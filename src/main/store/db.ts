@@ -76,6 +76,83 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_automations_project ON automations(project_id, enabled);
     `,
   },
+  {
+    version: 2,
+    up: `
+      CREATE TABLE IF NOT EXISTS specs (
+        id              TEXT PRIMARY KEY,
+        project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title           TEXT NOT NULL,
+        goal            TEXT NOT NULL,
+        context         TEXT NOT NULL DEFAULT '',
+        constraints     TEXT NOT NULL DEFAULT '',
+        done_when       TEXT NOT NULL DEFAULT '',
+        target_files    TEXT NOT NULL DEFAULT '[]',
+        selected_agents TEXT NOT NULL DEFAULT '[]',
+        run_mode        TEXT NOT NULL DEFAULT 'worktree',
+        status          TEXT NOT NULL DEFAULT 'draft',
+        approved_at     INTEGER,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS spec_requirements (
+        id        TEXT PRIMARY KEY,
+        spec_id   TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
+        body      TEXT NOT NULL,
+        position  INTEGER NOT NULL,
+        satisfied INTEGER NOT NULL DEFAULT 0 CHECK (satisfied IN (0, 1))
+      );
+
+      CREATE TABLE IF NOT EXISTS spec_acceptance_criteria (
+        id       TEXT PRIMARY KEY,
+        spec_id  TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
+        body     TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        verified INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1))
+      );
+
+      CREATE TABLE IF NOT EXISTS spec_runs (
+        id           TEXT PRIMARY KEY,
+        spec_id      TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
+        status       TEXT NOT NULL DEFAULT 'queued',
+        mode         TEXT NOT NULL DEFAULT 'worktree',
+        created_at   INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS run_attempts (
+        id           TEXT PRIMARY KEY,
+        spec_run_id  TEXT NOT NULL REFERENCES spec_runs(id) ON DELETE CASCADE,
+        session_id   TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        agent_id     TEXT NOT NULL,
+        model        TEXT,
+        status       TEXT NOT NULL DEFAULT 'queued',
+        cost_usd     REAL,
+        duration_ms  INTEGER,
+        risk         TEXT,
+        created_at   INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS verification_results (
+        id           TEXT PRIMARY KEY,
+        spec_run_id  TEXT NOT NULL REFERENCES spec_runs(id) ON DELETE CASCADE,
+        command      TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        output       TEXT,
+        created_at   INTEGER NOT NULL,
+        completed_at INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_specs_project ON specs(project_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_requirements_spec ON spec_requirements(spec_id, position);
+      CREATE INDEX IF NOT EXISTS idx_criteria_spec ON spec_acceptance_criteria(spec_id, position);
+      CREATE INDEX IF NOT EXISTS idx_spec_runs_spec ON spec_runs(spec_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_run_attempts_run ON run_attempts(spec_run_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_verification_results_run ON verification_results(spec_run_id, created_at ASC);
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
