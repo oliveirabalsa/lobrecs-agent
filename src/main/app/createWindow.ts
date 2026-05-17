@@ -1,8 +1,11 @@
 import { BrowserWindow, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { getAppIconPath } from './appIcon'
 
 export function createMainWindow(): BrowserWindow {
+  const icon = getAppIconPath()
+
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -10,6 +13,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 640,
     title: 'Lobrecs Agent',
     backgroundColor: '#09090b',
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,

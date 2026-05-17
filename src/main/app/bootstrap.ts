@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { adapterRegistry } from '../agents'
 import { registerIpcHandlers } from '../ipc'
 import { processPool } from '../process/ProcessPool'
+import { getAppIconPath } from './appIcon'
 import { createMainWindow } from './createWindow'
 import { registerAppShortcuts, unregisterAppShortcuts } from './shortcuts'
 
@@ -9,6 +10,7 @@ let mainWindow: BrowserWindow | null = null
 
 export function bootstrapMainProcess(): void {
   app.whenReady().then(async () => {
+    setDockIcon()
     registerIpcHandlers()
     await logAdapterAvailability()
     mainWindow = createMainWindow()
@@ -36,6 +38,14 @@ export function bootstrapMainProcess(): void {
     console.error('[main] uncaughtException:', error)
     processPool.killAll()
   })
+}
+
+function setDockIcon(): void {
+  const icon = getAppIconPath()
+
+  if (process.platform === 'darwin' && icon && app.dock) {
+    app.dock.setIcon(icon)
+  }
 }
 
 async function logAdapterAvailability(): Promise<void> {

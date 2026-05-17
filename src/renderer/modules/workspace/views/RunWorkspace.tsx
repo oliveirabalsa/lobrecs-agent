@@ -59,7 +59,11 @@ export function RunWorkspace({
   onEditAndApproveDiff,
   onSessionStarted,
 }: RunWorkspaceProps) {
-  const { activities, loading } = useSessionEvents(sessionId)
+  const { activities, loading } = useSessionEvents(sessionId, {
+    onApprovalRequest,
+    onDiffProposals,
+    onStatusChange,
+  })
   const [activeTab, setActiveTab] = useState<InspectorTab>('session')
 
   useEffect(() => {

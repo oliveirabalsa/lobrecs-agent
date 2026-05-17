@@ -1,10 +1,33 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { AgentActivity, AgentEvent } from '../../../../shared/types'
-import { completionStatus, eventKey, textFromPayload } from '../../../components/TerminalPanel/events'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  AgentActivity,
+  AgentEvent,
+  ApprovalRequest,
+  DiffProposal,
+  SessionStatus,
+} from '../../../../shared/types'
+import {
+  completionStatus,
+  eventKey,
+  normalizeApprovalPayload,
+  normalizeDiffPayload,
+  textFromPayload,
+} from '../../../components/TerminalPanel/events'
 
-export function useSessionEvents(sessionId: string | null) {
+interface UseSessionEventsOptions {
+  onApprovalRequest?: (request: ApprovalRequest | null) => void
+  onDiffProposals?: (proposals: DiffProposal[]) => void
+  onStatusChange?: (status: SessionStatus) => void
+}
+
+export function useSessionEvents(sessionId: string | null, options: UseSessionEventsOptions = {}) {
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [loading, setLoading] = useState(false)
+  const optionsRef = useRef(options)
+
+  useEffect(() => {
+    optionsRef.current = options
+  }, [options])
 
   useEffect(() => {
     setEvents([])
@@ -19,6 +42,7 @@ export function useSessionEvents(sessionId: string | null) {
       const key = eventKey(event)
       if (seen.has(key)) return
       seen.add(key)
+      applySessionState(event, optionsRef.current)
       setEvents((current) => [...current, event])
     }
 
@@ -44,6 +68,33 @@ export function useSessionEvents(sessionId: string | null) {
   const activities = useMemo(() => events.flatMap(activityFromEvent), [events])
 
   return { events, activities, loading }
+}
+
+function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
+  if (event.type === 'approval-request') {
+    options.onStatusChange?.('awaiting-approval')
+    options.onApprovalRequest?.(normalizeApprovalPayload(event.payload))
+    return
+  }
+
+  if (event.type === 'diff') {
+    const proposals = normalizeDiffPayload(event.payload)
+    if (proposals.length > 0) {
+      options.onDiffProposals?.(proposals)
+    }
+    return
+  }
+
+  if (event.type === 'session-complete') {
+    options.onStatusChange?.(completionStatus(event.payload))
+    options.onApprovalRequest?.(null)
+    return
+  }
+
+  if (event.type === 'error') {
+    options.onStatusChange?.('error')
+    options.onApprovalRequest?.(null)
+  }
 }
 
 function activityFromEvent(event: AgentEvent): AgentActivity[] {

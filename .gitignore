@@ -1,9 +1,40 @@
-node_modules
-out
-dist
-dist-electron
-coverage
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+dist-electron/
+release/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
 .env
-.DS_Store
+.env.*
+!.env.example
+
+# Local app data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Logs and diagnostics
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 *.agentforge-backup
+
+# OS and editor metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

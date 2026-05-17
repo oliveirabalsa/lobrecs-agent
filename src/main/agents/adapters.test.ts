@@ -102,8 +102,7 @@ describe('agent adapters', () => {
         'exec',
         '--model',
         'gpt-5.2-codex',
-        '--ask-for-approval',
-        'untrusted',
+        '--dangerously-bypass-approvals-and-sandbox',
       ]),
     )
     expect(events.some((event) => payloadField(event, 'text') === 'plain codex output')).toBe(true)
