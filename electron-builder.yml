@@ -1,0 +1,49 @@
+appId: com.lobrecs.agent
+productName: Lobrecs Agent
+artifactName: lobrecs-agent-${version}-${os}-${arch}.${ext}
+copyright: Copyright © 2026
+
+directories:
+  output: dist-electron
+
+files:
+  - out/**
+  - resources/**
+  - package.json
+  - node_modules/**
+
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/node-pty/**
+
+npmRebuild: true
+
+mac:
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  target:
+    - dmg
+    - zip
+
+dmg:
+  title: Lobrecs Agent ${version}
+
+win:
+  target:
+    - nsis
+
+linux:
+  target:
+    - AppImage
+  category: Development
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+publish:
+  provider: github
+  releaseType: release

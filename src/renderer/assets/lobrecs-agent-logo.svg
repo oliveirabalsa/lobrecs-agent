@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Lobrecs Agent logo</title>
+  <desc id="desc">A red geometric wolf head with AI circuit details.</desc>
+  <defs>
+    <linearGradient id="bg" x1="88" x2="424" y1="54" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2a0508" />
+      <stop offset="0.52" stop-color="#13060a" />
+      <stop offset="1" stop-color="#08090d" />
+    </linearGradient>
+    <linearGradient id="wolf" x1="130" x2="388" y1="84" y2="426" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff5a5f" />
+      <stop offset="0.48" stop-color="#e01827" />
+      <stop offset="1" stop-color="#8f0711" />
+    </linearGradient>
+    <linearGradient id="wolf-dark" x1="164" x2="366" y1="140" y2="398" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c9101c" />
+      <stop offset="1" stop-color="#5f070d" />
+    </linearGradient>
+    <filter id="shadow" x="-16%" y="-14%" width="132%" height="132%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000000" flood-opacity="0.42" />
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <path
+    fill="none"
+    stroke="#ff3040"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-opacity="0.34"
+    stroke-width="8"
+    d="M116 354h72l36-36h65l34-34h77M124 164h68l35 35h67l42 42h54M140 262h82l28-28h62"
+  />
+  <g fill="#ff3040" opacity="0.8">
+    <circle cx="116" cy="354" r="10" />
+    <circle cx="400" cy="284" r="10" />
+    <circle cx="124" cy="164" r="9" />
+    <circle cx="390" cy="241" r="9" />
+    <circle cx="140" cy="262" r="8" />
+    <circle cx="312" cy="234" r="8" />
+  </g>
+
+  <g filter="url(#shadow)">
+    <path
+      fill="url(#wolf)"
+      d="M113 108 208 87l48 47 48-47 95 21-30 112 41 41-40 114-76 51-38-52-38 52-76-51-40-114 41-41-30-112Z"
+    />
+    <path
+      fill="#190509"
+      d="m208 87 48 47 48-47-48 300-48-300Z"
+      opacity="0.5"
+    />
+    <path
+      fill="url(#wolf-dark)"
+      d="m113 108 90 115-61 152-40-114 41-41-30-112Zm286 0-90 115 61 152 40-114-41-41 30-112Z"
+      opacity="0.86"
+    />
+    <path
+      fill="#f8fafc"
+      d="m160 226 67 16-46 33-36-11 15-38Zm192 0-67 16 46 33 36-11-15-38Z"
+    />
+    <path
+      fill="#08090d"
+      d="m180 236 36 9-27 17-26-8 17-18Zm152 0-36 9 27 17 26-8-17-18Z"
+    />
+    <path
+      fill="#ffb4b8"
+      d="m256 224 42 98-42 65-42-65 42-98Z"
+      opacity="0.9"
+    />
+    <path
+      fill="#22060a"
+      d="m213 322 43 65 43-65-43 18-43-18Z"
+      opacity="0.78"
+    />
+    <path
+      fill="#f43f46"
+      d="M161 132 208 87l18 118-65-73Zm190 0-47-45-18 118 65-73Z"
+      opacity="0.62"
+    />
+    <path
+      fill="none"
+      stroke="#ffb4b8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-opacity="0.72"
+      stroke-width="7"
+      d="M205 170h36l15 24 15-24h36M196 319h36l24 21 24-21h36"
+    />
+    <g fill="#ffd3d6">
+      <circle cx="205" cy="170" r="7" />
+      <circle cx="307" cy="170" r="7" />
+      <circle cx="196" cy="319" r="7" />
+      <circle cx="316" cy="319" r="7" />
+    </g>
+  </g>
+
+  <path
+    fill="none"
+    stroke="#ff5a5f"
+    stroke-linecap="round"
+    stroke-opacity="0.52"
+    stroke-width="12"
+    d="M90 411c42 38 96 57 166 57s124-19 166-57"
+  />
+</svg>

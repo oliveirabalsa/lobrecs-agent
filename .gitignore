@@ -1,0 +1,9 @@
+node_modules
+out
+dist
+dist-electron
+coverage
+.env
+.DS_Store
+*.log
+*.agentforge-backup

@@ -1,0 +1,47 @@
+export interface ModelPricing {
+  inputPer1M: number
+  outputPer1M: number
+}
+
+export const MODEL_PRICING: Record<string, ModelPricing> = {
+  'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4 },
+  'claude-sonnet-4-6': { inputPer1M: 3, outputPer1M: 15 },
+  'claude-opus-4-6': { inputPer1M: 15, outputPer1M: 75 },
+  'gpt-5.2-codex': { inputPer1M: 0.5, outputPer1M: 2.5 },
+  'gpt-5.4': { inputPer1M: 2, outputPer1M: 8 },
+  'gpt-5.5': { inputPer1M: 5, outputPer1M: 20 },
+  minimax: { inputPer1M: 0.1, outputPer1M: 0.3 },
+  'opencode/minimax-m2.5-free': { inputPer1M: 0, outputPer1M: 0 },
+  'minimax/MiniMax-M2.5': { inputPer1M: 0.1, outputPer1M: 0.3 },
+  'minimax/MiniMax-M2.7': { inputPer1M: 0.1, outputPer1M: 0.3 },
+}
+
+export function estimateCost(model: string, tokensIn: number, tokensOut: number): number {
+  const pricing = MODEL_PRICING[model]
+  if (!pricing) {
+    return 0
+  }
+
+  const normalizedTokensIn = normalizeTokenCount(tokensIn)
+  const normalizedTokensOut = normalizeTokenCount(tokensOut)
+
+  return (
+    (normalizedTokensIn / 1_000_000) * pricing.inputPer1M +
+    (normalizedTokensOut / 1_000_000) * pricing.outputPer1M
+  )
+}
+
+export function estimateFromPrompt(model: string, promptLength: number): number {
+  const normalizedPromptLength = normalizeTokenCount(promptLength)
+  const estimatedTokensIn = Math.ceil(normalizedPromptLength * 0.75)
+
+  return estimateCost(model, estimatedTokensIn, estimatedTokensIn * 3)
+}
+
+function normalizeTokenCount(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0
+  }
+
+  return Math.ceil(value)
+}
