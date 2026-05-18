@@ -70,7 +70,7 @@ export interface SwarmOrchestratorDependencies {
   dispatchSession?: (input: SwarmDispatchInput) => MaybePromise<SwarmDispatchResult | void>
   waitForSessionCompletion?: (sessionId: string) => MaybePromise<SwarmCompletionResult>
   cancelSession?: (sessionId: string) => MaybePromise<void>
-  worktrees?: Pick<WorktreeManager, 'create' | 'remove' | 'reassignSession'>
+  worktrees?: Pick<WorktreeManager, 'remove'>
   /**
    * Optional plan-prompt round-trip for flows that explicitly need an extra
    * confirmation. Manual Swarm Builder launches already confirm intent in the
@@ -151,7 +151,9 @@ export class SwarmOrchestrator {
     for (const session of swarm.sessions) {
       try {
         await cancelSession?.(session.sessionId)
-        await worktrees.remove(session.sessionId)
+        if (session.worktreePath) {
+          await worktrees.remove(session.sessionId)
+        }
         session.status = 'cancelled'
       } catch (error) {
         errors.push(error)
@@ -325,51 +327,40 @@ export class SwarmOrchestrator {
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
     const provisionalSessionId = randomUUID()
-    const worktreePath = await dependencies.worktrees.create(provisionalSessionId, input.repoPath)
     const prompt = buildAgentPrompt(
       input.basePrompt,
       input.agentConfig,
       input.previousOutput,
     )
 
-    try {
-      const decision = await dependencies.routeModel({
-        prompt,
-        preferredAgentId: input.agentConfig.agentId,
-        modelOverride: input.agentConfig.modelOverride,
-      })
+    const decision = await dependencies.routeModel({
+      prompt,
+      preferredAgentId: input.agentConfig.agentId,
+      modelOverride: input.agentConfig.modelOverride,
+    })
 
-      const dispatchResult = await dependencies.dispatchSession({
-        sessionId: provisionalSessionId,
-        swarmId: input.swarmId,
-        threadId: input.threadId,
-        projectId: input.projectId,
-        prompt,
-        role: input.agentConfig.role,
-        agentId: decision.agentId,
-        model: decision.model,
-        repoPath: worktreePath,
-        imageAttachments: input.imageAttachments,
-      })
+    const dispatchResult = await dependencies.dispatchSession({
+      sessionId: provisionalSessionId,
+      swarmId: input.swarmId,
+      threadId: input.threadId,
+      projectId: input.projectId,
+      prompt,
+      role: input.agentConfig.role,
+      agentId: decision.agentId,
+      model: decision.model,
+      repoPath: input.repoPath,
+      imageAttachments: input.imageAttachments,
+    })
 
-      const actualSessionId = dispatchResult?.sessionId ?? provisionalSessionId
-      if (actualSessionId !== provisionalSessionId) {
-        dependencies.worktrees.reassignSession(provisionalSessionId, actualSessionId)
-      }
-
-      return {
-        sessionId: actualSessionId,
-        threadId: dispatchResult?.threadId ?? input.threadId,
-        role: input.agentConfig.role,
-        worktreePath,
-        status: dispatchResult?.status ?? 'running',
-        agentId: decision.agentId,
-        model: decision.model,
-        output: dispatchResult?.output,
-      }
-    } catch (error) {
-      await dependencies.worktrees.remove(provisionalSessionId)
-      throw error
+    return {
+      sessionId: dispatchResult?.sessionId ?? provisionalSessionId,
+      threadId: dispatchResult?.threadId ?? input.threadId,
+      role: input.agentConfig.role,
+      worktreePath: null,
+      status: dispatchResult?.status ?? 'running',
+      agentId: decision.agentId,
+      model: decision.model,
+      output: dispatchResult?.output,
     }
   }
 

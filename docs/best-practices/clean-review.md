@@ -7,7 +7,7 @@ Use this guide when reviewing changes in Lobrecs Agent.
 Review findings come before summaries. Order findings by severity:
 
 1. Security, data loss, secret exposure, or unintended filesystem writes.
-2. Broken approval, diff, worktree, cancellation, or process lifecycle behavior.
+2. Broken approval, diff, local execution, cancellation, or process lifecycle behavior.
 3. Cross-process boundary violations.
 4. User-visible regressions.
 5. Type, persistence, migration, or test gaps.
@@ -24,7 +24,8 @@ that were not run.
 - Preload exposes narrow methods, not raw `ipcRenderer`.
 - Agent diffs should be applied automatically by the main process, with renderer
   diffs used for review only.
-- Swarm agents operate in isolated worktrees.
+- Swarm agents run against the local project repository, with no hidden worktree
+  apply/discard step in production paths.
 - IPC payloads and results are serializable and typed.
 - Paths, prompts, model ids, terminal output, and agent patches are treated as
   untrusted input.

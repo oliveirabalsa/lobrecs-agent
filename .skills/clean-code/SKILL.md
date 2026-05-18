@@ -11,7 +11,7 @@ Lobrecs Agent.
 - Identify the owning feature module or the target module if the code has not
   been refactored yet.
 - Check whether the change touches Electron security boundaries, agent approval,
-  worktrees, process lifecycle, IPC, or persistence.
+  local execution, process lifecycle, IPC, or persistence.
 
 ## Implementation Rules
 

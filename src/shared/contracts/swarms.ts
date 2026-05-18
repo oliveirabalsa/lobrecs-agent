@@ -28,7 +28,7 @@ export interface SwarmResult {
     sessionId: string
     threadId: string
     role: string
-    worktreePath: string
+    worktreePath: string | null
     status: SessionStatus | string
     agentId?: SupportedAgentId
     model?: string

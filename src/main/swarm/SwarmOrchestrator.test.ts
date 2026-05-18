@@ -11,7 +11,7 @@ describe('SwarmOrchestrator', () => {
     expect(createDefaultDependencies().confirmPlan).toBeUndefined()
   })
 
-  it('spawns parallel agents in isolated worktrees', async () => {
+  it('spawns parallel agents in the local project repo', async () => {
     const worktrees = createFakeWorktrees()
     const createThread = vi.fn(() => ({ id: 'thread-1' }))
     const dispatched: SwarmDispatchInput[] = []
@@ -39,9 +39,10 @@ describe('SwarmOrchestrator', () => {
       projectId: 'project-1',
       title: 'Swarm: Review the current codebase',
     })
-    expect(worktrees.create).toHaveBeenCalledTimes(2)
+    expect(worktrees.create).not.toHaveBeenCalled()
     expect(dispatched.map((call) => call.threadId)).toEqual(['thread-1', 'thread-1'])
-    expect(dispatched.map((call) => call.repoPath)).toEqual(['/tmp/worktree-1', '/tmp/worktree-2'])
+    expect(dispatched.map((call) => call.repoPath)).toEqual(['/repo', '/repo'])
+    expect(result.sessions.map((session) => session.worktreePath)).toEqual([null, null])
     expect(dispatched.map((call) => call.agentId)).toEqual(['claude-code', 'codex'])
     expect(dispatched.map((call) => call.model)).toEqual([
       'claude-sonnet-4-6',
@@ -103,7 +104,7 @@ describe('SwarmOrchestrator', () => {
       'auto-opencode',
     ])
     expect(new Set(dispatched.map((call) => call.agentId)).size).toBe(3)
-    expect(worktrees.create).toHaveBeenCalledTimes(3)
+    expect(worktrees.create).not.toHaveBeenCalled()
   })
 
   it('appends swarm agents to an existing thread without creating another chat', async () => {
@@ -178,7 +179,7 @@ describe('SwarmOrchestrator', () => {
     expect(dispatched[1].prompt).toContain('output from analyzer')
   })
 
-  it('cancels every session in a swarm and removes its worktrees', async () => {
+  it('cancels every session in a swarm without creating worktrees', async () => {
     const worktrees = createFakeWorktrees()
     const cancelSession = vi.fn()
     const orchestrator = new SwarmOrchestrator({
@@ -198,7 +199,7 @@ describe('SwarmOrchestrator', () => {
     await orchestrator.cancel(result.swarmId)
 
     expect(cancelSession).toHaveBeenCalledTimes(2)
-    expect(worktrees.remove).toHaveBeenCalledTimes(2)
+    expect(worktrees.remove).not.toHaveBeenCalled()
     expect(orchestrator.get(result.swarmId)).toBeUndefined()
   })
 })

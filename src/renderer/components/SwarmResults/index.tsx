@@ -6,7 +6,7 @@ export interface SwarmSessionSummary {
   role: string
   model: string
   status: SessionStatus | string
-  worktreePath?: string
+  worktreePath?: string | null
   diffStats?: {
     filesChanged: number
     additions: number
@@ -68,7 +68,7 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
       type: 'accept',
       sessionIds: [sessionId],
       title: 'Apply this swarm result?',
-      detail: 'This will apply the selected worktree diff to the main repository.',
+      detail: 'This will apply the selected local session result.',
     })
   }
 
@@ -87,8 +87,8 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
     setConfirmAction({
       type: 'discard',
       sessionIds: sessions.map((session) => session.sessionId),
-      title: 'Discard all swarm worktrees?',
-      detail: 'No changes will be applied to the main repository.',
+      title: 'Discard all swarm results?',
+      detail: 'No additional apply step will run for these sessions.',
     })
   }
 

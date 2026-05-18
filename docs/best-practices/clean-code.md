@@ -78,15 +78,17 @@ Use this guide for implementation work in Lobrecs Agent.
   epoch milliseconds.
 - Do not store secrets in SQLite.
 
-## Agent And Worktree Safety
+## Agent Execution Safety
 
 - Treat every agent output as untrusted until reviewed.
-- Isolate swarm work in worktrees.
+- Run agents against the local project repository by default.
+- Do not introduce production worktree execution unless the product explicitly
+  re-enables isolated runs.
 - Keep automatic diff application in main-process services.
 - Preserve the distinction between an approval request and a diff proposal.
 - Apply completed session diff proposals automatically before publishing them
   for review.
-- Make cancellation clean up process handles and temporary worktrees.
+- Make cancellation clean up process handles and any temporary resources.
 
 ## Testing
 

@@ -91,7 +91,7 @@ export class SessionManager {
   constructor(options: SessionManagerOptions = {}) {
     this.adapterResolver = options.adapterResolver
     this.broadcastEvent = options.broadcast ?? broadcastToRenderer
-    this.worktreeIsolation = options.worktreeIsolation ?? true
+    this.worktreeIsolation = options.worktreeIsolation ?? false
     this.estimateCost = options.estimateCost ?? (() => 0)
 
     for (const adapter of options.adapters ?? []) {

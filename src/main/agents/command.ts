@@ -1,16 +1,15 @@
 import { constants } from 'node:fs'
-import fs from 'node:fs'
 import { access } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
-import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { buildProcessEnvironment, resolveExecutable } from '../process/environment'
 import type { ImageAttachment } from '../../shared/types'
 
 const execFileAsync = promisify(execFile)
 
 export function resolveCommand(envVarName: string, fallback: string): string {
-  return process.env[envVarName]?.trim() || resolveLocalCommand(fallback) || fallback
+  return process.env[envVarName]?.trim() || resolveExecutable(fallback) || fallback
 }
 
 export async function runCommandText(
@@ -20,6 +19,7 @@ export async function runCommandText(
 ): Promise<string> {
   const { stdout } = await execFileAsync(command, args, {
     cwd: options.cwd,
+    env: buildProcessEnvironment(),
     timeout: options.timeout ?? 5000,
     maxBuffer: options.maxBuffer ?? 1024 * 1024,
   })
@@ -41,7 +41,10 @@ export async function commandExists(command: string): Promise<boolean> {
 
   try {
     const lookupCommand = process.platform === 'win32' ? 'where' : 'which'
-    await execFileAsync(lookupCommand, [command], { timeout: 3000 })
+    await execFileAsync(lookupCommand, [command], {
+      env: buildProcessEnvironment(),
+      timeout: 3000,
+    })
     return true
   } catch {
     return false
@@ -78,38 +81,4 @@ export function withContextAndImages(
 
 function isPathLikeCommand(command: string): boolean {
   return command.includes('/') || command.includes('\\')
-}
-
-function resolveLocalCommand(command: string): string | null {
-  const home = homedir()
-  const candidates = [
-    path.join(home, '.local', 'bin', command),
-    path.join(home, '.opencode', 'bin', command),
-    ...nvmCommandCandidates(command),
-  ]
-
-  return candidates.find((candidate) => isExecutable(candidate)) ?? null
-}
-
-function nvmCommandCandidates(command: string): string[] {
-  const nvmVersionsPath = path.join(homedir(), '.nvm', 'versions', 'node')
-
-  try {
-    return fs
-      .readdirSync(nvmVersionsPath)
-      .sort()
-      .reverse()
-      .map((version) => path.join(nvmVersionsPath, version, 'bin', command))
-  } catch {
-    return []
-  }
-}
-
-function isExecutable(filePath: string): boolean {
-  try {
-    fs.accessSync(filePath, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
 }

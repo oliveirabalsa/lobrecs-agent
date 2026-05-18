@@ -4,7 +4,7 @@
 
 Electron desktop app that acts as a harness for multiple AI coding agents
 (Claude Code, Codex CLI, OpenCode). It selects models by task complexity and
-orchestrates swarms across isolated worktrees.
+orchestrates swarms against the local project repository.
 
 ## Stack
 
@@ -19,6 +19,8 @@ orchestrates swarms across isolated worktrees.
 
 - Never store API keys in code, local storage, or SQLite.
 - Renderer access to Node.js must go through `src/preload/index.ts`.
+- Run agent sessions locally by default; do not create worktrees in production
+  paths unless isolated runs are explicitly re-enabled.
 - Apply completed agent diffs automatically; use the diff UI only for review.
 - Use Conventional Commits: `feat(scope): msg` or `fix(scope): msg`.
 - Prefix local shell commands with `rtk`.

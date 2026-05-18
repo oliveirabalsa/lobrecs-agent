@@ -36,7 +36,6 @@ describe('SessionManager', () => {
       adapters: [adapter],
       broadcast: (event) => broadcasts.push(event),
       estimateCost: (_model, tokensIn, tokensOut) => tokensIn / 1_000 + tokensOut / 500,
-      worktreeIsolation: false,
     })
 
     const { sessionId, threadId } = await manager.dispatch({

@@ -288,6 +288,8 @@ async function collectEvents(session: AgentSession): Promise<AgentEvent[]> {
   await waitFor(() =>
     events.some((event) => event.type === 'session-complete' || event.type === 'error'),
   )
+  await waitFor(() => processPool.get(session.sessionId) === undefined)
+  await new Promise((resolve) => setTimeout(resolve, 20))
   return events
 }
 

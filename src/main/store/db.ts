@@ -89,7 +89,7 @@ const migrations: Migration[] = [
         done_when       TEXT NOT NULL DEFAULT '',
         target_files    TEXT NOT NULL DEFAULT '[]',
         selected_agents TEXT NOT NULL DEFAULT '[]',
-        run_mode        TEXT NOT NULL DEFAULT 'worktree',
+        run_mode        TEXT NOT NULL DEFAULT 'local',
         status          TEXT NOT NULL DEFAULT 'draft',
         approved_at     INTEGER,
         created_at      INTEGER NOT NULL,
@@ -116,7 +116,7 @@ const migrations: Migration[] = [
         id           TEXT PRIMARY KEY,
         spec_id      TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
         status       TEXT NOT NULL DEFAULT 'queued',
-        mode         TEXT NOT NULL DEFAULT 'worktree',
+        mode         TEXT NOT NULL DEFAULT 'local',
         created_at   INTEGER NOT NULL,
         completed_at INTEGER
       );
@@ -170,6 +170,13 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_threads_project ON threads(project_id);
       CREATE INDEX IF NOT EXISTS idx_threads_project_updated
         ON threads(project_id, updated_at DESC);
+    `,
+  },
+  {
+    version: 4,
+    up: `
+      UPDATE specs SET run_mode = 'local' WHERE run_mode <> 'local';
+      UPDATE spec_runs SET mode = 'local' WHERE mode <> 'local';
     `,
   },
 ]

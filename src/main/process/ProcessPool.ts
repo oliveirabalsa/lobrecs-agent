@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
+import { buildProcessEnvironment } from './environment'
 
 export interface ManagedProcess {
   pid: number
@@ -25,7 +26,7 @@ export class ProcessPool extends EventEmitter {
 
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: buildProcessEnvironment(options.env),
       stdio: [options.stdin ?? 'pipe', 'pipe', 'pipe'],
     })
 

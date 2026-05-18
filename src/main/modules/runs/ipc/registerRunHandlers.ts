@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { ipcMain } from 'electron'
+import { buildProcessEnvironment } from '../../../process/environment'
 import { projectsStore, sessionsStore, specRunsStore, specsStore } from '../../../store'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import type {
@@ -19,10 +20,7 @@ export function registerRunHandlers(context: MainIpcContext): void {
 
     const project = projectsStore.get(spec.projectId)
     if (!project) throw new Error(`Project not found: ${spec.projectId}`)
-    const runMode = input.mode ?? spec.runMode
-    if (runMode === 'remote-placeholder') {
-      throw new Error('Remote run mode is not implemented yet')
-    }
+    const runMode = 'local'
 
     const { run, attempts } = specRunsStore.start(spec.id, runMode)
     const prompt = formatSpecPrompt(spec)
@@ -44,7 +42,7 @@ export function registerRunHandlers(context: MainIpcContext): void {
           model: route.model,
           repoPath: project.repoPath,
           context: projectsStore.getContext(project.id),
-          isolate: runMode !== 'local',
+          isolate: false,
         })
         specRunsStore.updateAttempt(attempt.id, {
           sessionId,
@@ -194,7 +192,7 @@ function runVerificationCommand(
   return new Promise((resolve) => {
     const child = spawn('zsh', ['-lc', command], {
       cwd,
-      env: process.env,
+      env: buildProcessEnvironment(),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''

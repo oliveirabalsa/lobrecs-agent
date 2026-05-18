@@ -80,7 +80,7 @@ function rowToSpec(
     doneWhen: row.done_when,
     targetFiles: readStringArray(row.target_files),
     selectedAgents: readSupportedAgents(row.selected_agents),
-    runMode: row.run_mode,
+    runMode: localRunMode(),
     status: row.status,
     approvedAt: row.approved_at ?? undefined,
     createdAt: row.created_at,
@@ -131,7 +131,7 @@ export const specsStore = {
         data.doneWhen?.trim() ?? '',
         JSON.stringify(data.targetFiles ?? []),
         JSON.stringify(data.selectedAgents ?? ['codex']),
-        data.runMode ?? 'worktree',
+        localRunMode(),
         now,
         now,
       )
@@ -180,7 +180,7 @@ export const specsStore = {
       }
       if (data.runMode !== undefined) {
         fields.push('run_mode = ?')
-        values.push(data.runMode)
+        values.push(localRunMode())
       }
 
       fields.push('updated_at = ?')
@@ -239,6 +239,10 @@ function hydrateSpec(row: SpecRow): Spec {
     .all(row.id) as CriterionRow[]
 
   return rowToSpec(row, requirements.map(rowToRequirement), criteria.map(rowToCriterion))
+}
+
+function localRunMode(): RunMode {
+  return 'local'
 }
 
 function replaceRequirements(specId: string, requirements: string[]): void {

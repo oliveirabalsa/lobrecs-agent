@@ -10,7 +10,7 @@ the code toward process-aware feature modules with explicit public contracts.
 - Make every feature own its domain logic, application service, IPC handler, UI,
   tests, and persistence adapter where applicable.
 - Keep shared contracts stable and easy to review.
-- Make agent orchestration, automatic diff application, and worktree isolation hard to break
+- Make agent orchestration, local execution, and process cleanup hard to break
   accidentally.
 - Let future features be added by creating or extending one module instead of
   touching unrelated buckets.
@@ -22,8 +22,8 @@ the code toward process-aware feature modules with explicit public contracts.
 - Renderer-to-main access must go through the preload bridge in
   `src/preload/index.ts`.
 - Main process modules own privileged work: CLI execution, filesystem writes,
-  worktree management, SQLite access, dialogs, shell integration, and global
-  shortcuts.
+  optional worktree management, SQLite access, dialogs, shell integration, and
+  global shortcuts.
 - Shared code must contain only serializable types, schemas, constants, and pure
   utilities that are safe in both main and renderer.
 - Completed agent diffs are applied automatically by the main process; renderer

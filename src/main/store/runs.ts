@@ -51,7 +51,7 @@ function rowToRun(row: SpecRunRow): SpecRun {
     id: row.id,
     specId: row.spec_id,
     status: row.status,
-    mode: row.mode,
+    mode: 'local',
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
   }
@@ -113,7 +113,7 @@ export const specRunsStore = {
 
     const id = randomUUID()
     const now = Date.now()
-    const runMode = mode ?? spec.runMode
+    const runMode: RunMode = 'local'
     const selectedAgents = spec.selectedAgents.length > 0 ? spec.selectedAgents : ['codex']
     const db = getDb()
 

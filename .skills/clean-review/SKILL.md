@@ -17,7 +17,8 @@ Agent.
 - Verify Electron security boundaries.
 - Verify completed agent diffs are auto-applied by main-process services and
   renderer diff views stay review-only.
-- Verify worktree isolation for swarm behavior.
+- Verify swarm agents run locally and do not depend on a hidden worktree
+  apply/discard flow.
 - Verify IPC contracts, preload exposure, and renderer usage stay aligned.
 - Verify persistence changes are migrated, mapped, and tested.
 - Verify cancellation and cleanup paths for long-running processes.

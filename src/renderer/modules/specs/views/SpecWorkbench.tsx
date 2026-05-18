@@ -46,7 +46,7 @@ const emptyDraft: SpecDraft = {
   requirements: '',
   acceptanceCriteria: '',
   selectedAgents: ['codex'],
-  runMode: 'worktree',
+  runMode: 'local',
 }
 
 const phaseLabels = ['Intake', 'Plan', 'Agent Runs', 'Review', 'Verify', 'Ship']
@@ -200,7 +200,7 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
     try {
       const result = await window.agentforge.runs.start({
         specId: selectedSpec.id,
-        mode: draft.runMode,
+        mode: 'local',
       })
       await refreshSpecs(selectedSpec.id)
       await refreshComparison(selectedSpec.id)
@@ -442,19 +442,9 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
               </Field>
 
               <Field label="Run Mode">
-                <select
-                  value={draft.runMode}
-                  onChange={(event) =>
-                    setDraftField('runMode', event.target.value as RunMode, setDraft)
-                  }
-                  className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-blue-500"
-                >
-                  <option value="worktree">Worktree</option>
-                  <option value="local">Local</option>
-                  <option value="remote-placeholder" disabled>
-                    Remote later
-                  </option>
-                </select>
+                <div className="flex h-10 items-center rounded-md border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100">
+                  Local
+                </div>
               </Field>
             </div>
 
@@ -639,7 +629,7 @@ function inputFromDraft(projectId: string, draft: SpecDraft): CreateSpecInput {
     doneWhen: draft.doneWhen,
     targetFiles: linesFromText(draft.targetFiles),
     selectedAgents: draft.selectedAgents.length > 0 ? draft.selectedAgents : ['codex'],
-    runMode: draft.runMode,
+    runMode: 'local',
     requirements: linesFromText(draft.requirements),
     acceptanceCriteria: linesFromText(draft.acceptanceCriteria),
   }
@@ -656,7 +646,7 @@ function draftFromSpec(spec: Spec): SpecDraft {
     requirements: spec.requirements.map((item) => item.body).join('\n'),
     acceptanceCriteria: spec.acceptanceCriteria.map((item) => item.body).join('\n'),
     selectedAgents: spec.selectedAgents.length > 0 ? spec.selectedAgents : ['codex'],
-    runMode: spec.runMode,
+    runMode: 'local',
   }
 }
 

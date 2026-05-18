@@ -37,6 +37,7 @@ describe('specsStore', () => {
       status: 'draft',
       targetFiles: ['src/renderer/App.tsx'],
       selectedAgents: ['codex', 'claude-code'],
+      runMode: 'local',
     })
     expect(spec.requirements.map((item) => item.body)).toEqual([
       'Timeline shows approval cards',
@@ -97,6 +98,7 @@ describe('specsStore', () => {
 
     const { run, attempts } = specRunsStore.start(spec.id)
     expect(run.status).toBe('running')
+    expect(run.mode).toBe('local')
     expect(attempts).toHaveLength(1)
     expect(specsStore.get(spec.id)?.status).toBe('running')
     expect(() => specRunsStore.createVerification(run.id, 'rtk npm test')).toThrow(

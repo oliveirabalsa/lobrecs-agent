@@ -16,7 +16,9 @@ export function registerSwarmHandlers(context: MainIpcContext): void {
     'swarm:apply-result',
     async (_event, sessionId: string, targetRepoPath: string) => {
       const worktreePath = context.worktreeManager.getPath(sessionId)
-      if (!worktreePath) throw new Error('Worktree not found')
+      if (!worktreePath) {
+        throw new Error('Swarm agents now run locally, so there is no worktree result to apply')
+      }
 
       const patch = await createPatch(worktreePath)
       if (patch.trim()) {
