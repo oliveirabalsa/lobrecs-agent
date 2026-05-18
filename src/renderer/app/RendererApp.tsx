@@ -17,7 +17,15 @@ export function RendererApp() {
   const history = useWorkspaceHistory()
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+
+  // Keep the mobile drawer mounted while opening, and during the close
+  // animation so the `data-state="closed"` exit keyframes can play before
+  // unmount. The drawer's `onAnimationEnd` flips this back to false.
+  useEffect(() => {
+    if (mobileSidebarOpen) setMobileSidebarMounted(true)
+  }, [mobileSidebarOpen])
 
   const openThreadById = useCallback(
     async (threadId: string) => {
@@ -187,17 +195,28 @@ export function RendererApp() {
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
       </div>
 
-      {mobileSidebarOpen ? (
-        <div className="fixed inset-0 z-50 md:hidden">
+      {mobileSidebarMounted ? (
+        <div
+          className="fixed inset-0 z-50 md:hidden"
+          aria-hidden={!mobileSidebarOpen}
+        >
           <button
             type="button"
             aria-label="Close sidebar"
-            className="motion-fade-in absolute inset-0 bg-black/55"
+            data-motion="drawer-overlay"
+            data-state={mobileSidebarOpen ? 'open' : 'closed'}
+            className="absolute inset-0 bg-black/55"
             onClick={() => setMobileSidebarOpen(false)}
           />
           <div
-            className="motion-slide-in-left relative h-full max-w-full shadow-2xl shadow-black/50"
+            data-motion="drawer-left"
+            data-state={mobileSidebarOpen ? 'open' : 'closed'}
+            className="relative h-full max-w-full shadow-2xl shadow-black/50"
             style={{ width: 'min(86vw, 320px)' }}
+            onAnimationEnd={(event) => {
+              if (event.target !== event.currentTarget) return
+              if (!mobileSidebarOpen) setMobileSidebarMounted(false)
+            }}
           >
             <Sidebar
               isMac={isMac}

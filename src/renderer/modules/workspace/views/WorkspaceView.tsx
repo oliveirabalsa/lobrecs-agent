@@ -125,11 +125,18 @@ export function WorkspaceView({
   onOpenSidebar,
 }: WorkspaceViewProps) {
   const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() => readPanelOpen())
+  const [rightPanelMounted, setRightPanelMounted] = useState<boolean>(() => readPanelOpen())
   const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() => readPanelMode())
   const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
+
+  // Keep the right panel mounted while opening, and during the close animation
+  // so `data-state="closed"` exit keyframes can play before unmount.
+  useEffect(() => {
+    if (rightPanelOpen) setRightPanelMounted(true)
+  }, [rightPanelOpen])
 
   // Persist panel state.
   useEffect(() => {
@@ -321,13 +328,19 @@ export function WorkspaceView({
                 )}
               </div>
 
-              {mainView === 'workspace' && rightPanelOpen ? (
+              {mainView === 'workspace' && rightPanelMounted ? (
                 <aside
+                  data-motion="panel-right"
+                  data-state={rightPanelOpen ? 'open' : 'closed'}
                   className={
                     rightPanelFullscreen
                       ? 'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
                       : 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/40 sm:w-[420px] xl:relative xl:inset-auto xl:z-auto xl:w-[420px] xl:min-w-[320px] xl:max-w-[720px] xl:shrink-0 xl:shadow-none 2xl:w-[520px]'
                   }
+                  onAnimationEnd={(event) => {
+                    if (event.target !== event.currentTarget) return
+                    if (!rightPanelOpen) setRightPanelMounted(false)
+                  }}
                 >
                   <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline px-2">
                     <RightPanelTab

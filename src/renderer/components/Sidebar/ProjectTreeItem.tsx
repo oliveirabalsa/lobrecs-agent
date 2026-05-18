@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent } from 'react'
 import type { Project } from '../../../shared/types'
 import { Spinner } from '../ui'
 import { ThreadRow } from './ThreadRow'
@@ -38,6 +38,13 @@ export function ProjectTreeItem({
   onNewChat,
 }: ProjectTreeItemProps) {
   const [showAll, setShowAll] = useState(false)
+  // Keep the threads container mounted during the close animation. Flipped
+  // back to false on `onAnimationEnd` so the DOM stays light when collapsed.
+  const [threadsMounted, setThreadsMounted] = useState(expanded)
+
+  useEffect(() => {
+    if (expanded) setThreadsMounted(true)
+  }, [expanded])
 
   function handleRowClick() {
     onSelectProject(project)
@@ -106,8 +113,16 @@ export function ProjectTreeItem({
         ) : null}
       </div>
 
-      {expanded ? (
-        <div className="motion-expand-down-in ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-hairline pl-2">
+      {threadsMounted ? (
+        <div
+          data-motion="collapsible"
+          data-state={expanded ? 'open' : 'closed'}
+          className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-hairline pl-2"
+          onAnimationEnd={(event) => {
+            if (event.target !== event.currentTarget) return
+            if (!expanded) setThreadsMounted(false)
+          }}
+        >
           {loadingThreads && allThreads.length === 0 ? (
             <div className="flex h-8 items-center gap-2 px-2 text-[12px] text-muted">
               <Spinner size={12} />
