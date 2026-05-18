@@ -7,6 +7,7 @@ import type {
 
 export interface TerminalLike {
   write(message: string): void
+  scrollToBottom?(): void
 }
 
 export interface TerminalEventCallbacks {
@@ -123,6 +124,14 @@ export function completionStatus(payload: unknown): SessionStatus {
   if (!isRecord(payload)) return 'done'
   if (payload.subtype === 'error' || payload.is_error === true) return 'error'
 
+  if (
+    payload.status === 'done' ||
+    payload.status === 'error' ||
+    payload.status === 'cancelled'
+  ) {
+    return payload.status
+  }
+
   const exitCode = payload.exitCode ?? payload.exit_code
   return exitCode === 0 || exitCode === undefined || exitCode === null ? 'done' : 'error'
 }
@@ -142,7 +151,7 @@ export function createTerminalEventHandler(
     seenEvents.add(key)
 
     if (event.type === 'stdout' || event.type === 'stderr') {
-      term.write(textFromPayload(event.payload))
+      writeAndScroll(term, textFromPayload(event.payload))
       return
     }
 
@@ -166,7 +175,7 @@ export function createTerminalEventHandler(
       const finalOutput = shouldPrintCompletionPayload(event.payload)
         ? textFromPayload(event.payload)
         : ''
-      if (finalOutput) term.write(finalOutput)
+      if (finalOutput) writeAndScroll(term, finalOutput)
 
       const status = completionStatus(event.payload)
       callbacks.onStatusChange(status)
@@ -226,7 +235,13 @@ function textFromStructuredPayload(payload: unknown): string {
 }
 
 function writeLine(term: TerminalLike, message: string) {
-  term.write(`\r\n${message}\r\n`)
+  writeAndScroll(term, `\r\n${message}\r\n`)
+}
+
+function writeAndScroll(term: TerminalLike, message: string) {
+  if (!message) return
+  term.write(message)
+  term.scrollToBottom?.()
 }
 
 function inferChangeType(proposal: DiffProposal): 'added' | 'modified' | 'deleted' {

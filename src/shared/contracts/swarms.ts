@@ -20,6 +20,7 @@ export interface SwarmResult {
   strategy: SwarmConfig['strategy']
   sessions: Array<{
     sessionId: string
+    threadId?: string
     role: string
     worktreePath: string
     status: SessionStatus | string

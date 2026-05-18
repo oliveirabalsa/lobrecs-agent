@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import type { ImageAttachment } from '../../shared/types'
 
 const execFileAsync = promisify(execFile)
 
@@ -52,6 +53,27 @@ export function withContext(prompt: string, context?: string): string {
   if (!trimmedContext) return prompt
 
   return `Repository instructions:\n${trimmedContext}\n\nTask:\n${prompt}`
+}
+
+export function withContextAndImages(
+  prompt: string,
+  context?: string,
+  imageAttachments: ReadonlyArray<ImageAttachment> = [],
+): string {
+  const basePrompt = withContext(prompt, context)
+  if (imageAttachments.length === 0) return basePrompt
+
+  const imageList = imageAttachments
+    .map((image) => {
+      const name = image.name ?? path.basename(image.filePath)
+      const mimeType = image.mimeType ? ` (${image.mimeType})` : ''
+      const sizeLabel = image.size ? ` [${Math.round(image.size / 1024)}KB]` : ''
+
+      return `- ${name}${mimeType}${sizeLabel}: ${image.filePath}`
+    })
+    .join('\n')
+
+  return `${basePrompt}\n\nAttached images:\n${imageList}\n\nUse these image attachments as context for the task.`
 }
 
 function isPathLikeCommand(command: string): boolean {

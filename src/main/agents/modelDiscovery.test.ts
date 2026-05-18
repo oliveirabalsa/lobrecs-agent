@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  fallbackModelsForAgent,
   inferModelTier,
   parseCodexModels,
   parseOpenCodeModels,
@@ -38,7 +39,16 @@ describe('modelDiscovery', () => {
 
   it('infers tiers for unknown local model names', () => {
     expect(inferModelTier('claude-haiku-4-5-20251001')).toBe('lightweight')
-    expect(inferModelTier('claude-opus-4-6')).toBe('frontier')
+    expect(inferModelTier('claude-opus-4-7')).toBe('frontier')
     expect(inferModelTier('minimax/MiniMax-M2.7')).toBe('advanced')
+  })
+
+  it('keeps Claude fallback models concrete instead of displaying short aliases', () => {
+    const ids = fallbackModelsForAgent('claude-code').map((model) => model.id)
+
+    expect(ids).toContain('claude-opus-4-7')
+    expect(ids).not.toContain('opus')
+    expect(ids).not.toContain('sonnet')
+    expect(ids).not.toContain('haiku')
   })
 })

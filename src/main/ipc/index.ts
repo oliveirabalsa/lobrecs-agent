@@ -4,14 +4,17 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
-import { registerDiffHandlers } from '../modules/diffs/ipc/registerDiffHandlers'
 import { registerFeedbackHandlers } from '../modules/feedback/ipc/registerFeedbackHandlers'
+import { registerGitHandlers } from '../modules/git/ipc/registerGitHandlers'
 import { registerProjectHandlers } from '../modules/projects/ipc/registerProjectHandlers'
 import { registerRoutingHandlers } from '../modules/routing/ipc/registerRoutingHandlers'
+import { registerRunHandlers } from '../modules/runs/ipc/registerRunHandlers'
 import { registerSessionHandlers } from '../modules/sessions/ipc/registerSessionHandlers'
 import type { MainIpcContext } from '../modules/shared/ipcContext'
+import { registerSpecHandlers } from '../modules/specs/ipc/registerSpecHandlers'
 import { registerSwarmHandlers } from '../modules/swarms/ipc/registerSwarmHandlers'
 import { registerSystemHandlers } from '../modules/system/ipc/registerSystemHandlers'
+import { registerThreadHandlers } from '../modules/threads/ipc/registerThreadHandlers'
 import { ModelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore } from '../store'
@@ -27,13 +30,16 @@ export function registerIpcHandlers(): void {
 
   registerProjectHandlers()
   registerSessionHandlers()
+  registerThreadHandlers()
   registerAgentHandlers(context)
   registerSwarmHandlers(context)
   registerRoutingHandlers(context)
   registerFeedbackHandlers()
   registerCostHandlers()
   registerAutomationHandlers(context)
-  registerDiffHandlers()
+  registerSpecHandlers()
+  registerRunHandlers(context)
+  registerGitHandlers()
   registerSystemHandlers(context)
 }
 
@@ -59,7 +65,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
     getProject: (projectId) => projectsStore.get(projectId) ?? undefined,
     routeModel: (input) => context.modelRouter.route(input),
     dispatchSession: async (input) => {
-      const sessionId = await context.sessionManager.dispatch({
+      const { sessionId } = await context.sessionManager.dispatch({
         projectId: input.projectId,
         prompt: input.prompt,
         agentId: input.agentId,

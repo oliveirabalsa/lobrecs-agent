@@ -1,31 +1,31 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type {
   ApprovalRequest,
   DiffProposal,
   Project,
-  Session,
   SessionStatus,
 } from '../../../../shared/types'
+import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
 import { CostDashboard } from '../../costs'
 import {
-  HistoryPanel,
   SessionHeader,
-  TabBar,
+  TerminalPanel,
   type ActiveSessionMeta,
   type StartedSessionSummary,
-  type Tab,
 } from '../../sessions'
 import { SwarmBuilder } from '../../swarms'
+import { Composer } from '../components/Composer'
+import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
+import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import type { MainView } from '../hooks/useWorkspaceController'
 import { RunWorkspace } from './RunWorkspace'
 
 interface WorkspaceViewProps {
+  isMac?: boolean
   selectedProject: Project | null
   activeSession: ActiveSessionMeta | null
   activeSessionId: string | null
-  tabs: Tab[]
-  activeTabId: string | null
   mainView: MainView
   swarmOpen: boolean
   diffProposals: DiffProposal[]
@@ -36,10 +36,9 @@ interface WorkspaceViewProps {
   busyReason?: string
   onMainViewChange: Dispatch<SetStateAction<MainView>>
   onSwarmOpenChange: Dispatch<SetStateAction<boolean>>
-  onSelectTab: (sessionId: string) => void
-  onCloseTab: (sessionId: string) => void
-  onNewTab: () => void
-  onCancelSession: (sessionId: string) => void
+  onCancelSession: (sessionId: string) => void | Promise<void>
+  onRerunSession?: () => void | Promise<void>
+  onDeleteThread: () => void
   onForkSession: (sessionId: string) => void
   onFeedback: (
     sessionId: string,
@@ -49,33 +48,54 @@ interface WorkspaceViewProps {
   onDiffProposals: (proposals: DiffProposal[]) => void
   onApprovalRequest: (request: ApprovalRequest | null) => void
   onStatusChange: (status: SessionStatus) => void
-  onApproveApproval: () => void
-  onRejectApproval: () => void
-  onApproveDiff: (filePath: string) => void
-  onRejectDiff: (filePath: string) => void
-  onEditAndApproveDiff: (filePath: string, newContent: string) => void
+  onApproveApproval: () => void | Promise<void>
+  onRejectApproval: () => void | Promise<void>
   onSessionStarted: (session: StartedSessionSummary) => void
   onSwarmStarted: (result: {
     swarmId: string
     sessions: Array<{
       sessionId: string
+      threadId?: string
       role: string
       status: string
       agentId?: Project['agentId']
       model?: string
     }>
   }) => void
-  onOpenSession: (session: Session) => void
+  onOpenSidebar?: () => void
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
 
+const RIGHT_PANEL_OPEN_KEY = 'workspace.rightPanelOpen'
+const RIGHT_PANEL_MODE_KEY = 'workspace.rightPanelMode'
+
+function safeStorage(): Storage | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readPanelOpen(): boolean {
+  const ls = safeStorage()
+  if (!ls) return false
+  return ls.getItem(RIGHT_PANEL_OPEN_KEY) === '1'
+}
+
+function readPanelMode(): RightPanelMode {
+  const ls = safeStorage()
+  const value = ls?.getItem(RIGHT_PANEL_MODE_KEY)
+  return value === 'terminal' ? 'terminal' : 'diff'
+}
+
 export function WorkspaceView({
+  isMac = false,
   selectedProject,
   activeSession,
   activeSessionId,
-  tabs,
-  activeTabId,
   mainView,
   swarmOpen,
   diffProposals,
@@ -86,10 +106,9 @@ export function WorkspaceView({
   busyReason,
   onMainViewChange,
   onSwarmOpenChange,
-  onSelectTab,
-  onCloseTab,
-  onNewTab,
   onCancelSession,
+  onRerunSession,
+  onDeleteThread,
   onForkSession,
   onFeedback,
   onDiffProposals,
@@ -97,99 +116,249 @@ export function WorkspaceView({
   onStatusChange,
   onApproveApproval,
   onRejectApproval,
-  onApproveDiff,
-  onRejectDiff,
-  onEditAndApproveDiff,
   onSessionStarted,
   onSwarmStarted,
-  onOpenSession,
+  onOpenSidebar,
 }: WorkspaceViewProps) {
+  const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() => readPanelOpen())
+  const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() => readPanelMode())
+  /** File path requested via the "Review" button — focused inside <DiffViewer>. */
+  const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
+
+  // Persist panel state.
+  useEffect(() => {
+    const ls = safeStorage()
+    if (!ls) return
+    if (rightPanelOpen) ls.setItem(RIGHT_PANEL_OPEN_KEY, '1')
+    else ls.removeItem(RIGHT_PANEL_OPEN_KEY)
+  }, [rightPanelOpen])
+
+  useEffect(() => {
+    const ls = safeStorage()
+    if (!ls) return
+    ls.setItem(RIGHT_PANEL_MODE_KEY, rightPanelMode)
+  }, [rightPanelMode])
+
+  // If diff disappears while diff is selected, fall back to terminal.
+  useEffect(() => {
+    if (rightPanelMode === 'diff' && diffProposals.length === 0 && rightPanelOpen) {
+      setRightPanelModeState('terminal')
+    }
+  }, [diffProposals.length, rightPanelMode, rightPanelOpen])
+
+  // Auto-open the right panel the first time diffs land in a session.
+  useEffect(() => {
+    if (diffProposals.length > 0 && !rightPanelOpen) {
+      setRightPanelOpenState(true)
+      setRightPanelModeState('diff')
+    }
+    // Only react to diff appearance, not panel state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diffProposals.length > 0])
+
+  const handleToggleRightPanel = useCallback(
+    (mode: RightPanelMode) => {
+      setRightPanelOpenState((prev) => {
+        if (prev && rightPanelMode === mode) return false
+        return true
+      })
+      setRightPanelModeState(mode)
+    },
+    [rightPanelMode],
+  )
+
+  /**
+   * Opens the right panel in diff mode and optionally focuses a specific file.
+   * Passed down through `RunWorkspace` → `MessageStream` → `<EditedFilesCard>`
+   * so per-file "Review" buttons jump straight to the matching diff tab.
+   */
+  const openDiffPanel = useCallback((filePath?: string) => {
+    setRightPanelOpenState(true)
+    setRightPanelModeState('diff')
+    setFocusFilePath(filePath ?? null)
+  }, [])
+
+  const titleForTopBar = activeSession?.prompt?.trim()
+    ? activeSession.prompt.trim().slice(0, 80)
+    : selectedProject
+      ? selectedProject.name
+      : 'Workspace'
+
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas">
         {selectedProject ? (
           <>
-            <div className="flex h-11 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3">
-              <div className="flex items-center gap-1">
-                {MAIN_VIEWS.map((view) => (
-                  <button
-                    key={view}
-                    type="button"
-                    onClick={() => onMainViewChange(view)}
-                    className={`rounded px-3 py-1.5 text-xs font-medium capitalize ${
-                      mainView === view
-                        ? 'bg-zinc-800 text-zinc-100'
-                        : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200'
-                    }`}
-                  >
-                    {view}
-                  </button>
-                ))}
-              </div>
+            <WorkspaceTopBar
+              title={titleForTopBar}
+              model={activeSession?.modelOverride ?? activeSession?.routingDecision?.model}
+              rightPanelOpen={rightPanelOpen}
+              rightPanelMode={rightPanelMode}
+              hasDiff={diffProposals.length > 0}
+              canRerun={Boolean(activeSession?.prompt) && !busy}
+              onRerun={onRerunSession}
+              onToggleRightPanel={handleToggleRightPanel}
+              onFork={activeSessionId ? () => onForkSession(activeSessionId) : undefined}
+              onDelete={activeSession?.threadId ? onDeleteThread : undefined}
+              reserveTrafficLightInset={isMac}
+              onOpenSidebar={onOpenSidebar}
+            />
+
+            <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-canvas px-3 py-1.5">
+              {MAIN_VIEWS.map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => onMainViewChange(view)}
+                  className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors ${
+                    mainView === view
+                      ? 'bg-white/10 text-primary'
+                      : 'text-muted hover:bg-white/5 hover:text-secondary'
+                  }`}
+                >
+                  {view}
+                </button>
+              ))}
+              <div className="flex-1" />
               <button
                 type="button"
                 onClick={() => onSwarmOpenChange(true)}
-                className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                className="shrink-0 whitespace-nowrap rounded border border-hairline bg-card px-2 py-1 text-[11px] font-medium text-secondary hover:bg-card-raised hover:text-primary"
               >
                 Swarm
               </button>
             </div>
 
-            <TabBar
-              tabs={tabs}
-              activeTabId={activeTabId}
-              onSelect={onSelectTab}
-              onClose={onCloseTab}
-              onNewTab={onNewTab}
-            />
+            {bannerError ? (
+              <div className="shrink-0 break-words border-b border-accent-del/40 bg-accent-del/10 px-4 py-2 text-xs text-accent-del">
+                {bannerError}
+              </div>
+            ) : null}
 
-            {mainView === 'workspace' ? (
-              <>
-                <SessionHeader
-                  project={selectedProject}
-                  sessionId={activeSessionId}
-                  prompt={activeSession?.prompt ?? ''}
-                  status={activeSession?.status ?? null}
-                  routingDecision={activeSession?.routingDecision ?? null}
-                  modelOverride={activeSession?.modelOverride}
-                  onCancel={onCancelSession}
-                  onFork={onForkSession}
-                  onFeedback={onFeedback}
-                />
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {mainView === 'workspace' ? (
+                  <>
+                    {activeSessionId ? (
+                      <div className="shrink-0 border-b border-hairline px-3 sm:px-4">
+                        <div className="mx-auto w-full max-w-[820px]">
+                          <SessionHeader
+                            project={selectedProject}
+                            sessionId={activeSessionId}
+                            prompt={activeSession?.prompt ?? ''}
+                            status={activeSession?.status ?? null}
+                            routingDecision={activeSession?.routingDecision ?? null}
+                            modelOverride={activeSession?.modelOverride}
+                            onCancel={onCancelSession}
+                            onFork={onForkSession}
+                            onFeedback={onFeedback}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
 
-                {bannerError ? (
-                  <div className="border-b border-red-900/70 bg-red-950/50 px-4 py-2 text-xs text-red-200">
-                    {bannerError}
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                      {activeSessionId ? (
+                        <RunWorkspace
+                          project={selectedProject}
+                          sessionId={activeSessionId}
+                          threadId={activeSession?.threadId ?? null}
+                          prompt={activeSession?.prompt ?? ''}
+                          status={activeSession?.status ?? null}
+                          startedAt={activeSession?.createdAt}
+                          model={
+                            activeSession?.modelOverride ?? activeSession?.routingDecision?.model
+                          }
+                          diffProposals={diffProposals}
+                          approvalRequest={approvalRequest}
+                          onApprovalRequest={onApprovalRequest}
+                          onDiffProposals={onDiffProposals}
+                          onStatusChange={onStatusChange}
+                          onApproveApproval={onApproveApproval}
+                          onRejectApproval={onRejectApproval}
+                          onReviewFile={openDiffPanel}
+                        />
+                      ) : (
+                        <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                          <WorkspaceEmpty projectName={selectedProject.name} />
+                        </div>
+                      )}
+
+                      <div className="shrink-0 border-t border-hairline px-3 sm:px-4">
+                        <div className="mx-auto w-full max-w-[820px]">
+                          <Composer
+                            project={selectedProject}
+                            activeThreadId={activeSession?.threadId ?? null}
+                            activeSessionId={activeSessionId}
+                            activeSessionStatus={activeSession?.status ?? null}
+                            busy={busy}
+                            busyReason={busyReason}
+                            prefillPrompt={prefillPrompt}
+                            onCancelSession={onCancelSession}
+                            onSessionStarted={onSessionStarted}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : mainView === 'costs' ? (
+                  <CostDashboard project={selectedProject} />
+                ) : (
+                  <AutomationManager project={selectedProject} />
+                )}
+              </div>
+
+              {mainView === 'workspace' && rightPanelOpen ? (
+                <aside className="absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/40 sm:w-[420px] xl:relative xl:inset-auto xl:z-auto xl:w-[420px] xl:min-w-[320px] xl:max-w-[720px] xl:shrink-0 xl:shadow-none 2xl:w-[520px]">
+                  <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline px-2">
+                    <RightPanelTab
+                      label="Diff"
+                      active={rightPanelMode === 'diff'}
+                      disabled={diffProposals.length === 0}
+                      onClick={() => setRightPanelModeState('diff')}
+                    />
+                    <RightPanelTab
+                      label="Terminal"
+                      active={rightPanelMode === 'terminal'}
+                      onClick={() => setRightPanelModeState('terminal')}
+                    />
+                    <div className="flex-1" />
+                    <button
+                      type="button"
+                      onClick={() => setRightPanelOpenState(false)}
+                      aria-label="Close panel"
+                      className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+                    >
+                      ×
+                    </button>
                   </div>
-                ) : null}
 
-                <RunWorkspace
-                  project={selectedProject}
-                  sessionId={activeSessionId}
-                  prompt={activeSession?.prompt ?? ''}
-                  status={activeSession?.status ?? null}
-                  model={activeSession?.modelOverride ?? activeSession?.routingDecision?.model}
-                  diffProposals={diffProposals}
-                  approvalRequest={approvalRequest}
-                  prefillPrompt={prefillPrompt}
-                  busy={busy}
-                  busyReason={busyReason}
-                  onDiffProposals={onDiffProposals}
-                  onApprovalRequest={onApprovalRequest}
-                  onStatusChange={onStatusChange}
-                  onApproveApproval={onApproveApproval}
-                  onRejectApproval={onRejectApproval}
-                  onApproveDiff={onApproveDiff}
-                  onRejectDiff={onRejectDiff}
-                  onEditAndApproveDiff={onEditAndApproveDiff}
-                  onSessionStarted={onSessionStarted}
-                />
-              </>
-            ) : mainView === 'costs' ? (
-              <CostDashboard project={selectedProject} />
-            ) : (
-              <AutomationManager project={selectedProject} />
-            )}
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    {rightPanelMode === 'diff' && diffProposals.length > 0 ? (
+                      <DiffViewer
+                        proposals={diffProposals}
+                        focusFilePath={focusFilePath}
+                      />
+                    ) : rightPanelMode === 'diff' ? (
+                      <div className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted">
+                        No code changes to review.
+                      </div>
+                    ) : (
+                      <TerminalPanel
+                        sessionId={activeSessionId}
+                        diffProposals={[]}
+                        approvalRequest={approvalRequest}
+                        onDiffProposals={onDiffProposals}
+                        onApprovalRequest={onApprovalRequest}
+                        onStatusChange={onStatusChange}
+                        onApproveApproval={onApproveApproval}
+                        onRejectApproval={onRejectApproval}
+                      />
+                    )}
+                  </div>
+                </aside>
+              ) : null}
+            </div>
 
             <SwarmBuilder
               open={swarmOpen}
@@ -200,25 +369,98 @@ export function WorkspaceView({
             />
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center p-6">
-            <div className="max-w-sm text-center">
-              <div className="text-base font-semibold text-zinc-200">Select a project</div>
-              <p className="mt-2 text-sm leading-6 text-zinc-500">
-                Choose a repository from the sidebar or add one with the plus button.
-              </p>
+          <>
+            <WorkspacePlaceholderTopBar
+              isMac={isMac}
+              onOpenSidebar={onOpenSidebar}
+            />
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden p-6">
+              <div className="max-w-sm text-center">
+                <div className="text-[15px] font-semibold text-primary">Select a project</div>
+                <p className="mt-2 text-[13px] leading-6 text-muted">
+                  Choose a repository from the sidebar or add one with the plus button.
+                </p>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </section>
-
-      {selectedProject ? (
-        <HistoryPanel
-          projectId={selectedProject.id}
-          activeSessionId={activeSessionId}
-          onOpenSession={onOpenSession}
-          onFork={onForkSession}
-        />
-      ) : null}
     </main>
+  )
+}
+
+function WorkspacePlaceholderTopBar({
+  isMac,
+  onOpenSidebar,
+}: {
+  isMac: boolean
+  onOpenSidebar?: () => void
+}) {
+  const leftInsetClass = isMac ? 'pl-[70px] md:pl-4' : 'pl-2 md:pl-4'
+
+  return (
+    <div
+      className={`drag flex h-11 shrink-0 items-center border-b border-hairline bg-canvas ${leftInsetClass} pr-2`}
+    >
+      {onOpenSidebar ? (
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          aria-label="Open sidebar"
+          className="no-drag flex h-7 w-7 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary md:hidden"
+        >
+          <MenuIcon />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function RightPanelTab({
+  label,
+  active,
+  disabled,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+}) {
+  const stateClasses = disabled
+    ? 'cursor-not-allowed text-muted/40'
+    : active
+      ? 'bg-white/10 text-primary'
+      : 'text-secondary hover:bg-white/5 hover:text-primary'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${stateClasses}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function MenuIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+    </svg>
   )
 }

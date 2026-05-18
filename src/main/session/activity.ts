@@ -5,6 +5,7 @@ import type {
   DiffProposal,
   SessionStatus,
 } from '../../shared/types'
+import { isClaudeSessionEndCwdDeletedWarning } from '../../shared/contracts/agentOutput'
 
 export function deriveActivityEvents(event: AgentEvent): AgentEvent[] {
   if (event.type === 'activity') return []
@@ -29,6 +30,8 @@ export function activityFromEvent(event: AgentEvent): AgentActivity | AgentActiv
   if (event.type === 'stderr') {
     const text = textFromPayload(event.payload)
     if (!text.trim()) return null
+    if (isClaudeSessionEndCwdDeletedWarning(text)) return null
+
     return {
       kind: 'step',
       title: 'Process warning',
@@ -94,7 +97,7 @@ export function activityFromEvent(event: AgentEvent): AgentActivity | AgentActiv
   return null
 }
 
-function activityFromStdout(payload: unknown): AgentActivity | null {
+function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] | null {
   if (!isRecord(payload)) {
     const text = textFromPayload(payload)
     return text.trim()
@@ -103,6 +106,8 @@ function activityFromStdout(payload: unknown): AgentActivity | null {
   }
 
   const type = typeof payload.type === 'string' ? payload.type : ''
+  const codexActivity = activityFromCodexPayload(payload, type)
+  if (codexActivity !== undefined) return codexActivity
 
   if (type.includes('tool_call') || type.includes('tool-call') || type.includes('tool.use')) {
     return {
@@ -146,6 +151,97 @@ function activityFromStdout(payload: unknown): AgentActivity | null {
   }
 
   return null
+}
+
+function activityFromCodexPayload(
+  payload: Record<string, unknown>,
+  type: string,
+): AgentActivity | AgentActivity[] | null | undefined {
+  if (type === 'thread.started') {
+    return null
+  }
+
+  if (type === 'turn.started') {
+    return { kind: 'step', title: 'Thinking', status: 'running' }
+  }
+
+  const item = isRecord(payload.item) ? payload.item : payload
+  const itemType = stringField(item, 'type') ?? type
+
+  if (type === 'item.started') {
+    if (isReasoningItem(itemType)) {
+      return { kind: 'step', title: 'Thinking', status: 'running' }
+    }
+
+    const toolName = toolNameFromItem(item, itemType)
+    if (toolName) {
+      return {
+        kind: 'tool-call',
+        name: toolName,
+        input: toolInputFromItem(item),
+        status: 'running',
+      }
+    }
+
+    return null
+  }
+
+  if (type === 'item.completed') {
+    const text = textFromPayload(item)
+    if (isMessageItem(itemType) && text.trim()) {
+      return { kind: 'message', role: 'assistant', text, stream: true }
+    }
+
+    if (isReasoningItem(itemType)) {
+      const detail = text.trim()
+      return { kind: 'step', title: 'Thinking', detail: detail || undefined, status: 'done' }
+    }
+
+    if (isToolResultItem(itemType)) {
+      return {
+        kind: 'tool-result',
+        name: toolNameFromItem(item, itemType) ?? 'tool',
+        output: text.trim() ? text : undefined,
+        status: type.includes('error') ? 'error' : 'done',
+      }
+    }
+
+    const toolName = toolNameFromItem(item, itemType)
+    if (toolName) {
+      const output = commandOutputFromItem(item)
+      const call: AgentActivity = {
+        kind: 'tool-call',
+        name: toolName,
+        input: toolInputFromItem(item),
+        status: itemIncludesError(item) ? 'error' : 'done',
+      }
+
+      return output
+        ? [
+            call,
+            {
+              kind: 'tool-result',
+              name: toolName,
+              output,
+              status: itemIncludesError(item) ? 'error' : 'done',
+            },
+          ]
+        : call
+    }
+
+    return null
+  }
+
+  if (type === 'response.output_text.delta' || type === 'agent_message') {
+    const text = textFromPayload(payload)
+    return text.trim() ? { kind: 'message', role: 'assistant', text, stream: true } : null
+  }
+
+  if (type.startsWith('thread.') || type.startsWith('turn.') || type.startsWith('item.')) {
+    return null
+  }
+
+  return undefined
 }
 
 function normalizeApproval(payload: unknown): ApprovalRequest {
@@ -226,6 +322,13 @@ function riskForAction(action: ApprovalRequest['action']): ApprovalRequest['risk
 function completionStatus(payload: unknown): SessionStatus {
   if (!isRecord(payload)) return 'done'
   if (payload.subtype === 'error' || payload.is_error === true) return 'error'
+  if (
+    payload.status === 'done' ||
+    payload.status === 'error' ||
+    payload.status === 'cancelled'
+  ) {
+    return payload.status
+  }
   const exitCode = payload.exitCode ?? payload.exit_code
   return exitCode === 0 || exitCode === undefined || exitCode === null ? 'done' : 'error'
 }
@@ -250,7 +353,7 @@ function textFromPayload(payload: unknown, fallbackToJson = false): string {
   const text = stringField(payload, 'text')
   if (text) return text
 
-  for (const field of ['message', 'content', 'delta', 'output', 'result', 'summary', 'error']) {
+  for (const field of ['message', 'content', 'delta', 'output', 'result', 'summary', 'error', 'item']) {
     const value = payload[field]
     if (typeof value === 'string') return `${value}\n`
     if (Array.isArray(value)) {
@@ -288,6 +391,65 @@ function labelFromType(type: string): string {
   return type
     .replace(/[._-]+/g, ' ')
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function isMessageItem(type: string): boolean {
+  return (
+    type === 'message' ||
+    type === 'agent_message' ||
+    type === 'assistant_message' ||
+    type === 'output_text'
+  )
+}
+
+function isReasoningItem(type: string): boolean {
+  return type === 'reasoning' || type === 'thinking' || type.includes('reasoning')
+}
+
+function isToolResultItem(type: string): boolean {
+  return (
+    type === 'function_call_output' ||
+    type === 'tool_result' ||
+    type === 'tool-result' ||
+    type.includes('tool_result')
+  )
+}
+
+function toolNameFromItem(
+  item: Record<string, unknown>,
+  itemType: string,
+): string | undefined {
+  const directName = stringField(item, 'name') ?? stringField(item, 'tool')
+  if (directName) return directName
+
+  if (
+    itemType === 'function_call' ||
+    itemType === 'tool_call' ||
+    itemType === 'tool-call' ||
+    itemType === 'command_execution' ||
+    itemType === 'local_shell_call' ||
+    itemType.includes('tool_call')
+  ) {
+    return itemType === 'local_shell_call' || itemType === 'command_execution' ? 'shell' : 'tool'
+  }
+
+  return undefined
+}
+
+function toolInputFromItem(item: Record<string, unknown>): unknown {
+  return item.input ?? item.arguments ?? stringField(item, 'command')
+}
+
+function commandOutputFromItem(item: Record<string, unknown>): string | undefined {
+  return stringField(item, 'aggregated_output') ?? stringField(item, 'output')
+}
+
+function itemIncludesError(item: Record<string, unknown>): boolean {
+  return (
+    item.status === 'failed' ||
+    item.status === 'error' ||
+    (typeof item.exit_code === 'number' && item.exit_code !== 0)
+  )
 }
 
 function stringField(object: Record<string, unknown>, key: string): string | undefined {

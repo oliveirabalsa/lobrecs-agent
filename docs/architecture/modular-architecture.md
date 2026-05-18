@@ -10,7 +10,7 @@ the code toward process-aware feature modules with explicit public contracts.
 - Make every feature own its domain logic, application service, IPC handler, UI,
   tests, and persistence adapter where applicable.
 - Keep shared contracts stable and easy to review.
-- Make agent orchestration, diff approval, and worktree isolation hard to break
+- Make agent orchestration, automatic diff application, and worktree isolation hard to break
   accidentally.
 - Let future features be added by creating or extending one module instead of
   touching unrelated buckets.
@@ -26,7 +26,8 @@ the code toward process-aware feature modules with explicit public contracts.
   shortcuts.
 - Shared code must contain only serializable types, schemas, constants, and pure
   utilities that are safe in both main and renderer.
-- Applying an agent diff to disk must remain an explicit user-approved action.
+- Completed agent diffs are applied automatically by the main process; renderer
+  diff surfaces are review-only.
 - API keys and provider secrets must never be stored in code, local storage, or
   SQLite.
 

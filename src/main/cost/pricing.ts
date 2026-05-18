@@ -6,8 +6,11 @@ export interface ModelPricing {
 export const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4 },
   'claude-sonnet-4-6': { inputPer1M: 3, outputPer1M: 15 },
+  'claude-opus-4-7': { inputPer1M: 15, outputPer1M: 75 },
   'claude-opus-4-6': { inputPer1M: 15, outputPer1M: 75 },
-  'gpt-5.2-codex': { inputPer1M: 0.5, outputPer1M: 2.5 },
+  'gpt-5.3-codex-spark': { inputPer1M: 0.25, outputPer1M: 1 },
+  'gpt-5.3-codex': { inputPer1M: 0.5, outputPer1M: 2.5 },
+  'gpt-5.4-mini': { inputPer1M: 0.5, outputPer1M: 2 },
   'gpt-5.4': { inputPer1M: 2, outputPer1M: 8 },
   'gpt-5.5': { inputPer1M: 5, outputPer1M: 20 },
   minimax: { inputPer1M: 0.1, outputPer1M: 0.3 },

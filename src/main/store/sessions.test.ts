@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { closeDb, setDbForTests } from './db'
 import { projectsStore } from './projects'
 import { sessionsStore } from './sessions'
+import { threadsStore } from './threads'
 
 describe('sessionsStore', () => {
   beforeEach(() => {
@@ -27,7 +28,7 @@ describe('sessionsStore', () => {
     const second = sessionsStore.create({
       projectId: project.id,
       agentId: 'codex',
-      model: 'gpt-5.2-codex',
+      model: 'gpt-5.3-codex',
       prompt: 'second',
       createdAt: 2_000,
     })
@@ -103,6 +104,48 @@ describe('sessionsStore', () => {
     ])
   })
 
+  it('cancels interrupted active sessions without touching terminal history', () => {
+    vi.useFakeTimers()
+    const project = createProject()
+    const running = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'running',
+    })
+    const waiting = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'waiting',
+      status: 'awaiting-approval',
+    })
+    const done = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'codex',
+      model: 'gpt-5.5',
+      prompt: 'done',
+      status: 'done',
+      completedAt: 1_000,
+    })
+
+    vi.setSystemTime(9_000)
+
+    expect(sessionsStore.cancelInterrupted()).toBe(2)
+    expect(sessionsStore.get(running.id)).toMatchObject({
+      status: 'cancelled',
+      completedAt: 9_000,
+    })
+    expect(sessionsStore.get(waiting.id)).toMatchObject({
+      status: 'cancelled',
+      completedAt: 9_000,
+    })
+    expect(sessionsStore.get(done.id)).toMatchObject({
+      status: 'done',
+      completedAt: 1_000,
+    })
+  })
+
   it('returns the fork payload needed by history UI', () => {
     const project = createProject()
     const session = sessionsStore.create({
@@ -118,6 +161,58 @@ describe('sessionsStore', () => {
       model: 'minimax',
     })
   })
+
+  it('maps the owning thread id onto session DTOs', () => {
+    const project = createProject()
+    const thread = threadsStore.create({ projectId: project.id, title: 'Follow-up thread' })
+    const session = sessionsStore.create({
+      projectId: project.id,
+      threadId: thread.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: 'continue here',
+    })
+
+    expect(session.threadId).toBe(thread.id)
+    expect(sessionsStore.get(session.id)?.threadId).toBe(thread.id)
+    expect(sessionsStore.list(project.id)[0]?.threadId).toBe(thread.id)
+  })
+
+  it('returns recent thread transcript turns in chronological order', () => {
+    const project = createProject()
+    const thread = threadsStore.create({ projectId: project.id, title: 'Follow-up thread' })
+
+    const first = createThreadSession(thread.id, project.id, 'first prompt', 1_000)
+    const second = createThreadSession(thread.id, project.id, 'second prompt', 2_000)
+    const third = createThreadSession(thread.id, project.id, 'third prompt', 3_000)
+    const active = createThreadSession(thread.id, project.id, 'active prompt', 4_000)
+
+    addAssistantMessage(first.id, 'first answer')
+    addAssistantMessage(second.id, 'second answer')
+    addAssistantMessage(third.id, 'third answer')
+    addAssistantMessage(active.id, 'active answer')
+
+    expect(
+      sessionsStore
+        .listThreadTranscript(thread.id, { limit: 2, excludeSessionId: active.id })
+        .map((turn) => ({
+          sessionId: turn.sessionId,
+          prompt: turn.prompt,
+          assistantText: turn.assistantText,
+        })),
+    ).toEqual([
+      {
+        sessionId: second.id,
+        prompt: 'second prompt',
+        assistantText: 'second answer',
+      },
+      {
+        sessionId: third.id,
+        prompt: 'third prompt',
+        assistantText: 'third answer',
+      },
+    ])
+  })
 })
 
 function createProject() {
@@ -126,5 +221,32 @@ function createProject() {
     repoPath: '/repo/project',
     agentId: 'claude-code',
     modelTier: 'balanced',
+  })
+}
+
+function createThreadSession(
+  threadId: string,
+  projectId: string,
+  prompt: string,
+  createdAt: number,
+) {
+  return sessionsStore.create({
+    projectId,
+    threadId,
+    agentId: 'claude-code',
+    model: 'claude-sonnet-4-6',
+    prompt,
+    status: 'done',
+    createdAt,
+    completedAt: createdAt + 100,
+  })
+}
+
+function addAssistantMessage(sessionId: string, text: string): void {
+  sessionsStore.addEvent({
+    type: 'activity',
+    sessionId,
+    payload: { kind: 'message', role: 'assistant', text },
+    timestamp: Date.now(),
   })
 }

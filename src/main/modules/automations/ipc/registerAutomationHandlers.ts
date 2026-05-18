@@ -28,7 +28,7 @@ export function registerAutomationHandlers(context: MainIpcContext): void {
       prompt: automation.prompt,
       preferredAgentId: automation.agentId,
     })
-    const sessionId = await context.sessionManager.dispatch({
+    const { sessionId } = await context.sessionManager.dispatch({
       projectId: project.id,
       prompt: `[Automation: ${automation.name}]\n${automation.prompt}`,
       agentId: decision.agentId,

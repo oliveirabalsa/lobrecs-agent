@@ -5,7 +5,7 @@ const transitions: Record<SpecStatus, SpecStatus[]> = {
   approved: ['running', 'draft', 'failed'],
   running: ['reviewing', 'failed'],
   reviewing: ['verified', 'failed', 'running'],
-  verified: ['running'],
+  verified: ['running', 'failed'],
   failed: ['draft', 'approved', 'running'],
 }
 

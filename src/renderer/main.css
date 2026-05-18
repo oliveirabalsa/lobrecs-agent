@@ -1,11 +1,48 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — see docs/specs/REFACTOR_AGENT_IDE.md §2.9
+ * All component colors/radii/typography reference these. Do not introduce hex literals
+ * in component files; add a token here if a new shade is needed.
+ */
+@theme {
+  --color-canvas: #0e0e0f;
+  --color-sidebar: #141416;
+  --color-bubble-user: #1f1f22;
+  --color-card: #17171a;
+  --color-card-raised: #1c1c20;
+  --color-hairline: rgba(255, 255, 255, 0.08);
+
+  --color-text-primary: rgba(255, 255, 255, 0.92);
+  --color-text-secondary: rgba(255, 255, 255, 0.58);
+  --color-text-muted: rgba(255, 255, 255, 0.40);
+
+  --color-accent-add: #34d399;
+  --color-accent-del: #f87171;
+  --color-accent-warn: #f59e0b;
+  --color-accent-primary: #3b82f6;
+
+  --radius-bubble: 12px;
+  --radius-card: 8px;
+  --radius-pill: 9999px;
+
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+}
+
 :root {
   color-scheme: dark;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #09090b;
-  color: #f4f4f5;
+  font-family: var(--font-ui);
+  background: var(--color-canvas);
+  color: var(--color-text-primary);
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
 }
 
 * {
@@ -16,7 +53,17 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+}
+
+#root {
+  overflow: hidden;
+}
+
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
 }
 
 button,
@@ -24,4 +71,69 @@ textarea,
 select,
 input {
   font: inherit;
+}
+
+/* Drag region utilities — components inside .drag must use .no-drag on interactive children */
+.drag {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * Lightweight animations for Radix data-state-driven components (Modal /
+ * Dialog) and reusable artifacts. The `tailwindcss-animate` plugin is NOT
+ * installed; these keyframes back the `animate-in` / `animate-out` /
+ * `fade-in-*` / `zoom-in-*` utility classes already referenced by
+ * `components/ui/Modal.tsx`. All durations are well under the 200ms ceiling
+ * defined by the M8 polish brief.
+ */
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes overlay-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes content-pop-in {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes content-pop-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+}
+
+[data-radix-popper-content-wrapper] [data-state="open"],
+[role="dialog"][data-state="open"] {
+  animation: content-pop-in 140ms ease-out;
+}
+
+[role="dialog"][data-state="closed"] {
+  animation: content-pop-out 120ms ease-in;
+}
+
+[data-state="open"][class*="bg-black"] {
+  animation: overlay-fade-in 140ms ease-out;
+}
+
+[data-state="closed"][class*="bg-black"] {
+  animation: overlay-fade-out 120ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

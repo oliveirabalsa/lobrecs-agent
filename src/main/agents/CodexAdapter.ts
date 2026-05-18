@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
-import { commandExists, resolveCommand, runCommandText, withContext } from './command'
+import { commandExists, resolveCommand, runCommandText, withContextAndImages } from './command'
 import {
   dedupeModels,
   fallbackModelsForAgent,
@@ -33,52 +33,72 @@ export class CodexAdapter implements AgentAdapter {
       if (event.type === 'session-complete') completed = true
       events.emit('event', event)
     }
-    const prompt = withContext(params.prompt, params.context)
-    const command = resolveCommand(CODEX_COMMAND_ENV, 'codex')
-    const args = [
-      'exec',
-      '--model',
-      params.model,
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--color',
-      'never',
-      '--json',
-      '--skip-git-repo-check',
-      prompt,
-    ]
 
-    const child = processPool.spawn(params.sessionId, command, args, {
-      cwd: params.repoPath,
-      stdin: 'ignore',
-    })
+    setImmediate(() => {
+      try {
+        const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
+        const command = resolveCommand(CODEX_COMMAND_ENV, 'codex')
+        const imageArgs = (params.imageAttachments ?? []).flatMap((image) => [
+          '--image',
+          image.filePath,
+        ])
+        const args = [
+          'exec',
+          '--model',
+          params.model,
+          ...imageArgs,
+          '--dangerously-bypass-approvals-and-sandbox',
+          '--color',
+          'never',
+          '--json',
+          '--skip-git-repo-check',
+          prompt,
+        ]
 
-    if (child.stdout) {
-      const rl = createInterface({ input: child.stdout })
-      rl.on('line', (line) => {
-        if (!line.trim()) return
+        const child = processPool.spawn(params.sessionId, command, args, {
+          cwd: params.repoPath,
+          stdin: 'ignore',
+        })
 
-        emitEvent(parseCodexLine(line, params.sessionId))
-      })
-    }
+        if (child.stdout) {
+          const rl = createInterface({ input: child.stdout })
+          rl.on('line', (line) => {
+            if (!line.trim()) return
 
-    child.stderr?.on('data', (chunk: Buffer) => {
-      emitEvent({
-        type: 'stderr',
-        sessionId: params.sessionId,
-        payload: { text: chunk.toString() },
-        timestamp: Date.now(),
-      } satisfies AgentEvent)
-    })
+            emitEvent(parseCodexLine(line, params.sessionId))
+          })
+        }
 
-    child.on('exit', (code, signal) => {
-      if (completed) return
+        child.stderr?.on('data', (chunk: Buffer) => {
+          const text = visibleCodexStderr(chunk.toString())
+          if (!text) return
 
-      emitEvent({
-        type: 'session-complete',
-        sessionId: params.sessionId,
-        payload: { exitCode: code, signal },
-        timestamp: Date.now(),
-      } satisfies AgentEvent)
+          emitEvent({
+            type: 'stderr',
+            sessionId: params.sessionId,
+            payload: { text },
+            timestamp: Date.now(),
+          } satisfies AgentEvent)
+        })
+
+        child.on('exit', (code, signal) => {
+          if (completed) return
+
+          emitEvent({
+            type: 'session-complete',
+            sessionId: params.sessionId,
+            payload: { exitCode: code, signal },
+            timestamp: Date.now(),
+          } satisfies AgentEvent)
+        })
+      } catch (error) {
+        emitEvent({
+          type: 'error',
+          sessionId: params.sessionId,
+          payload: { message: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+        } satisfies AgentEvent)
+      }
     })
 
     return {
@@ -111,11 +131,12 @@ export class CodexAdapter implements AgentAdapter {
 function parseCodexLine(line: string, sessionId: string): AgentEvent {
   try {
     const data = JSON.parse(line) as Record<string, unknown>
+    const type = typeof data.type === 'string' ? data.type : ''
 
     if (
-      data.type === 'approval_request' ||
-      data.type === 'approval-request' ||
-      data.type === 'approval.request'
+      type === 'approval_request' ||
+      type === 'approval-request' ||
+      type === 'approval.request'
     ) {
       return {
         type: 'approval-request',
@@ -126,14 +147,32 @@ function parseCodexLine(line: string, sessionId: string): AgentEvent {
     }
 
     if (
-      data.type === 'turn_complete' ||
-      data.type === 'turn-complete' ||
-      data.type === 'turn.completed'
+      type === 'turn_complete' ||
+      type === 'turn-complete' ||
+      type === 'turn.completed'
     ) {
       return {
         type: 'session-complete',
         sessionId,
         payload: data,
+        timestamp: Date.now(),
+      }
+    }
+
+    if (type === 'error') {
+      return {
+        type: 'error',
+        sessionId,
+        payload: data,
+        timestamp: Date.now(),
+      }
+    }
+
+    if (type === 'turn.failed') {
+      return {
+        type: 'session-complete',
+        sessionId,
+        payload: { ...data, exitCode: 1 },
         timestamp: Date.now(),
       }
     }
@@ -152,4 +191,45 @@ function parseCodexLine(line: string, sessionId: string): AgentEvent {
       timestamp: Date.now(),
     }
   }
+}
+
+function visibleCodexStderr(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim()
+      if (!trimmed) return false
+
+      return !isCodexInfrastructureNoise(trimmed)
+    })
+    .join('\n')
+}
+
+function isCodexInfrastructureNoise(line: string): boolean {
+  return (
+    line === 'Reading additional input from stdin...' ||
+    line.includes('rmcp::transport::worker') ||
+    line.includes('Auth(TokenRefreshFailed') ||
+    line.includes('codex_core_plugins::') ||
+    line.includes('codex_core_skills::') ||
+    line.includes('codex_rmcp_client::') ||
+    line.includes('codex_mcp::rmcp_client') ||
+    line.includes('stdio_server_launcher') ||
+    line.includes('session_startup_prewarm') ||
+    line.includes('Model personality requested but model_messages is missing') ||
+    line.includes('Cloudflare') ||
+    line.includes('chatgpt.com/backend-api/plugins/featured') ||
+    line.startsWith('<') ||
+    line.startsWith('</') ||
+    line.startsWith('{') ||
+    line.startsWith('}') ||
+    line.startsWith('d=') ||
+    line.startsWith('fill=') ||
+    line.startsWith('xmlns=') ||
+    line.startsWith('viewBox=') ||
+    line.includes('challenge-error-text') ||
+    line.includes('cf_chl_opt') ||
+    line.includes('<html>') ||
+    line.includes('<script>')
+  )
 }

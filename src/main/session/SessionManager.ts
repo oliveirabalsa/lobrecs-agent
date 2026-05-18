@@ -1,10 +1,20 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import type { AgentEvent, AgentId, SessionStatus } from '../../shared/types'
+import type {
+  AgentEvent,
+  AgentId,
+  ThreadTranscriptTurn,
+  SessionStatus,
+  Thread,
+  ThreadUpdatedEvent,
+} from '../../shared/types'
+import { processWarningKey } from '../../shared/contracts/agentOutput'
 import { worktreeManager } from '../git/WorktreeManager'
-import { sessionsStore } from '../store'
+import { applyDiffContent } from '../modules/diffs/application/applyDiff'
+import { sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
 import { buildDiffProposals } from './worktreeDiff'
+import type { DiffProposal, ImageAttachment } from '../../shared/types'
 
 const require = createRequire(import.meta.url)
 
@@ -25,6 +35,7 @@ export type AgentAdapter = {
     repoPath: string
     model: string
     context?: string | null
+    imageAttachments?: ImageAttachment[]
   }): Promise<AgentSession>
 }
 
@@ -35,7 +46,15 @@ export type DispatchSessionParams = {
   model: string
   repoPath: string
   context?: string | null
+  imageAttachments?: ImageAttachment[]
   isolate?: boolean
+  /** When provided, links the new session to an existing thread. */
+  threadId?: string
+}
+
+export type DispatchSessionResult = {
+  sessionId: string
+  threadId: string
 }
 
 export type EventBroadcaster = (event: AgentEvent) => void
@@ -46,6 +65,11 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   repoPath: string
   worktreePath: string | null
 }
+
+const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
+const THREAD_CONTEXT_SESSION_LIMIT = 6
+const THREAD_CONTEXT_PROMPT_CHARS = 2_000
+const THREAD_CONTEXT_ASSISTANT_CHARS = 4_000
 
 export type SessionManagerOptions = {
   adapters?: Iterable<AgentAdapter>
@@ -61,6 +85,7 @@ export class SessionManager {
   private readonly adapterResolver?: AdapterResolver
   private readonly broadcastEvent: EventBroadcaster
   private readonly worktreeIsolation: boolean
+  private readonly processWarningsBySession = new Map<string, Set<string>>()
   private estimateCost: CostEstimator
 
   constructor(options: SessionManagerOptions = {}) {
@@ -82,14 +107,26 @@ export class SessionManager {
     this.estimateCost = estimateCost
   }
 
-  async dispatch(params: DispatchSessionParams): Promise<string> {
+  async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
+    const threadId = this.resolveOrCreateThread(params)
+    const context = buildAdapterContext(
+      params.context,
+      sessionsStore.listThreadTranscript(threadId, { limit: THREAD_CONTEXT_SESSION_LIMIT }),
+    )
+
     const session = sessionsStore.create({
       projectId: params.projectId,
       agentId: params.agentId,
       model: params.model,
       prompt: params.prompt,
       status: 'running',
+      threadId,
     })
+
+    // Link the thread to the new session and bump updated_at so the sidebar
+    // bubbles this thread to the top of its project list.
+    const linkedThread = threadsStore.linkSession(threadId, session.id)
+    broadcastThreadUpdated(linkedThread)
 
     const adapter = this.resolveAdapter(params.agentId)
     if (!adapter) {
@@ -118,7 +155,8 @@ export class SessionManager {
         prompt: params.prompt,
         repoPath: worktreePath ?? params.repoPath,
         model: params.model,
-        context: params.context,
+        context,
+        imageAttachments: params.imageAttachments,
       })
 
       this.activeSessions.set(session.id, {
@@ -133,7 +171,7 @@ export class SessionManager {
         this.handleAgentEvent({ ...event, sessionId: session.id })
       })
 
-      return session.id
+      return { sessionId: session.id, threadId }
     } catch (error) {
       await worktreeManager.remove(session.id, params.repoPath)
       this.failSession(session.id, error)
@@ -158,14 +196,17 @@ export class SessionManager {
   }
 
   cancel(sessionId: string): void {
-    this.activeSessions.get(sessionId)?.cancel()
     const active = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
-    void worktreeManager.remove(sessionId, active?.repoPath)
+    this.processWarningsBySession.delete(sessionId)
+    const session = sessionsStore.get(sessionId)
 
-    if (sessionsStore.get(sessionId)) {
+    if (session && !terminalSessionStatuses.has(session.status)) {
       sessionsStore.updateStatus(sessionId, 'cancelled')
     }
+
+    active?.cancel()
+    void worktreeManager.remove(sessionId, active?.repoPath)
   }
 
   cancelAll(): void {
@@ -182,33 +223,95 @@ export class SessionManager {
     return this.adapterResolver?.(agentId) ?? this.adapters.get(agentId)
   }
 
-  private handleAgentEvent(event: AgentEvent): void {
-    sessionsStore.addEvent(event)
-    this.broadcastEvent(event)
-
-    for (const activityEvent of deriveActivityEvents(event)) {
-      sessionsStore.addEvent(activityEvent)
-      this.broadcastEvent(activityEvent)
+  private resolveOrCreateThread(params: DispatchSessionParams): string {
+    if (params.threadId) {
+      const existing = threadsStore.get(params.threadId)
+      if (!existing) {
+        throw new Error(`Thread not found: ${params.threadId}`)
+      }
+      if (existing.projectId !== params.projectId) {
+        throw new Error(
+          `Thread ${params.threadId} belongs to a different project (${existing.projectId})`,
+        )
+      }
+      return existing.id
     }
 
+    const title = params.prompt.trim().slice(0, 60) || 'Untitled thread'
+    const created = threadsStore.create({ projectId: params.projectId, title })
+    broadcastThreadUpdated(created)
+    return created.id
+  }
+
+  private handleAgentEvent(event: AgentEvent): void {
     if (event.type === 'approval-request') {
+      if (this.isTerminalSession(event.sessionId)) return
+
+      this.recordActivityEvents(event)
       sessionsStore.updateStatus(event.sessionId, 'awaiting-approval')
+      this.recordEvent(event)
       return
     }
 
     if (event.type === 'session-complete') {
+      if (this.isTerminalSession(event.sessionId)) return
+
+      const status = completionStatus(event)
+      const completedEvent = withCompletionStatus(event, status)
+      const active = this.activeSessions.get(event.sessionId)
+
       this.applyUsage(event)
-      sessionsStore.updateStatus(event.sessionId, completionStatus(event))
-      void this.emitWorktreeDiff(event.sessionId)
+      sessionsStore.updateStatus(event.sessionId, status)
+      void this.applyAndEmitWorktreeDiff(event.sessionId, active, completedEvent)
       this.activeSessions.delete(event.sessionId)
+      this.processWarningsBySession.delete(event.sessionId)
       return
     }
 
     if (event.type === 'error') {
+      if (this.isTerminalSession(event.sessionId)) return
+
+      const active = this.activeSessions.get(event.sessionId)
       sessionsStore.updateStatus(event.sessionId, 'error')
-      void this.removeWorktree(event.sessionId)
+      this.recordEvent(event)
+      void this.removeWorktree(event.sessionId, active)
       this.activeSessions.delete(event.sessionId)
+      this.processWarningsBySession.delete(event.sessionId)
+      return
     }
+
+    this.recordEvent(event)
+    this.recordActivityEvents(event)
+  }
+
+  private recordEvent(event: AgentEvent): void {
+    sessionsStore.addEvent(event)
+    this.broadcastEvent(event)
+  }
+
+  private recordActivityEvents(event: AgentEvent): void {
+    for (const activityEvent of deriveActivityEvents(event)) {
+      if (this.hasSeenProcessWarning(activityEvent)) continue
+
+      this.recordEvent(activityEvent)
+    }
+  }
+
+  private hasSeenProcessWarning(event: AgentEvent): boolean {
+    const key = processWarningActivityKey(event)
+    if (!key) return false
+
+    const seen = this.processWarningsBySession.get(event.sessionId) ?? new Set<string>()
+    if (seen.has(key)) return true
+
+    seen.add(key)
+    this.processWarningsBySession.set(event.sessionId, seen)
+    return false
+  }
+
+  private isTerminalSession(sessionId: string): boolean {
+    const session = sessionsStore.get(sessionId)
+    return session ? terminalSessionStatuses.has(session.status) : false
   }
 
   private emitSyntheticEvent(sessionId: string, payload: AgentEvent['payload']): void {
@@ -220,34 +323,105 @@ export class SessionManager {
     })
   }
 
-  private async emitWorktreeDiff(sessionId: string): Promise<void> {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.worktreePath) return
+  private async applyAndEmitWorktreeDiff(
+    sessionId: string,
+    active: ActiveSession | undefined,
+    finalEvent: AgentEvent,
+  ): Promise<void> {
+    if (!active?.worktreePath) {
+      this.recordEvent(finalEvent)
+      return
+    }
 
     try {
       const proposals = await buildDiffProposals(active.worktreePath, active.repoPath)
       if (proposals.length > 0) {
+        const reviewedProposals = await this.applyDiffProposals(sessionId, proposals)
         this.handleAgentEvent({
           type: 'diff',
           sessionId,
-          payload: proposals,
+          payload: reviewedProposals,
           timestamp: Date.now(),
         })
       }
     } catch (error) {
-      this.handleAgentEvent({
-        type: 'error',
+      this.recordEvent({
+        type: 'activity',
         sessionId,
-        payload: { message: errorMessage(error) },
+        payload: {
+          kind: 'step',
+          title: 'Review preparation failed',
+          detail: errorMessage(error),
+          status: 'error',
+        },
         timestamp: Date.now(),
       })
     } finally {
-      await this.removeWorktree(sessionId)
+      await this.removeWorktree(sessionId, active)
+      this.recordEvent(finalEvent)
     }
   }
 
-  private async removeWorktree(sessionId: string): Promise<void> {
-    const active = this.activeSessions.get(sessionId)
+  private async applyDiffProposals(
+    sessionId: string,
+    proposals: DiffProposal[],
+  ): Promise<DiffProposal[]> {
+    const reviewedProposals: DiffProposal[] = []
+    const conflicts: string[] = []
+
+    for (const proposal of proposals) {
+      try {
+        await applyDiffContent(
+          proposal.filePath,
+          proposal.proposedContent,
+          proposal.originalContent,
+        )
+        reviewedProposals.push({ ...proposal, status: 'applied' })
+      } catch (error) {
+        conflicts.push(`${proposal.filePath}: ${errorMessage(error)}`)
+        reviewedProposals.push({ ...proposal, status: 'conflict' })
+      }
+    }
+
+    const appliedCount = reviewedProposals.filter(
+      (proposal) => proposal.status === 'applied',
+    ).length
+
+    if (appliedCount > 0) {
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Applied code changes',
+          detail: `${appliedCount} file${appliedCount === 1 ? '' : 's'} applied automatically.`,
+          status: 'done',
+        },
+        timestamp: Date.now(),
+      })
+    }
+
+    if (conflicts.length > 0) {
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Some code changes could not be applied',
+          detail: conflicts.join('\n'),
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
+    }
+
+    return reviewedProposals
+  }
+
+  private async removeWorktree(
+    sessionId: string,
+    active = this.activeSessions.get(sessionId),
+  ): Promise<void> {
     await worktreeManager.remove(sessionId, active?.repoPath)
   }
 
@@ -276,16 +450,42 @@ export class SessionManager {
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
     this.activeSessions.delete(sessionId)
+    this.processWarningsBySession.delete(sessionId)
   }
 }
 
 export const sessionManager = new SessionManager()
 
+function processWarningActivityKey(event: AgentEvent): string | null {
+  if (event.type !== 'activity') return null
+  if (!isProcessWarningPayload(event.payload)) return null
+
+  return processWarningKey(event.payload.detail)
+}
+
 function completionStatus(event: AgentEvent): SessionStatus {
   const payload = objectPayload(event.payload)
-  const exitCode = readNumber(payload, 'exitCode')
+  const status = readSessionStatus(payload, 'status')
+  if (status && terminalSessionStatuses.has(status)) return status
 
-  return exitCode !== undefined && exitCode !== 0 ? 'error' : 'done'
+  const exitCode = readNumber(payload, 'exitCode')
+  const signal = payload.signal
+
+  if (exitCode !== undefined && exitCode !== 0) return 'error'
+  if (typeof signal === 'string' && signal.trim()) return 'cancelled'
+
+  return 'done'
+}
+
+function withCompletionStatus(event: AgentEvent, status: SessionStatus): AgentEvent {
+  const payload = objectPayload(event.payload)
+  return {
+    ...event,
+    payload:
+      Object.keys(payload).length > 0
+        ? { ...payload, status }
+        : { status, value: event.payload },
+  }
 }
 
 function broadcastToRenderer(event: AgentEvent): void {
@@ -301,6 +501,25 @@ function broadcastToRenderer(event: AgentEvent): void {
     }
   } catch {
     // Unit tests and non-Electron contexts can provide an explicit broadcaster.
+  }
+}
+
+function broadcastThreadUpdated(thread: Thread): void {
+  try {
+    const electron = require('electron') as {
+      BrowserWindow?: {
+        getAllWindows(): Array<{
+          webContents: { send(channel: string, payload: ThreadUpdatedEvent): void }
+        }>
+      }
+    }
+
+    const payload: ThreadUpdatedEvent = { threadId: thread.id, thread }
+    for (const win of electron.BrowserWindow?.getAllWindows() ?? []) {
+      win.webContents.send('thread:updated', payload)
+    }
+  } catch {
+    // Unit tests and non-Electron contexts: silently noop.
   }
 }
 
@@ -346,6 +565,83 @@ function readNumber(object: Record<string, unknown>, key: string): number | unde
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function readSessionStatus(
+  object: Record<string, unknown>,
+  key: string,
+): SessionStatus | undefined {
+  const value = object[key]
+  return typeof value === 'string' && isSessionStatus(value) ? value : undefined
+}
+
+function isSessionStatus(value: string): value is SessionStatus {
+  return (
+    value === 'running' ||
+    value === 'awaiting-approval' ||
+    value === 'done' ||
+    value === 'error' ||
+    value === 'cancelled'
+  )
+}
+
+function isProcessWarningPayload(payload: unknown): payload is {
+  kind: 'step'
+  title: 'Process warning'
+  detail: string
+} {
+  if (!payload || typeof payload !== 'object') return false
+
+  const record = payload as Record<string, unknown>
+  return (
+    record.kind === 'step' &&
+    record.title === 'Process warning' &&
+    typeof record.detail === 'string' &&
+    processWarningKey(record.detail).length > 0
+  )
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function buildAdapterContext(
+  baseContext: string | null | undefined,
+  transcript: ThreadTranscriptTurn[],
+): string | null | undefined {
+  const trimmedContext = baseContext?.trim()
+  const historyBlock = buildThreadHistoryBlock(transcript)
+
+  if (!historyBlock) return baseContext
+  if (!trimmedContext) return historyBlock
+
+  return `${trimmedContext}\n\n${historyBlock}`
+}
+
+function buildThreadHistoryBlock(transcript: ThreadTranscriptTurn[]): string | null {
+  const turns = transcript
+    .filter((turn) => turn.prompt.trim() || turn.assistantText?.trim())
+    .map((turn, index) => {
+      const parts = [
+        `Turn ${index + 1}`,
+        `User: ${truncateForContext(turn.prompt, THREAD_CONTEXT_PROMPT_CHARS)}`,
+      ]
+      const assistantText = turn.assistantText?.trim()
+      if (assistantText) {
+        parts.push(
+          `Assistant: ${truncateForContext(assistantText, THREAD_CONTEXT_ASSISTANT_CHARS)}`,
+        )
+      }
+
+      return parts.join('\n')
+    })
+
+  if (turns.length === 0) return null
+
+  return `Conversation history (same thread, oldest to newest):\n${turns.join('\n\n')}`
+}
+
+function truncateForContext(value: string, maxChars: number): string {
+  const trimmed = value.trim()
+  if (trimmed.length <= maxChars) return trimmed
+
+  return `${trimmed.slice(0, maxChars).trimEnd()}\n[truncated]`
 }

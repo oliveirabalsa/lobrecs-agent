@@ -11,6 +11,7 @@ export type SessionStatus =
 export interface Session {
   id: string
   projectId: string
+  threadId?: string
   agentId: AgentId
   model: string
   prompt: string
@@ -59,7 +60,7 @@ export type AgentActivity =
       changeType: 'added' | 'modified' | 'deleted'
       additions?: number
       deletions?: number
-      status: 'pending' | 'approved' | 'rejected' | 'conflict'
+      status: 'pending' | 'applied' | 'approved' | 'rejected' | 'conflict'
     }
   | {
       kind: 'approval'
@@ -81,6 +82,17 @@ export type AgentActivity =
       tokensOut?: number
       costUsd?: number
     }
+  | {
+      kind: 'compaction'
+      at: number
+    }
+  | {
+      kind: 'plan-prompt'
+      promptId: string
+      title: string
+      options: Array<{ id: string; label: string }>
+      allowFreeText?: boolean
+    }
 
 export interface AgentEvent {
   type:
@@ -100,4 +112,19 @@ export interface SessionForkPayload {
   prompt: string
   agentId: AgentId
   model: string
+}
+
+export interface ThreadTranscriptTurn {
+  sessionId: string
+  threadId: string
+  prompt: string
+  assistantText?: string
+  status: SessionStatus
+  createdAt: number
+  completedAt?: number
+}
+
+export interface ListThreadTranscriptOptions {
+  limit?: number
+  excludeSessionId?: string
 }

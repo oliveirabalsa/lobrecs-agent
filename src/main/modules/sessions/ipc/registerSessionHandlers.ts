@@ -14,4 +14,7 @@ export function registerSessionHandlers(): void {
   ipcMain.handle('sessions:list-events', async (_event, sessionId: string) =>
     sessionsStore.listEvents(sessionId),
   )
+  ipcMain.handle('sessions:list-thread-transcript', async (_event, threadId: string, options) =>
+    sessionsStore.listThreadTranscript(threadId, options),
+  )
 }

@@ -22,10 +22,10 @@ describe('ModelRouter', () => {
     const router = new ModelRouter()
     const decision = await router.route({
       prompt: 'anything',
-      modelOverride: 'claude-opus-4-6',
+      modelOverride: 'claude-opus-4-7',
     })
 
-    expect(decision.model).toBe('claude-opus-4-6')
+    expect(decision.model).toBe('claude-opus-4-7')
     expect(decision.reasoning).toContain('Manual override')
   })
 
@@ -47,7 +47,43 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('codex')
-    expect(decision.model).toBe('gpt-5.2-codex')
+    expect(decision.model).toBe('gpt-5.3-codex-spark')
+  })
+
+  it('uses live Codex catalog models instead of stale static fallbacks', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: {
+        get(agentId) {
+          if (agentId !== 'codex') return { isInstalled: () => true }
+          return {
+            isInstalled: () => true,
+            listModels: async () => [
+              {
+                id: 'gpt-5.4-mini',
+                label: 'GPT-5.4 Mini',
+                agentId: 'codex',
+                tier: 'lightweight',
+                source: 'cli',
+              },
+              {
+                id: 'gpt-5.5',
+                label: 'GPT-5.5',
+                agentId: 'codex',
+                tier: 'frontier',
+                source: 'cli',
+              },
+            ],
+          }
+        },
+      },
+    })
+
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'codex',
+    })
+
+    expect(decision.model).toBe('gpt-5.4-mini')
   })
 
   it('falls back to claude-code when the preferred agent is unavailable', async () => {
@@ -60,6 +96,42 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('claude-code')
+  })
+
+  it('falls back to another installed adapter when preferred and default adapters are unavailable', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({
+        codex: false,
+        'claude-code': false,
+        opencode: true,
+      }),
+    })
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'codex',
+    })
+
+    expect(decision.agentId).toBe('opencode')
+    expect(decision.model).toBe('opencode/minimax-m2.5-free')
+  })
+
+  it('does not dispatch an unavailable adapter just because it has a manual override', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({
+        codex: false,
+        'claude-code': false,
+        opencode: true,
+      }),
+    })
+    const decision = await router.route({
+      prompt: 'fix complex routing bug',
+      preferredAgentId: 'codex',
+      modelOverride: 'gpt-5.5',
+    })
+
+    expect(decision.agentId).toBe('opencode')
+    expect(decision.model).toBe('minimax/MiniMax-M2.7')
+    expect(decision.reasoning).toContain('unavailable')
   })
 
   it('keeps frontier tasks off opencode when a stronger adapter is available', async () => {
@@ -96,6 +168,6 @@ describe('ModelRouter', () => {
 
     expect(decision.agentId).toBe('claude-code')
     expect(decision.tier).toBe('advanced')
-    expect(decision.model).toBe('claude-opus-4-6')
+    expect(decision.model).toBe('claude-opus-4-7')
   })
 })

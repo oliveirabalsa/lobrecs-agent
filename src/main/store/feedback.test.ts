@@ -78,7 +78,7 @@ function createSessions() {
   const newestFailure = sessionsStore.create({
     projectId: project.id,
     agentId: 'codex',
-    model: 'gpt-5.2-codex',
+    model: 'gpt-5.3-codex',
     prompt: 'newest failed task',
     createdAt: 3_000,
   })

@@ -22,7 +22,8 @@ that were not run.
 - Renderer code does not access Node.js, Electron main APIs, SQLite, `node-pty`,
   filesystem APIs, child processes, or shell execution directly.
 - Preload exposes narrow methods, not raw `ipcRenderer`.
-- Agent diffs require explicit user approval before touching disk.
+- Agent diffs should be applied automatically by the main process, with renderer
+  diffs used for review only.
 - Swarm agents operate in isolated worktrees.
 - IPC payloads and results are serializable and typed.
 - Paths, prompts, model ids, terminal output, and agent patches are treated as

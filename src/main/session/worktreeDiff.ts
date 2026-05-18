@@ -8,28 +8,26 @@ interface DiffStat {
   deletions: number
 }
 
+interface ChangedFile {
+  relativePath: string
+  changeType: 'added' | 'modified' | 'deleted'
+}
+
 export async function buildDiffProposals(
   worktreePath: string,
   targetRepoPath: string,
 ): Promise<DiffProposal[]> {
-  const [nameStatusOutput, numstatOutput] = await Promise.all([
-    execGit(worktreePath, ['diff', '--name-status', 'HEAD']).then((result) => result.stdout),
-    execGit(worktreePath, ['diff', '--numstat', 'HEAD']).then((result) => result.stdout),
+  const [statusOutput, numstatOutput] = await Promise.all([
+    execGit(worktreePath, ['status', '--porcelain=v1', '--untracked-files=all']).then(
+      (result) => result.stdout,
+    ),
+    execGit(worktreePath, ['diff', '--numstat', '-z', 'HEAD']).then((result) => result.stdout),
   ])
   const stats = parseNumstat(numstatOutput)
-  const changes = nameStatusOutput
-    .trim()
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
+  const changes = parseStatus(statusOutput)
 
   const proposals = await Promise.all(
-    changes.map(async (line): Promise<DiffProposal | null> => {
-      const [status, ...pathParts] = line.split(/\s+/)
-      const relativePath = pathParts.at(-1)
-      if (!relativePath) return null
-
-      const changeType = changeTypeFromStatus(status)
+    changes.map(async ({ relativePath, changeType }): Promise<DiffProposal | null> => {
       const originalContent =
         changeType === 'added' ? '' : await readHeadFile(worktreePath, relativePath)
       const proposedContent =
@@ -53,12 +51,34 @@ export async function buildDiffProposals(
   return proposals.filter((proposal): proposal is DiffProposal => proposal !== null)
 }
 
+function parseStatus(output: string): ChangedFile[] {
+  const seen = new Set<string>()
+  const changes: ChangedFile[] = []
+
+  for (const line of output.split('\n')) {
+    if (!line.trim()) continue
+
+    const status = line.slice(0, 2)
+    const relativePath = normalizeStatusPath(line.slice(3))
+    if (!relativePath || seen.has(relativePath)) continue
+
+    seen.add(relativePath)
+    changes.push({
+      relativePath,
+      changeType: changeTypeFromStatus(status),
+    })
+  }
+
+  return changes
+}
+
 function parseNumstat(output: string): Map<string, DiffStat> {
   const stats = new Map<string, DiffStat>()
 
-  for (const line of output.trim().split('\n')) {
-    const [added, deleted, ...pathParts] = line.trim().split(/\s+/)
-    const relativePath = pathParts.at(-1)
+  for (const record of output.split('\0')) {
+    if (!record.trim()) continue
+
+    const [added, deleted, relativePath] = record.split('\t')
     if (!relativePath) continue
 
     stats.set(relativePath, {
@@ -70,9 +90,24 @@ function parseNumstat(output: string): Map<string, DiffStat> {
   return stats
 }
 
+function normalizeStatusPath(value: string): string {
+  const rawPath = value.includes(' -> ') ? value.slice(value.lastIndexOf(' -> ') + 4) : value
+  return unquoteGitPath(rawPath.trim())
+}
+
+function unquoteGitPath(value: string): string {
+  if (!value.startsWith('"') || !value.endsWith('"')) return value
+
+  try {
+    return JSON.parse(value) as string
+  } catch {
+    return value.slice(1, -1)
+  }
+}
+
 function changeTypeFromStatus(status: string | undefined): 'added' | 'modified' | 'deleted' {
-  if (status?.startsWith('A')) return 'added'
-  if (status?.startsWith('D')) return 'deleted'
+  if (status?.includes('?') || status?.includes('A')) return 'added'
+  if (status?.includes('D')) return 'deleted'
   return 'modified'
 }
 

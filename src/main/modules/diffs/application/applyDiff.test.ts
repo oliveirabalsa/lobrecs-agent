@@ -28,8 +28,48 @@ describe('applyDiffContent', () => {
     await fs.writeFile(filePath, 'user edit', 'utf-8')
 
     await expect(applyDiffContent(filePath, 'new', 'old')).rejects.toThrow(
-      'file changed since this diff was generated',
+      'could not be merged cleanly',
     )
     await expect(fs.readFile(filePath, 'utf-8')).resolves.toBe('user edit')
+  })
+
+  it('merges proposed changes onto the latest file when edits do not conflict', async () => {
+    await fs.writeFile(filePath, 'one\nuser edit\ntwo\nthree\n', 'utf-8')
+
+    await applyDiffContent(filePath, 'one\ntwo\nagent edit\nthree\n', 'one\ntwo\nthree\n')
+
+    await expect(fs.readFile(filePath, 'utf-8')).resolves.toBe(
+      'one\nuser edit\ntwo\nagent edit\nthree\n',
+    )
+  })
+
+  it('rejects stale deletions without removing latest local edits', async () => {
+    await fs.writeFile(filePath, 'old\nuser edit\n', 'utf-8')
+
+    await expect(applyDiffContent(filePath, '', 'old\n')).rejects.toThrow(
+      'file changed since this diff was generated',
+    )
+    await expect(fs.readFile(filePath, 'utf-8')).resolves.toBe('old\nuser edit\n')
+  })
+
+  it('treats already-applied diffs as successful', async () => {
+    await fs.writeFile(filePath, 'new', 'utf-8')
+
+    await expect(applyDiffContent(filePath, 'new', 'old')).resolves.toBeUndefined()
+    await expect(fs.readFile(filePath, 'utf-8')).resolves.toBe('new')
+  })
+
+  it('creates new files when the expected base is empty', async () => {
+    const newFilePath = path.join(dir, 'nested', 'new-file.ts')
+
+    await applyDiffContent(newFilePath, 'created', '')
+
+    await expect(fs.readFile(newFilePath, 'utf-8')).resolves.toBe('created')
+  })
+
+  it('deletes files when proposed content is empty', async () => {
+    await applyDiffContent(filePath, '', 'old')
+
+    await expect(fs.access(filePath)).rejects.toThrow()
   })
 })

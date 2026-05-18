@@ -16,6 +16,7 @@ describe('agent adapters', () => {
   afterEach(() => {
     delete process.env.CLAUDE_COMMAND
     delete process.env.CLAUDE_MOCK_RESULT_MODE
+    delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CODEX_COMMAND
     delete process.env.OPENCODE_COMMAND
     processPool.killAll()
@@ -37,26 +38,45 @@ describe('agent adapters', () => {
       sessionId: 'claude-session',
       prompt: 'Implement the task',
       repoPath: process.cwd(),
-      model: 'claude-sonnet-4-6',
+      model: 'opus',
       context: 'Always use rtk.',
     })
     const events = await collectEvents(session)
     const textDelta = events.find(
       (event) => payloadField(event, 'text') === 'Hello from Claude stream',
     )
+    const assistantText = events.find(
+      (event) => payloadField(event, 'text') === 'Hello from Claude mock\n',
+    )
     const rawLine = events.find((event) => payloadField(event, 'text') === 'raw claude line\n')
+    const toolCall = events.find(
+      (event) => payloadField(event, 'kind') === 'tool-call' && payloadField(event, 'name') === 'Read',
+    )
+    const toolResult = events.find(
+      (event) =>
+        payloadField(event, 'kind') === 'tool-result' &&
+        payloadField(event, 'output') === 'mock file output',
+    )
     const stderrText = events
       .filter((event) => event.type === 'stderr')
       .map((event) => payloadField(event, 'text'))
       .join('\n')
 
     expect(textDelta?.type).toBe('stdout')
+    expect(assistantText?.type).toBe('stdout')
     expect(events.some((event) => payloadField(event, 'output') === 'hook noise')).toBe(false)
     expect(events.some((event) => payloadField(event, 'thinking') === 'hidden thinking')).toBe(false)
     expect(stderrText).toContain('--output-format')
     expect(stderrText).toContain('stream-json')
+    expect(stderrText).toContain('--input-format')
+    expect(stderrText).toContain('--permission-mode')
+    expect(stderrText).toContain('bypassPermissions')
     expect(stderrText).toContain('--verbose')
+    expect(stderrText).toContain('--dangerously-skip-permissions')
+    expect(stderrText).toContain('claude-opus-4-7')
     expect(stderrText).toContain('Repository instructions:')
+    expect(toolCall).toMatchObject({ type: 'activity' })
+    expect(toolResult).toMatchObject({ type: 'activity' })
     expect(rawLine?.type).toBe('stdout')
     expect(events.some((event) => event.type === 'stderr')).toBe(true)
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
@@ -81,6 +101,28 @@ describe('agent adapters', () => {
     expect(payloadField(complete, 'exitCode')).toBe(1)
   })
 
+  it('filters Claude SessionEnd cwd-deleted hook warnings from stderr', async () => {
+    process.env.CLAUDE_COMMAND = claudeMock
+    process.env.CLAUDE_MOCK_SESSION_END_NOISE = '1'
+    const adapter = new ClaudeCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'claude-hook-noise-session',
+      prompt: 'Trigger hook noise',
+      repoPath: process.cwd(),
+      model: 'sonnet',
+    })
+    const events = await collectEvents(session)
+    const stderrText = events
+      .filter((event) => event.type === 'stderr')
+      .map((event) => payloadField(event, 'text'))
+      .join('\n')
+
+    expect(stderrText).toContain('claude warning')
+    expect(stderrText).not.toContain('SessionEnd hook')
+    expect(stderrText).not.toContain('current working directory was deleted')
+  })
+
   it('dispatches Codex and maps approval requests', async () => {
     process.env.CODEX_COMMAND = codexMock
     const adapter = new CodexAdapter()
@@ -91,22 +133,40 @@ describe('agent adapters', () => {
       sessionId: 'codex-session',
       prompt: 'Review the diff',
       repoPath: process.cwd(),
-      model: 'gpt-5.2-codex',
+      model: 'gpt-5.3-codex',
+      imageAttachments: [
+        {
+          filePath: '/tmp/mock-image.png',
+          name: 'mock-image.png',
+          mimeType: 'image/png',
+          size: 1024,
+        },
+      ],
     })
     const events = await collectEvents(session)
     const approval = events.find((event) => event.type === 'approval-request')
+    const stderrText = events
+      .filter((event) => event.type === 'stderr')
+      .map((event) => payloadField(event, 'text'))
+      .join('\n')
 
     expect(approval).toBeDefined()
     expect(payloadField(approval, 'argv')).toEqual(
       expect.arrayContaining([
         'exec',
         '--model',
-        'gpt-5.2-codex',
+        'gpt-5.3-codex',
+        '--image',
+        '/tmp/mock-image.png',
         '--dangerously-bypass-approvals-and-sandbox',
       ]),
     )
     expect(events.some((event) => payloadField(event, 'text') === 'plain codex output')).toBe(true)
-    expect(events.some((event) => event.type === 'stderr')).toBe(true)
+    expect(events.some((event) => payloadField(event, 'type') === 'item.started')).toBe(true)
+    expect(events.some((event) => payloadField(event, 'type') === 'item.completed')).toBe(true)
+    expect(stderrText).toBe('codex warning')
+    expect(stderrText).not.toContain('TokenRefreshFailed')
+    expect(stderrText).not.toContain('Reading additional input')
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 
@@ -146,7 +206,9 @@ async function collectEvents(session: AgentSession): Promise<AgentEvent[]> {
     events.push(event)
   })
 
-  await waitFor(() => processPool.get(session.sessionId) === undefined)
+  await waitFor(() =>
+    events.some((event) => event.type === 'session-complete' || event.type === 'error'),
+  )
   return events
 }
 

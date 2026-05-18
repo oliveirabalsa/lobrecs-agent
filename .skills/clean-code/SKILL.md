@@ -22,7 +22,8 @@ Lobrecs Agent.
 - Prefer module-owned services over adding more logic to large entry files.
 - Keep changes scoped to the requested behavior.
 - Do not store secrets anywhere persistent.
-- Keep explicit approval before applying agent-generated changes.
+- Keep completed agent diffs auto-applied by main-process services; renderer
+  diff views are review-only.
 - Add focused tests for changed behavior.
 
 ## Refactor Rules

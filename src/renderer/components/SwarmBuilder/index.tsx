@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentModelCatalog,
   SupportedAgentId,
@@ -7,6 +7,13 @@ import type {
   SwarmResult,
 } from '../../../shared/types'
 import { AgentRow } from './AgentRow'
+import {
+  buildDefaultSwarmAgents,
+  DEFAULT_SWARM_AGENT_IDS,
+  DEFAULT_SWARM_MODEL_CATALOGS,
+  normalizeSwarmAgents,
+  resolveAvailableSwarmAgents,
+} from './agentSelection'
 
 interface Props {
   open: boolean
@@ -20,18 +27,6 @@ interface Props {
 type Strategy = SwarmConfig['strategy']
 
 const MAX_AGENTS = 8
-const DEFAULT_AGENTS: SupportedAgentId[] = ['claude-code', 'codex', 'opencode']
-const DEFAULT_MODEL_CATALOGS: AgentModelCatalog[] = DEFAULT_AGENTS.map((agentId) => ({
-  agentId,
-  name:
-    agentId === 'claude-code'
-      ? 'Claude Code'
-      : agentId === 'codex'
-        ? 'OpenAI Codex'
-        : 'OpenCode',
-  installed: true,
-  models: [],
-}))
 
 const TEMPLATES: Array<{
   id: string
@@ -82,33 +77,37 @@ export function SwarmBuilder({
   open,
   projectId,
   initialPrompt = '',
-  installedAgents = DEFAULT_AGENTS,
+  installedAgents = DEFAULT_SWARM_AGENT_IDS,
   onClose,
   onSwarmStarted,
 }: Props) {
   const [strategy, setStrategy] = useState<Strategy>('parallel')
   const [prompt, setPrompt] = useState(initialPrompt)
-  const [agents, setAgents] = useState<SwarmAgentConfig[]>(() => [
-    { role: 'implementer', agentId: installedAgents[0] ?? 'claude-code' },
-    { role: 'reviewer', agentId: installedAgents[1] ?? installedAgents[0] ?? 'codex' },
-  ])
-  const [modelCatalogs, setModelCatalogs] = useState<AgentModelCatalog[]>(
-    DEFAULT_MODEL_CATALOGS,
+  const [agents, setAgents] = useState<SwarmAgentConfig[]>(() =>
+    buildDefaultSwarmAgents(installedAgents),
   )
+  const [modelCatalogs, setModelCatalogs] = useState<AgentModelCatalog[]>(
+    DEFAULT_SWARM_MODEL_CATALOGS,
+  )
+  const [modelCatalogsLoaded, setModelCatalogsLoaded] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const availableAgents = useMemo(() => {
-    const discovered = modelCatalogs
-      .filter((catalog) => catalog.installed)
-      .map((catalog) => catalog.agentId)
-
-    return discovered.length > 0 ? discovered : installedAgents
-  }, [installedAgents, modelCatalogs])
+  const autoManageAgentsRef = useRef(true)
+  const availableAgents = useMemo(
+    () =>
+      resolveAvailableSwarmAgents({
+        modelCatalogs,
+        fallbackAgents: installedAgents,
+        catalogsLoaded: modelCatalogsLoaded,
+      }),
+    [installedAgents, modelCatalogs, modelCatalogsLoaded],
+  )
 
   useEffect(() => {
     if (open) {
       setPrompt(initialPrompt)
       setError(null)
+      autoManageAgentsRef.current = true
     }
   }, [initialPrompt, open])
 
@@ -116,14 +115,21 @@ export function SwarmBuilder({
     if (!open) return
 
     let cancelled = false
+    setModelCatalogsLoaded(false)
 
     window.agentforge.system
       .listAgentModels()
       .then((catalogs) => {
-        if (!cancelled) setModelCatalogs(catalogs)
+        if (!cancelled) {
+          setModelCatalogs(catalogs)
+          setModelCatalogsLoaded(true)
+        }
       })
       .catch(() => {
-        if (!cancelled) setModelCatalogs(DEFAULT_MODEL_CATALOGS)
+        if (!cancelled) {
+          setModelCatalogs(DEFAULT_SWARM_MODEL_CATALOGS)
+          setModelCatalogsLoaded(false)
+        }
       })
 
     return () => {
@@ -135,11 +141,9 @@ export function SwarmBuilder({
     if (!open || availableAgents.length === 0) return
 
     setAgents((current) =>
-      current.map((agent) =>
-        availableAgents.includes(agent.agentId)
-          ? agent
-          : { ...agent, agentId: availableAgents[0], modelOverride: undefined },
-      ),
+      autoManageAgentsRef.current
+        ? buildDefaultSwarmAgents(availableAgents)
+        : normalizeSwarmAgents(current, availableAgents),
     )
   }, [availableAgents, open])
 
@@ -162,7 +166,9 @@ export function SwarmBuilder({
   })
 
   const costEstimate = useMemo(() => estimateCost(agents), [agents])
-  const canLaunch = Boolean(projectId && prompt.trim() && agents.length > 0 && !launching)
+  const canLaunch = Boolean(
+    projectId && prompt.trim() && agents.length > 0 && availableAgents.length > 0 && !launching,
+  )
 
   if (!open) return null
 
@@ -241,8 +247,13 @@ export function SwarmBuilder({
                   type="button"
                   className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900"
                   onClick={() => {
+                    autoManageAgentsRef.current = false
                     setStrategy(template.strategy)
-                    setAgents(normalizeAgents(template.agents, availableAgents))
+                    setAgents(
+                      normalizeSwarmAgents(template.agents, availableAgents, {
+                        spreadDuplicates: true,
+                      }),
+                    )
                   }}
                 >
                   {template.label}
@@ -258,15 +269,21 @@ export function SwarmBuilder({
                 <button
                   type="button"
                   className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={agents.length >= MAX_AGENTS}
+                  disabled={agents.length >= MAX_AGENTS || availableAgents.length === 0}
                   onClick={() =>
-                    setAgents((current) => [
-                      ...current,
-                      {
-                        role: `agent ${current.length + 1}`,
-                        agentId: availableAgents[0] ?? 'claude-code',
-                      },
-                    ])
+                    setAgents((current) => {
+                      autoManageAgentsRef.current = false
+
+                      return [
+                        ...current,
+                        {
+                          role: `agent ${current.length + 1}`,
+                          agentId:
+                            availableAgents[current.length % availableAgents.length] ??
+                            'claude-code',
+                        },
+                      ]
+                    })
                   }
                 >
                   + Add agent
@@ -283,14 +300,20 @@ export function SwarmBuilder({
                     sequential={strategy === 'sequential'}
                     removable={agents.length > 1}
                     onChange={(nextAgent) =>
-                      setAgents((current) =>
-                        current.map((item, itemIndex) =>
+                      setAgents((current) => {
+                        autoManageAgentsRef.current = false
+
+                        return current.map((item, itemIndex) =>
                           itemIndex === index ? nextAgent : item,
-                        ),
-                      )
+                        )
+                      })
                     }
                     onRemove={() =>
-                      setAgents((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                      setAgents((current) => {
+                        autoManageAgentsRef.current = false
+
+                        return current.filter((_, itemIndex) => itemIndex !== index)
+                      })
                     }
                   />
                 ))}
@@ -325,19 +348,6 @@ export function SwarmBuilder({
         </footer>
       </section>
     </div>
-  )
-}
-
-function normalizeAgents(
-  agents: SwarmAgentConfig[],
-  availableAgents: SupportedAgentId[],
-): SwarmAgentConfig[] {
-  if (availableAgents.length === 0) return agents
-
-  return agents.map((agent) =>
-    availableAgents.includes(agent.agentId)
-      ? agent
-      : { ...agent, agentId: availableAgents[0], modelOverride: undefined },
   )
 }
 

@@ -19,7 +19,7 @@ orchestrates swarms across isolated worktrees.
 
 - Never store API keys in code, local storage, or SQLite.
 - Renderer access to Node.js must go through `src/preload/index.ts`.
-- Require explicit user approval before applying any agent diff to disk.
+- Apply completed agent diffs automatically; use the diff UI only for review.
 - Use Conventional Commits: `feat(scope): msg` or `fix(scope): msg`.
 - Prefix local shell commands with `rtk`.
 
@@ -57,3 +57,39 @@ orchestrates swarms across isolated worktrees.
 - Tests live next to source as `*.test.ts`.
 - Shared cross-process types currently live in `src/shared/types.ts`; split them
   into feature contracts during the modular architecture refactor.
+
+## Renderer shell (post-refactor)
+
+The renderer was rebuilt as a Codex-style chat IDE during the M0–M8 refactor.
+Top-level layout:
+
+- `src/renderer/app/RendererApp.tsx` — owns the resizable 2-pane shell
+  (`Sidebar` + `WorkspaceView`) and Cmd+T / Cmd+W shortcuts.
+- `src/renderer/components/Sidebar/` — project tree with collapsible threads,
+  traffic-light-safe top zone, back/forward history arrows, and the new-chat
+  action. Thread data comes from `window.agentforge.threads.list(projectId)`
+  and stays live via `thread:updated` + per-session events.
+- `src/renderer/modules/workspace/views/WorkspaceView.tsx` — top bar
+  (`WorkspaceTopBar`), main-view tabs (workspace / costs / automations),
+  the active session column (`RunWorkspace`), and the toggleable right
+  panel (`DiffViewer` / `TerminalPanel`). State for the right panel is
+  persisted to `localStorage`.
+- `src/renderer/modules/workspace/components/MessageStream.tsx` +
+  `groupTurns()` — turn-based message timeline rendered with
+  `UserMessage`, `AssistantMessage`, and `WorkingState`.
+- `src/renderer/modules/workspace/components/artifacts/` — turn artifacts:
+  `RanCommandsPill`, `CommandPreview`, `EditedFilesCard` / `FileChangeRow`,
+  `Callout`, `ApprovalRequestPill`, `CompletionFooter`.
+- `src/renderer/modules/workspace/components/Composer/` — replaces the
+  legacy `TaskInput`. Autosizing textarea, attach/approval-mode chips, a
+  model-picker popover, and a circle send button that toggles to stop.
+- `src/renderer/modules/workspace/components/modals/PlanPromptModal.tsx` —
+  Radix `Dialog` for the `askPlanPrompt` round trip wired through
+  `agent:plan-decision`.
+- `src/renderer/components/ui/` — design tokens + primitives (`Button`,
+  `Pill`, `Card`, `Divider`, `Spinner`, `Modal`).
+
+Deprecated `TaskInput/`, `HistoryPanel/`, `TabBar/` directories and the
+`src/renderer/store/tabs.tsx` shim were removed in M8. Tabs state still lives
+at `src/renderer/modules/sessions/state/tabs.tsx` since the workspace
+controller uses it internally for session bookkeeping.

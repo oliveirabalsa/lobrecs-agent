@@ -8,13 +8,46 @@ import type {
 } from '../../../../shared/types'
 import {
   isSessionStatus,
-  removeProposal,
   useTabs,
   type ActiveSessionMeta,
   type StartedSessionSummary,
 } from '../../sessions'
 
 export type MainView = 'workspace' | 'costs' | 'automations'
+
+const ACTIVE_THREAD_KEY_PREFIX = 'activeThread:'
+
+function safeLocalStorage(): Storage | null {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readActiveThread(projectId: string): string | null {
+  const ls = safeLocalStorage()
+  if (!ls) return null
+  return ls.getItem(`${ACTIVE_THREAD_KEY_PREFIX}${projectId}`)
+}
+
+function writeActiveThread(projectId: string, threadId: string | null): void {
+  const ls = safeLocalStorage()
+  if (!ls) return
+  const key = `${ACTIVE_THREAD_KEY_PREFIX}${projectId}`
+  if (threadId) ls.setItem(key, threadId)
+  else ls.removeItem(key)
+}
+
+function toStartedSessionAgentId(
+  agentId: Project['agentId'] | undefined,
+): StartedSessionSummary['agentId'] {
+  if (agentId === 'claude-code' || agentId === 'codex' || agentId === 'opencode') {
+    return agentId
+  }
+  return undefined
+}
 
 export function useWorkspaceController() {
   const tabs = useTabs()
@@ -28,6 +61,19 @@ export function useWorkspaceController() {
   const [swarmOpen, setSwarmOpen] = useState(false)
 
   const activeSessionId = activeSession?.id ?? null
+  const activeThreadId = activeSession?.threadId ?? null
+
+  const clearActiveThread = useCallback(
+    (projectId?: string) => {
+      const targetProjectId = projectId ?? selectedProject?.id
+      if (targetProjectId) writeActiveThread(targetProjectId, null)
+      setActiveSession(null)
+      setDiffProposals([])
+      setApprovalRequest(null)
+      setBannerError(null)
+    },
+    [selectedProject?.id],
+  )
 
   useEffect(() => {
     const unsubscribeSwarm = window.agentforge.onShortcut('shortcut:swarm', () => {
@@ -51,23 +97,32 @@ export function useWorkspaceController() {
     }
   }, [selectedProject, tabs])
 
+  useEffect(() => {
+    const unsubscribe = window.agentforge.threads.onDeleted((event) => {
+      if (readActiveThread(event.projectId) === event.threadId) {
+        writeActiveThread(event.projectId, null)
+      }
+      if (activeThreadId !== event.threadId) return
+      clearActiveThread(event.projectId)
+    })
+
+    return unsubscribe
+  }, [activeThreadId, clearActiveThread])
+
   const isBusy = useMemo(() => {
     if (!activeSession) return false
     return activeSession.status === 'running' || activeSession.status === 'awaiting-approval'
   }, [activeSession])
 
   const busyReason = useMemo(() => {
-    if (diffProposals.length > 0) return 'Resolve the pending diff before starting another task'
     if (approvalRequest) return 'Respond to the pending approval before starting another task'
     if (isBusy) return 'Current session is still running'
     return undefined
-  }, [approvalRequest, diffProposals.length, isBusy])
+  }, [approvalRequest, isBusy])
 
   function handleSelectedProjectDeleted() {
     setSelectedProject(null)
-    setActiveSession(null)
-    setDiffProposals([])
-    setApprovalRequest(null)
+    clearActiveThread()
   }
 
   function handleProjectSelect(project: Project) {
@@ -78,20 +133,44 @@ export function useWorkspaceController() {
     setApprovalRequest(null)
     setBannerError(null)
     setMainView('workspace')
+
+    // Restore the previously active thread for this project, if any.
+    const restoredId = readActiveThread(project.id)
+    if (!restoredId) return
+    void window.agentforge.threads
+      .get(restoredId)
+      .then(async (thread) => {
+        if (!thread || thread.projectId !== project.id || !thread.lastSessionId) {
+          writeActiveThread(project.id, null)
+          return
+        }
+        const session = await window.agentforge.sessions.get(thread.lastSessionId)
+        if (!session || session.projectId !== project.id) {
+          writeActiveThread(project.id, null)
+          return
+        }
+        handleOpenSession(session, project)
+      })
+      .catch(() => {
+        writeActiveThread(project.id, null)
+      })
   }
 
   function handleSessionStarted(summary: StartedSessionSummary) {
     setActiveSession({
       id: summary.sessionId,
+      threadId: summary.threadId,
       prompt: summary.prompt,
       status: 'running',
       routingDecision: summary.routingDecision,
       agentId: summary.agentId,
       modelOverride: summary.modelOverride,
+      createdAt: summary.createdAt ?? Date.now(),
     })
     setDiffProposals([])
     setApprovalRequest(null)
     setBannerError(null)
+    if (selectedProject) writeActiveThread(selectedProject.id, summary.threadId)
     tabs.addTab({
       sessionId: summary.sessionId,
       projectId: selectedProject?.id ?? '',
@@ -101,7 +180,7 @@ export function useWorkspaceController() {
         ? `${summary.agentId ?? 'agent'} / ${summary.modelOverride}`
         : summary.routingDecision?.model ?? 'auto',
       tier: summary.routingDecision?.tier ?? 'balanced',
-      createdAt: Date.now(),
+      createdAt: summary.createdAt ?? Date.now(),
     })
   }
 
@@ -115,9 +194,19 @@ export function useWorkspaceController() {
     [activeSessionId, tabs],
   )
 
-  const handleApprovalRequest = useCallback((request: ApprovalRequest | null) => {
-    setApprovalRequest(request)
-  }, [])
+  const handleApprovalRequest = useCallback(
+    (request: ApprovalRequest | null) => {
+      setApprovalRequest(request)
+    },
+    [],
+  )
+
+  const handleDiffProposals = useCallback(
+    (proposals: DiffProposal[]) => {
+      setDiffProposals(proposals)
+    },
+    [],
+  )
 
   async function handleApproveApproval() {
     if (!activeSessionId) return
@@ -143,38 +232,34 @@ export function useWorkspaceController() {
     }
   }
 
-  async function handleApproveDiff(filePath: string) {
-    const proposal = diffProposals.find((item) => item.filePath === filePath)
-    if (!proposal) return
-
-    await handleApplyDiff(filePath, proposal.proposedContent)
-  }
-
-  async function handleApplyDiff(filePath: string, content: string) {
-    const proposal = diffProposals.find((item) => item.filePath === filePath)
+  async function handleRerunActiveSession(): Promise<StartedSessionSummary | null> {
+    const prompt = activeSession?.prompt.trim()
+    if (!selectedProject || !activeSession || !prompt) return null
+    if (isBusy || approvalRequest) return null
 
     try {
-      await window.agentforge.diff.apply(filePath, content, proposal?.originalContent)
-      if (activeSessionId) {
-        await window.agentforge.agent.approve(activeSessionId)
+      const createdAt = Date.now()
+      const result = await window.agentforge.agent.dispatch({
+        projectId: selectedProject.id,
+        prompt,
+        agentId: activeSession.agentId,
+        modelOverride: activeSession.modelOverride,
+        threadId: activeSession.threadId,
+      })
+      const summary: StartedSessionSummary = {
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt,
+        routingDecision: null,
+        agentId: toStartedSessionAgentId(activeSession.agentId),
+        modelOverride: activeSession.modelOverride,
+        createdAt,
       }
-      setDiffProposals((current) => removeProposal(current, filePath))
-      setBannerError(null)
+      handleSessionStarted(summary)
+      return summary
     } catch (error: unknown) {
-      setBannerError(error instanceof Error ? error.message : 'Failed to apply diff')
-    }
-  }
-
-  async function handleRejectDiff(filePath: string) {
-    try {
-      await window.agentforge.diff.reject()
-      if (activeSessionId) {
-        await window.agentforge.agent.reject(activeSessionId)
-      }
-      setDiffProposals((current) => removeProposal(current, filePath))
-      setBannerError(null)
-    } catch (error: unknown) {
-      setBannerError(error instanceof Error ? error.message : 'Failed to reject diff')
+      setBannerError(error instanceof Error ? error.message : 'Failed to rerun session')
+      return null
     }
   }
 
@@ -191,6 +276,21 @@ export function useWorkspaceController() {
     }
   }
 
+  async function handleDeleteActiveThread() {
+    const threadId = activeSession?.threadId
+    if (!threadId) return
+
+    try {
+      if (activeSessionId && isBusy) {
+        await window.agentforge.agent.cancel(activeSessionId).catch(() => undefined)
+      }
+      await window.agentforge.threads.delete(threadId)
+      clearActiveThread(selectedProject?.id)
+    } catch (error: unknown) {
+      setBannerError(error instanceof Error ? error.message : 'Failed to delete thread')
+    }
+  }
+
   async function handleForkSession(sessionId: string) {
     try {
       const fork = await window.agentforge.sessions.fork(sessionId)
@@ -202,22 +302,30 @@ export function useWorkspaceController() {
     }
   }
 
-  function handleOpenSession(session: Session) {
+  function handleOpenSession(session: Session, project?: Project) {
+    if (project && selectedProject?.id !== project.id) {
+      setSelectedProject(project)
+      tabs.resetTabs()
+    }
+
     setActiveSession({
       id: session.id,
+      threadId: session.threadId,
       prompt: session.prompt,
       status: session.status,
       routingDecision: null,
       agentId: session.agentId,
       modelOverride: session.model,
+      createdAt: session.createdAt,
     })
+    writeActiveThread(session.projectId, session.threadId ?? null)
     tabs.addTab({
       sessionId: session.id,
       projectId: session.projectId,
       prompt: session.prompt,
       status: session.status,
       model: session.model,
-      tier: selectedProject?.modelTier ?? 'balanced',
+      tier: project?.modelTier ?? selectedProject?.modelTier ?? 'balanced',
       createdAt: session.createdAt,
     })
     setMainView('workspace')
@@ -238,6 +346,7 @@ export function useWorkspaceController() {
       setActiveSession(null)
       setDiffProposals([])
       setApprovalRequest(null)
+      if (selectedProject) writeActiveThread(selectedProject.id, null)
     }
   }
 
@@ -253,6 +362,7 @@ export function useWorkspaceController() {
     swarmId: string
     sessions: Array<{
       sessionId: string
+      threadId?: string
       role: string
       status: string
       agentId?: Project['agentId']
@@ -277,11 +387,13 @@ export function useWorkspaceController() {
     if (first) {
       setActiveSession({
         id: first.sessionId,
+        threadId: first.threadId,
         prompt: `[${first.role}] swarm`,
         status: isSessionStatus(first.status) ? first.status : 'running',
         routingDecision: null,
         agentId: first.agentId,
         modelOverride: first.model ?? 'swarm',
+        createdAt: Date.now(),
       })
       setMainView('workspace')
     }
@@ -302,7 +414,7 @@ export function useWorkspaceController() {
 
   function handleNewTab() {
     setMainView('workspace')
-    setActiveSession(null)
+    clearActiveThread()
   }
 
   return {
@@ -310,6 +422,7 @@ export function useWorkspaceController() {
     selectedProject,
     activeSession,
     activeSessionId,
+    activeThreadId,
     diffProposals,
     approvalRequest,
     prefillPrompt,
@@ -319,6 +432,7 @@ export function useWorkspaceController() {
     isBusy,
     busyReason,
     setDiffProposals,
+    handleDiffProposals,
     setMainView,
     setSwarmOpen,
     handleSelectedProjectDeleted,
@@ -328,10 +442,9 @@ export function useWorkspaceController() {
     handleApprovalRequest,
     handleApproveApproval,
     handleRejectApproval,
-    handleApproveDiff,
-    handleApplyDiff,
-    handleRejectDiff,
+    handleRerunActiveSession,
     handleCancelSession,
+    handleDeleteActiveThread,
     handleForkSession,
     handleOpenSession,
     handleCloseTab,

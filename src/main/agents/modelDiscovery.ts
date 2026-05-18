@@ -11,10 +11,7 @@ const TIER_ORDER: ModelTier[] = ['lightweight', 'balanced', 'advanced', 'frontie
 const CLAUDE_FALLBACK_MODELS = [
   'claude-haiku-4-5-20251001',
   'claude-sonnet-4-6',
-  'claude-opus-4-6',
-  'haiku',
-  'sonnet',
-  'opus',
+  'claude-opus-4-7',
 ]
 
 export function fallbackModelsForAgent(agentId: SupportedAgentId): AgentModel[] {
@@ -89,12 +86,19 @@ export function createAgentModel(
 ): AgentModel {
   return {
     id,
-    label: overrides.label ?? id,
+    label: overrides.label ?? labelForModelId(id),
     agentId,
     tier: overrides.tier ?? inferModelTier(id, overrides.label),
     source,
     description: overrides.description,
   }
+}
+
+function labelForModelId(id: string): string {
+  if (id === 'opus') return 'opus (latest Opus, currently 4.7)'
+  if (id === 'sonnet') return 'sonnet (latest Sonnet)'
+  if (id === 'haiku') return 'haiku (latest Haiku)'
+  return id
 }
 
 export function dedupeModels(models: AgentModel[]): AgentModel[] {
@@ -134,6 +138,10 @@ export function inferModelTier(id: string, label = ''): ModelTier {
 
   if (normalized.includes('gpt-5.5') || normalized.includes('opus')) {
     return 'frontier'
+  }
+
+  if (normalized.includes('spark')) {
+    return 'lightweight'
   }
 
   if (normalized.includes('m2.7')) {

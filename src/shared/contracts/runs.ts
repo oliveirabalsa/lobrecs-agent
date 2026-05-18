@@ -6,6 +6,7 @@ export type RunMode = 'local' | 'worktree' | 'remote-placeholder'
 export type SpecRunStatus =
   | 'queued'
   | 'running'
+  | 'done'
   | 'reviewing'
   | 'verified'
   | 'failed'

@@ -1,12 +1,15 @@
-import { DiffEditor, type DiffOnMount, type MonacoDiffEditor } from '@monaco-editor/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { DiffEditor } from '@monaco-editor/react'
+import { useEffect, useState } from 'react'
 import type { DiffProposal } from '../../../shared/types'
 
 interface Props {
   proposals: DiffProposal[]
-  onApprove: (filePath: string) => void
-  onReject: (filePath: string) => void
-  onEditAndApprove: (filePath: string, newContent: string) => void
+  /**
+   * When provided, focuses the matching proposal in the tab strip whenever it
+   * changes. Used by the "Review" button in `<EditedFilesCard>` so clicking a
+   * specific file row jumps straight to that diff.
+   */
+  focusFilePath?: string | null
 }
 
 function fileName(filePath: string) {
@@ -37,9 +40,8 @@ function languageFromPath(filePath: string) {
   }
 }
 
-export function DiffViewer({ proposals, onApprove, onReject, onEditAndApprove }: Props) {
+export function DiffViewer({ proposals, focusFilePath }: Props) {
   const [selected, setSelected] = useState(0)
-  const editorRef = useRef<MonacoDiffEditor | null>(null)
   const current = proposals[selected] ?? proposals[0]
 
   useEffect(() => {
@@ -48,37 +50,20 @@ export function DiffViewer({ proposals, onApprove, onReject, onEditAndApprove }:
     }
   }, [proposals.length, selected])
 
-  const getModifiedContent = useCallback(() => {
-    return editorRef.current?.getModifiedEditor().getValue() ?? current?.proposedContent ?? ''
-  }, [current?.proposedContent])
-
-  const approveEdited = useCallback(() => {
-    if (!current) return
-    onEditAndApprove(current.filePath, getModifiedContent())
-  }, [current, getModifiedContent, onEditAndApprove])
-
+  // External focus request — e.g. clicking "Review" on a file row in the
+  // <EditedFilesCard> jumps to that tab in the diff strip.
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault()
-        approveEdited()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    const unsubscribe = window.agentforge.onShortcut('shortcut:approve', approveEdited)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      unsubscribe()
-    }
-  }, [approveEdited])
-
-  const handleMount: DiffOnMount = (editor) => {
-    editorRef.current = editor
-  }
+    if (!focusFilePath) return
+    const idx = proposals.findIndex((p) => p.filePath === focusFilePath)
+    if (idx >= 0) setSelected(idx)
+  }, [focusFilePath, proposals])
 
   if (!current) {
-    return null
+    return (
+      <div className="flex h-full items-center justify-center bg-zinc-950 text-sm text-zinc-500">
+        No code changes to review.
+      </div>
+    )
   }
 
   return (
@@ -101,6 +86,17 @@ export function DiffViewer({ proposals, onApprove, onReject, onEditAndApprove }:
             </button>
           ))}
         </div>
+        {current.status ? (
+          <span
+            className={`rounded-pill border px-2 py-0.5 text-[11px] capitalize ${
+              current.status === 'conflict'
+                ? 'border-red-700/70 bg-red-950/40 text-red-200'
+                : 'border-emerald-700/70 bg-emerald-950/30 text-emerald-200'
+            }`}
+          >
+            {current.status}
+          </span>
+        ) : null}
         <span className="px-3 text-xs text-zinc-500">
           {selected + 1} / {proposals.length} files
         </span>
@@ -120,9 +116,9 @@ export function DiffViewer({ proposals, onApprove, onReject, onEditAndApprove }:
           original={current.originalContent}
           modified={current.proposedContent}
           language={languageFromPath(current.filePath)}
-          onMount={handleMount}
           options={{
-            readOnly: false,
+            readOnly: true,
+            originalEditable: false,
             renderSideBySide: true,
             minimap: { enabled: false },
             fontSize: 12,
@@ -131,31 +127,6 @@ export function DiffViewer({ proposals, onApprove, onReject, onEditAndApprove }:
             automaticLayout: true,
           }}
         />
-      </div>
-
-      <div className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => onApprove(current.filePath)}
-          className="rounded-md border border-emerald-700 bg-emerald-950/50 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-900/70"
-        >
-          Accept proposed
-        </button>
-        <button
-          type="button"
-          onClick={approveEdited}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
-        >
-          Apply edited
-        </button>
-        <button
-          type="button"
-          onClick={() => onReject(current.filePath)}
-          className="rounded-md border border-red-800 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-950/70"
-        >
-          Reject
-        </button>
-        <span className="ml-auto text-xs text-zinc-500">Cmd+A applies edited content</span>
       </div>
     </div>
   )

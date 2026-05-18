@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentActivity,
   AgentEvent,
@@ -13,6 +13,17 @@ import {
   normalizeDiffPayload,
   textFromPayload,
 } from '../../../components/TerminalPanel/events'
+import {
+  isClaudeSessionEndCwdDeletedWarning,
+  processWarningKey,
+} from '../../../../shared/contracts/agentOutput'
+
+export type PlanPromptActivity = Extract<AgentActivity, { kind: 'plan-prompt' }>
+
+interface TimedActivity {
+  activity: AgentActivity
+  at: number
+}
 
 interface UseSessionEventsOptions {
   onApprovalRequest?: (request: ApprovalRequest | null) => void
@@ -24,10 +35,21 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
   const [events, setEvents] = useState<AgentEvent[]>([])
   const [loading, setLoading] = useState(false)
   const optionsRef = useRef(options)
+  // Bumped whenever a promptId is resolved so the memoized derivation re-runs.
+  const [resolvedPromptVersion, setResolvedPromptVersion] = useState(0)
+  // Resolved set lives in a ref so updates don't cause a render of their own —
+  // the version bump above is what triggers the recompute when needed.
+  const resolvedPromptIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     optionsRef.current = options
   }, [options])
+
+  // Reset the resolved set when switching sessions.
+  useEffect(() => {
+    resolvedPromptIdsRef.current = new Set()
+    setResolvedPromptVersion((v) => v + 1)
+  }, [sessionId])
 
   useEffect(() => {
     setEvents([])
@@ -65,9 +87,64 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     }
   }, [sessionId])
 
-  const activities = useMemo(() => events.flatMap(activityFromEvent), [events])
+  const timedActivities = useMemo(
+    () => timedActivitiesFromEvents(events),
+    [events],
+  )
+  const activities = useMemo(
+    () => timedActivities.map(({ activity }) => activity),
+    [timedActivities],
+  )
+  const activityTimes = useMemo(
+    () => timedActivities.map(({ at }) => at),
+    [timedActivities],
+  )
 
-  return { events, activities, loading }
+  const pendingPlanPrompt = useMemo<PlanPromptActivity | null>(() => {
+    // Search from the end so the latest unresolved prompt wins.
+    for (let i = activities.length - 1; i >= 0; i -= 1) {
+      const activity = activities[i]
+      if (activity.kind !== 'plan-prompt') continue
+      if (resolvedPromptIdsRef.current.has(activity.promptId)) continue
+      return activity
+    }
+    return null
+    // resolvedPromptVersion is part of the dependency list so the memo
+    // refreshes when the resolved set mutates.
+  }, [activities, resolvedPromptVersion])
+
+  const resolvePlanPrompt = useCallback((promptId: string) => {
+    if (resolvedPromptIdsRef.current.has(promptId)) return
+    resolvedPromptIdsRef.current.add(promptId)
+    setResolvedPromptVersion((v) => v + 1)
+  }, [])
+
+  return {
+    events,
+    activities,
+    activityTimes,
+    loading,
+    pendingPlanPrompt,
+    resolvePlanPrompt,
+  }
+}
+
+export function deriveSessionActivities(events: readonly AgentEvent[]): AgentActivity[] {
+  return timedActivitiesFromEvents(events).map(({ activity }) => activity)
+}
+
+function timedActivitiesFromEvents(events: readonly AgentEvent[]): TimedActivity[] {
+  const explicitProcessWarnings = collectExplicitProcessWarnings(events)
+  const seenProcessWarnings = new Set<string>()
+
+  return events.flatMap((event) =>
+    timedActivitiesFromEvent(event, { explicitProcessWarnings, seenProcessWarnings }),
+  )
+}
+
+type ProcessWarningState = {
+  explicitProcessWarnings: ReadonlySet<string>
+  seenProcessWarnings: Set<string>
 }
 
 function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
@@ -97,23 +174,30 @@ function applySessionState(event: AgentEvent, options: UseSessionEventsOptions):
   }
 }
 
-function activityFromEvent(event: AgentEvent): AgentActivity[] {
+function activityFromEvent(
+  event: AgentEvent,
+  warningState: ProcessWarningState,
+): AgentActivity[] {
   if (event.type === 'activity' && isAgentActivity(event.payload)) {
+    if (shouldSuppressProcessWarningActivity(event.payload, warningState)) return []
+
     return [event.payload]
   }
 
-  if (event.type === 'stdout') {
-    const text = textFromPayload(event.payload)
-    return text.trim()
-      ? [{ kind: 'message', role: 'assistant', text, stream: true }]
-      : []
-  }
+  if (event.type === 'stdout') return []
 
   if (event.type === 'stderr') {
     const text = textFromPayload(event.payload)
-    return text.trim()
-      ? [{ kind: 'step', title: 'Process warning', detail: text.trim(), status: 'error' }]
-      : []
+    const detail = text.trim()
+    if (!detail) return []
+    if (isClaudeSessionEndCwdDeletedWarning(detail)) return []
+
+    const key = processWarningKey(detail)
+    if (warningState.explicitProcessWarnings.has(key)) return []
+    if (warningState.seenProcessWarnings.has(key)) return []
+
+    warningState.seenProcessWarnings.add(key)
+    return [{ kind: 'step', title: 'Process warning', detail, status: 'error' }]
   }
 
   if (event.type === 'approval-request') {
@@ -121,7 +205,7 @@ function activityFromEvent(event: AgentEvent): AgentActivity[] {
   }
 
   if (event.type === 'diff') {
-    return [{ kind: 'step', title: 'Code changes ready for review', status: 'pending' }]
+    return [{ kind: 'step', title: 'Code changes applied', status: 'done' }]
   }
 
   if (event.type === 'session-complete') {
@@ -148,6 +232,61 @@ function activityFromEvent(event: AgentEvent): AgentActivity[] {
   }
 
   return []
+}
+
+function timedActivitiesFromEvent(
+  event: AgentEvent,
+  warningState: ProcessWarningState,
+): TimedActivity[] {
+  return activityFromEvent(event, warningState).map((activity, index) => ({
+    activity,
+    at: event.timestamp + index,
+  }))
+}
+
+function collectExplicitProcessWarnings(events: readonly AgentEvent[]): Set<string> {
+  const warnings = new Set<string>()
+
+  for (const event of events) {
+    if (event.type !== 'activity' || !isAgentActivity(event.payload)) continue
+
+    const key = processWarningActivityKey(event.payload)
+    if (key) warnings.add(key)
+  }
+
+  return warnings
+}
+
+function shouldSuppressProcessWarningActivity(
+  activity: AgentActivity,
+  warningState: ProcessWarningState,
+): boolean {
+  if (isClaudeProcessWarningActivity(activity)) return true
+
+  const key = processWarningActivityKey(activity)
+  if (!key) return false
+  if (warningState.seenProcessWarnings.has(key)) return true
+
+  warningState.seenProcessWarnings.add(key)
+  return false
+}
+
+function processWarningActivityKey(activity: AgentActivity): string | null {
+  if (activity.kind !== 'step') return null
+  if (activity.title !== 'Process warning') return null
+  if (!activity.detail) return null
+
+  const key = processWarningKey(activity.detail)
+  return key || null
+}
+
+function isClaudeProcessWarningActivity(activity: AgentActivity): boolean {
+  return (
+    activity.kind === 'step' &&
+    activity.title === 'Process warning' &&
+    typeof activity.detail === 'string' &&
+    isClaudeSessionEndCwdDeletedWarning(activity.detail)
+  )
 }
 
 function isAgentActivity(payload: unknown): payload is AgentActivity {

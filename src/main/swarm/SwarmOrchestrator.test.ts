@@ -25,8 +25,67 @@ describe('SwarmOrchestrator', () => {
     expect(result.sessions).toHaveLength(2)
     expect(worktrees.create).toHaveBeenCalledTimes(2)
     expect(dispatched.map((call) => call.repoPath)).toEqual(['/tmp/worktree-1', '/tmp/worktree-2'])
+    expect(dispatched.map((call) => call.agentId)).toEqual(['claude-code', 'codex'])
+    expect(dispatched.map((call) => call.model)).toEqual([
+      'claude-sonnet-4-6',
+      'gpt-5.3-codex',
+    ])
     expect(dispatched[0].prompt).toContain('[Role: analyzer]')
     expect(dispatched[1].prompt).toContain('Check implementation quality')
+  })
+
+  it('routes each swarm role with its configured adapter and model hint', async () => {
+    const worktrees = createFakeWorktrees()
+    const dispatched: SwarmDispatchInput[] = []
+    const routeInputs: Array<{ preferredAgentId: string; modelOverride?: string }> = []
+    const orchestrator = new SwarmOrchestrator({
+      getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      routeModel: async (input) => {
+        routeInputs.push({
+          preferredAgentId: input.preferredAgentId,
+          modelOverride: input.modelOverride,
+        })
+
+        return {
+          agentId: input.preferredAgentId,
+          model: input.modelOverride ?? `auto-${input.preferredAgentId}`,
+        }
+      },
+      dispatchSession: async (input) => {
+        dispatched.push(input)
+        return { sessionId: input.sessionId, status: 'running' }
+      },
+      worktrees,
+    })
+
+    await orchestrator.spawn({
+      projectId: 'project-1',
+      prompt: 'Improve the codebase',
+      strategy: 'parallel',
+      agents: [
+        { role: 'planner', agentId: 'claude-code' },
+        { role: 'implementer', agentId: 'codex', modelOverride: 'gpt-5.3-codex' },
+        { role: 'reviewer', agentId: 'opencode' },
+      ],
+    })
+
+    expect(routeInputs).toEqual([
+      { preferredAgentId: 'claude-code', modelOverride: undefined },
+      { preferredAgentId: 'codex', modelOverride: 'gpt-5.3-codex' },
+      { preferredAgentId: 'opencode', modelOverride: undefined },
+    ])
+    expect(dispatched.map((call) => call.agentId)).toEqual([
+      'claude-code',
+      'codex',
+      'opencode',
+    ])
+    expect(dispatched.map((call) => call.model)).toEqual([
+      'auto-claude-code',
+      'gpt-5.3-codex',
+      'auto-opencode',
+    ])
+    expect(new Set(dispatched.map((call) => call.agentId)).size).toBe(3)
+    expect(worktrees.create).toHaveBeenCalledTimes(3)
   })
 
   it('feeds sequential output into the next agent prompt', async () => {
@@ -34,7 +93,7 @@ describe('SwarmOrchestrator', () => {
     const dispatched: SwarmDispatchInput[] = []
     const orchestrator = new SwarmOrchestrator({
       getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
-      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'gpt-5.2-codex' }),
+      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'gpt-5.3-codex' }),
       dispatchSession: (input) => {
         dispatched.push(input)
         return { sessionId: input.sessionId, status: 'running', output: `output from ${input.role}` }
@@ -83,7 +142,7 @@ function baseConfig(): SwarmConfig {
       {
         role: 'reviewer',
         agentId: 'codex',
-        modelOverride: 'gpt-5.2-codex',
+        modelOverride: 'gpt-5.3-codex',
         promptSuffix: 'Check implementation quality',
       },
     ],

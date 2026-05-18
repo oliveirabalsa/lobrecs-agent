@@ -28,6 +28,7 @@ export interface ModelRouterOptions {
 export interface RouteParams {
   prompt: string
   preferredAgentId?: AgentId | string
+  requiresImageSupport?: boolean
   modelOverride?: string
   recentFailures?: ScoringContext['recentFailures']
 }
@@ -47,15 +48,44 @@ export class ModelRouter {
   }
 
   async route(params: RouteParams): Promise<RoutingDecision> {
+    const imageSupportRequired = params.requiresImageSupport ?? false
     if (params.modelOverride) {
-      const agentId = this.normalizeAgentId(params.preferredAgentId) ?? this.defaultAgentId
+      const requestedAgentId = this.normalizeAgentId(params.preferredAgentId) ?? this.defaultAgentId
+      let agentId = requestedAgentId
+
+      if (imageSupportRequired && !this.supportsImages(agentId)) {
+        throw new Error('Manual image-capable model required')
+      }
+
+      if (!(await this.isAgentAvailable(agentId))) {
+        agentId = imageSupportRequired
+          ? await this.firstAvailableImageAwareAgent()
+          : await this.firstAvailableAgent([
+              this.fallbackAgentId,
+              this.defaultAgentId,
+              ...SUPPORTED_AGENT_IDS,
+            ])
+      }
+
+      if (imageSupportRequired && !this.supportsImages(agentId)) {
+        throw new Error('Manual image-capable model required')
+      }
+
+      const tier = modelTierFromModel(params.modelOverride)
+      const model =
+        agentId === requestedAgentId
+          ? params.modelOverride
+          : await this.resolveModelForTier(agentId, tier)
 
       return {
         agentId,
-        model: params.modelOverride,
-        tier: modelTierFromModel(params.modelOverride),
+        model,
+        tier,
         score: -1,
-        reasoning: 'Manual override',
+        reasoning:
+          model === params.modelOverride
+            ? 'Manual override'
+            : 'Manual override agent unavailable; routed to available adapter',
       }
     }
 
@@ -64,12 +94,20 @@ export class ModelRouter {
     })
     let agentId = this.normalizeAgentId(params.preferredAgentId) ?? this.defaultAgentId
 
+    if (imageSupportRequired && !this.supportsImages(agentId)) {
+      agentId = await this.firstAvailableImageAwareAgent()
+    }
+
     if (!(await this.isAgentAvailable(agentId))) {
-      agentId = await this.firstAvailableAgent([this.fallbackAgentId, this.defaultAgentId])
+      agentId = await this.firstAvailableAgent([
+        this.fallbackAgentId,
+        this.defaultAgentId,
+        ...SUPPORTED_AGENT_IDS,
+      ])
     }
 
     if (scoring.tier === 'frontier' && agentId === 'opencode') {
-      agentId = await this.firstAvailableAgent(['claude-code', 'codex'])
+      agentId = await this.firstAvailableAgent(['claude-code', 'codex', ...SUPPORTED_AGENT_IDS])
     }
 
     return {
@@ -79,6 +117,10 @@ export class ModelRouter {
       score: scoring.score,
       reasoning: scoring.reasoning,
     }
+  }
+
+  private supportsImages(agentId: SupportedAgentId): boolean {
+    return agentId === 'claude-code' || agentId === 'codex'
   }
 
   private normalizeAgentId(agentId?: AgentId | string): SupportedAgentId | undefined {
@@ -116,6 +158,14 @@ export class ModelRouter {
     }
 
     return this.fallbackAgentId
+  }
+
+  private async firstAvailableImageAwareAgent(): Promise<SupportedAgentId> {
+    for (const agentId of ['claude-code', 'codex'] as SupportedAgentId[]) {
+      if (await this.isAgentAvailable(agentId)) return agentId
+    }
+
+    throw new Error('Image-capable model required')
   }
 
   private async resolveModelForTier(

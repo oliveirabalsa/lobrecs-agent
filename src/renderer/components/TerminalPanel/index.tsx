@@ -21,11 +21,8 @@ interface Props {
   onDiffProposals: (proposals: DiffProposal[]) => void
   onApprovalRequest: (request: ApprovalRequest | null) => void
   onStatusChange: (status: SessionStatus) => void
-  onApproveApproval: () => void
-  onRejectApproval: () => void
-  onApproveDiff: (filePath: string) => void
-  onRejectDiff: (filePath: string) => void
-  onEditAndApproveDiff: (filePath: string, newContent: string) => void
+  onApproveApproval: () => void | Promise<void>
+  onRejectApproval: () => void | Promise<void>
 }
 
 export function TerminalPanel({
@@ -37,9 +34,6 @@ export function TerminalPanel({
   onStatusChange,
   onApproveApproval,
   onRejectApproval,
-  onApproveDiff,
-  onRejectDiff,
-  onEditAndApproveDiff,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -158,12 +152,7 @@ export function TerminalPanel({
 
         {diffProposals.length > 0 ? (
           <div className="h-[46%] min-h-[280px]">
-            <DiffViewer
-              proposals={diffProposals}
-              onApprove={onApproveDiff}
-              onReject={onRejectDiff}
-              onEditAndApprove={onEditAndApproveDiff}
-            />
+            <DiffViewer proposals={diffProposals} />
           </div>
         ) : approvalRequest && sessionId ? (
           <ApprovalBanner

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
-import { commandExists, resolveCommand, runCommandText, withContext } from './command'
+import { commandExists, resolveCommand, runCommandText, withContextAndImages } from './command'
 import {
   dedupeModels,
   fallbackModelsForAgent,
@@ -33,7 +33,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       if (event.type === 'session-complete') completed = true
       events.emit('event', event)
     }
-    const prompt = withContext(params.prompt, params.context)
+    const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
     const command = resolveCommand(OPENCODE_COMMAND_ENV, 'opencode')
     const args = [
       'run',

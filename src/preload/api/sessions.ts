@@ -1,4 +1,10 @@
-import type { AgentEvent, Session, SessionForkPayload } from '../../shared/contracts/sessions'
+import type {
+  AgentEvent,
+  ListThreadTranscriptOptions,
+  Session,
+  SessionForkPayload,
+  ThreadTranscriptTurn,
+} from '../../shared/contracts/sessions'
 import type { IpcInvoker } from './ipc'
 
 export interface SessionsApi {
@@ -6,6 +12,10 @@ export interface SessionsApi {
   get(sessionId: string): Promise<Session | null>
   fork(sessionId: string): Promise<SessionForkPayload>
   listEvents(sessionId: string): Promise<AgentEvent[]>
+  listThreadTranscript(
+    threadId: string,
+    options?: ListThreadTranscriptOptions,
+  ): Promise<ThreadTranscriptTurn[]>
 }
 
 export function createSessionsApi(ipcRenderer: IpcInvoker): SessionsApi {
@@ -14,5 +24,7 @@ export function createSessionsApi(ipcRenderer: IpcInvoker): SessionsApi {
     get: (sessionId) => ipcRenderer.invoke('sessions:get', sessionId),
     fork: (sessionId) => ipcRenderer.invoke('sessions:fork', sessionId),
     listEvents: (sessionId) => ipcRenderer.invoke('sessions:list-events', sessionId),
+    listThreadTranscript: (threadId, options) =>
+      ipcRenderer.invoke('sessions:list-thread-transcript', threadId, options),
   }
 }

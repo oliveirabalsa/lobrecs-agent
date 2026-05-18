@@ -1,0 +1,171 @@
+import { useState, type MouseEvent } from 'react'
+import type { Project } from '../../../shared/types'
+import { Spinner } from '../ui'
+import { ThreadRow } from './ThreadRow'
+import type { Thread } from './useProjectTree'
+
+const COLLAPSED_THREAD_LIMIT = 10
+
+interface ProjectTreeItemProps {
+  project: Project
+  expanded: boolean
+  selected: boolean
+  threads: Thread[] | undefined
+  loadingThreads: boolean
+  threadsError?: string
+  activeThreadId: string | null
+  onToggleExpand: (project: Project) => void
+  onSelectProject: (project: Project) => void
+  onSelectThread: (project: Project, thread: Thread) => void
+  onDeleteThread?: (project: Project, thread: Thread) => void
+  onContextMenu?: (event: MouseEvent, project: Project) => void
+}
+
+export function ProjectTreeItem({
+  project,
+  expanded,
+  selected,
+  threads,
+  loadingThreads,
+  threadsError,
+  activeThreadId,
+  onToggleExpand,
+  onSelectProject,
+  onSelectThread,
+  onDeleteThread,
+  onContextMenu,
+}: ProjectTreeItemProps) {
+  const [showAll, setShowAll] = useState(false)
+
+  function handleRowClick() {
+    onSelectProject(project)
+    if (!expanded) {
+      onToggleExpand(project)
+    }
+  }
+
+  function handleChevronClick(event: MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation()
+    onToggleExpand(project)
+  }
+
+  function handleContextMenu(event: MouseEvent) {
+    if (onContextMenu) onContextMenu(event, project)
+  }
+
+  const rowBase =
+    'flex h-8 w-full items-center gap-1.5 rounded-card pl-1.5 pr-2 transition-colors'
+  const rowState = selected
+    ? 'bg-white/8 text-primary'
+    : 'text-secondary hover:bg-white/5 hover:text-primary'
+
+  const allThreads = threads ?? []
+  const overLimit = allThreads.length > COLLAPSED_THREAD_LIMIT
+  const visibleThreads = overLimit && !showAll
+    ? allThreads.slice(0, COLLAPSED_THREAD_LIMIT)
+    : allThreads
+  const hiddenCount = overLimit && !showAll ? allThreads.length - COLLAPSED_THREAD_LIMIT : 0
+
+  return (
+    <div className="flex flex-col">
+      <div className={`${rowBase} ${rowState}`} onContextMenu={handleContextMenu}>
+        <button
+          type="button"
+          onClick={handleChevronClick}
+          aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
+          className="flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted hover:text-primary"
+        >
+          <ChevronIcon open={expanded} />
+        </button>
+        <button
+          type="button"
+          onClick={handleRowClick}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          title={project.repoPath}
+        >
+          <FolderIcon />
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
+            {project.name}
+          </span>
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-hairline pl-2">
+          {loadingThreads && allThreads.length === 0 ? (
+            <div className="flex h-8 items-center gap-2 px-2 text-[12px] text-muted">
+              <Spinner size={12} />
+              Loading threads…
+            </div>
+          ) : threadsError ? (
+            <div className="px-2 py-1 text-[12px] text-accent-del">{threadsError}</div>
+          ) : allThreads.length === 0 ? (
+            <div className="px-2 py-1 text-[12px] text-muted">No threads yet</div>
+          ) : (
+            <>
+              {visibleThreads.map((thread) => (
+                <ThreadRow
+                  key={thread.id}
+                  thread={thread}
+                  active={activeThreadId === thread.id}
+                  onSelect={(t) => onSelectThread(project, t)}
+                  onDelete={onDeleteThread ? (t) => onDeleteThread(project, t) : undefined}
+                />
+              ))}
+              {overLimit ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAll((value) => !value)}
+                  className="mt-0.5 self-start rounded px-2 py-1 text-[11px] text-muted hover:text-primary"
+                >
+                  {showAll ? 'Show less' : `Show more (${hiddenCount})`}
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FolderIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0 text-muted"
+    >
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  )
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{
+        transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+        transition: 'transform 120ms ease-out',
+      }}
+    >
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
+  )
+}

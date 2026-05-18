@@ -4,13 +4,15 @@ import type { ApprovalRequest } from '../../../shared/types'
 interface Props {
   request: ApprovalRequest
   sessionId: string
-  onApprove: () => void
-  onReject: () => void
+  onApprove: () => void | Promise<void>
+  onReject: () => void | Promise<void>
 }
 
 export function ApprovalBanner({ request, sessionId, onApprove, onReject }: Props) {
   useEffect(() => {
-    return window.agentforge.onShortcut('shortcut:approve', onApprove)
+    return window.agentforge.onShortcut('shortcut:approve', () => {
+      void onApprove()
+    })
   }, [onApprove])
 
   return (
@@ -31,14 +33,14 @@ export function ApprovalBanner({ request, sessionId, onApprove, onReject }: Prop
 
       <button
         type="button"
-        onClick={onReject}
+        onClick={() => void onReject()}
         className="rounded-md border border-red-800 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-950/70"
       >
         Deny
       </button>
       <button
         type="button"
-        onClick={onApprove}
+        onClick={() => void onApprove()}
         className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-900/70"
       >
         Allow Cmd+Shift+A

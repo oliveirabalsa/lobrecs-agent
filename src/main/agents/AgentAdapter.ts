@@ -1,5 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import type { AgentEvent, AgentModel, AgentId } from '../../shared/types'
+import type { ImageAttachment } from '../../shared/types'
 
 export interface AgentSession {
   sessionId: string
@@ -15,6 +16,7 @@ export interface AgentDispatchParams {
   repoPath: string
   model: string
   context?: string
+  imageAttachments?: ImageAttachment[]
 }
 
 export interface AgentAdapter {

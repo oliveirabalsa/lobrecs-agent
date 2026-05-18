@@ -6,14 +6,20 @@ import { getAppIconPath } from './appIcon'
 export function createMainWindow(): BrowserWindow {
   const icon = getAppIconPath()
 
+  const macOptions =
+    process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
+      : {}
+
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 980,
     minHeight: 640,
     title: 'Lobrecs Agent',
-    backgroundColor: '#09090b',
+    backgroundColor: '#0e0e0f',
     ...(icon ? { icon } : {}),
+    ...macOptions,
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,

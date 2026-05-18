@@ -10,7 +10,7 @@ describe('agent activity normalization', () => {
       payload: {
         type: 'approval_request',
         action: 'run-command',
-        argv: ['exec', '--model', 'gpt-5.2-codex'],
+        argv: ['exec', '--model', 'gpt-5.3-codex'],
         cwd: '/repo',
       },
       timestamp: 1,
@@ -22,7 +22,7 @@ describe('agent activity normalization', () => {
       status: 'pending',
       request: {
         action: 'run-command',
-        command: 'exec --model gpt-5.2-codex',
+        command: 'exec --model gpt-5.3-codex',
         cwd: '/repo',
         risk: 'medium',
       },
@@ -53,6 +53,125 @@ describe('agent activity normalization', () => {
       tokensIn: 10,
       tokensOut: 20,
     })
+    expect(
+      deriveActivityEvents({
+        ...complete,
+        payload: { status: 'cancelled' },
+      })[0]?.payload,
+    ).toMatchObject({
+      kind: 'completion',
+      status: 'cancelled',
+    })
+  })
+
+  it('suppresses Claude SessionEnd cwd-deleted hook warnings from timeline activities', () => {
+    const activities = deriveActivityEvents({
+      type: 'stderr',
+      sessionId: 'session-1',
+      payload: {
+        text: 'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.\n',
+      },
+      timestamp: 1,
+    })
+
+    expect(activities).toEqual([])
+  })
+
+  it('keeps real stderr as process warning activities', () => {
+    const [activity] = deriveActivityEvents({
+      type: 'stderr',
+      sessionId: 'session-1',
+      payload: { text: 'real CLI warning\n' },
+      timestamp: 1,
+    })
+
+    expect(activity?.payload).toMatchObject({
+      kind: 'step',
+      title: 'Process warning',
+      detail: 'real CLI warning',
+      status: 'error',
+    })
+  })
+
+  it('turns Codex lifecycle JSON into Codex-style timeline activities', () => {
+    const events: AgentEvent[] = [
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: { type: 'thread.started' },
+        timestamp: 1,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: { type: 'turn.started' },
+        timestamp: 2,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'item.completed',
+          item: { type: 'agent_message', text: 'Implemented the fix.' },
+        },
+        timestamp: 3,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'item.started',
+          item: {
+            type: 'command_execution',
+            command: "/bin/zsh -lc 'rtk npm test'",
+            status: 'in_progress',
+          },
+        },
+        timestamp: 4,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'item.completed',
+          item: {
+            type: 'command_execution',
+            command: "/bin/zsh -lc 'rtk npm test'",
+            aggregated_output: 'tests passed',
+            exit_code: 0,
+            status: 'completed',
+          },
+        },
+        timestamp: 5,
+      },
+    ]
+
+    const activities = events.flatMap(deriveActivityEvents).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({ kind: 'step', title: 'Thinking', status: 'running' }),
+      expect.objectContaining({
+        kind: 'message',
+        role: 'assistant',
+        text: 'Implemented the fix.',
+      }),
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'shell',
+        status: 'running',
+      }),
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'shell',
+        status: 'done',
+      }),
+      expect.objectContaining({
+        kind: 'tool-result',
+        name: 'shell',
+        output: 'tests passed',
+        status: 'done',
+      }),
+    ])
   })
 
   it('turns diff proposals into summary and file-change activities', () => {

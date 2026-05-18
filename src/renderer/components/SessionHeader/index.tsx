@@ -30,7 +30,7 @@ function formatCost(value: number | undefined) {
 function tierFromModel(model: string | undefined, fallback: ModelTier | undefined): ModelTier {
   if (fallback) return fallback
   if (!model) return 'balanced'
-  if (model.includes('haiku') || model.includes('minimax')) return 'lightweight'
+  if (model.includes('haiku') || model.includes('minimax') || model.includes('spark')) return 'lightweight'
   if (model.includes('opus') || model.includes('gpt-5.5')) return 'frontier'
   if (model.includes('gpt-5.4')) return 'advanced'
   return 'balanced'

@@ -7,7 +7,7 @@ export interface DiffProposal {
   additions?: number
   deletions?: number
   baseHash?: string
-  status?: 'pending' | 'approved' | 'rejected' | 'conflict'
+  status?: 'pending' | 'applied' | 'approved' | 'rejected' | 'conflict'
 }
 
 export interface ApprovalRequest {

@@ -3,6 +3,7 @@ import type { AgentEvent } from '../../../shared/types'
 import {
   completionStatus,
   createTerminalEventHandler,
+  normalizeDiffPayload,
   textFromPayload,
 } from './events'
 
@@ -30,6 +31,31 @@ describe('terminal event handling', () => {
     expect(completionStatus({ type: 'result', subtype: 'error' })).toBe('error')
     expect(completionStatus({ exitCode: 1 })).toBe('error')
     expect(completionStatus({ exitCode: 0 })).toBe('done')
+    expect(completionStatus({ status: 'cancelled' })).toBe('cancelled')
+  })
+
+  it('normalizes wrapped diff proposals without dropping review content', () => {
+    expect(
+      normalizeDiffPayload({
+        proposals: [
+          {
+            filePath: '/repo/new.ts',
+            originalContent: '',
+            proposedContent: 'created\n',
+          },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        filePath: '/repo/new.ts',
+        originalContent: '',
+        proposedContent: 'created\n',
+        changeType: 'added',
+        additions: 1,
+        deletions: 0,
+        status: 'pending',
+      }),
+    ])
   })
 
   it('deduplicates replayed events without clearing visible output', () => {

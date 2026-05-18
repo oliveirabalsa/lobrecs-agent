@@ -12,7 +12,7 @@ describe('pricing', () => {
   })
 
   it('estimates input and output token costs', () => {
-    const cost = estimateCost('gpt-5.2-codex', 1_000, 2_000)
+    const cost = estimateCost('gpt-5.3-codex', 1_000, 2_000)
 
     expect(cost).toBeCloseTo(0.0055, 8)
   })

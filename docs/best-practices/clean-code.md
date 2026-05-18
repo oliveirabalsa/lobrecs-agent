@@ -35,7 +35,8 @@ Use this guide for implementation work in Lobrecs Agent.
   shell execution, or database handles to the renderer.
 - Treat paths, prompts, model ids, command output, and agent-generated patches as
   untrusted input.
-- Preserve explicit user approval before writing agent changes to disk.
+- Preserve automatic main-process application of completed agent diffs; keep the
+  renderer diff UI review-only.
 
 ## Main Process
 
@@ -81,9 +82,10 @@ Use this guide for implementation work in Lobrecs Agent.
 
 - Treat every agent output as untrusted until reviewed.
 - Isolate swarm work in worktrees.
-- Keep apply/reject flows explicit.
+- Keep automatic diff application in main-process services.
 - Preserve the distinction between an approval request and a diff proposal.
-- Do not apply patches automatically because a session completed successfully.
+- Apply completed session diff proposals automatically before publishing them
+  for review.
 - Make cancellation clean up process handles and temporary worktrees.
 
 ## Testing

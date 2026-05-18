@@ -15,7 +15,8 @@ Agent.
 
 - Look for concrete bugs before style issues.
 - Verify Electron security boundaries.
-- Verify explicit approval before disk writes.
+- Verify completed agent diffs are auto-applied by main-process services and
+  renderer diff views stay review-only.
 - Verify worktree isolation for swarm behavior.
 - Verify IPC contracts, preload exposure, and renderer usage stay aligned.
 - Verify persistence changes are migrated, mapped, and tested.
@@ -35,7 +36,7 @@ Agent.
   main-process modules.
 - Raw `ipcRenderer` exposed to the renderer.
 - Generic IPC channels that bypass typed contracts.
-- Agent patches applied without explicit approval.
+- Agent patches applied outside the main-process auto-apply path.
 - Secrets persisted in code, SQLite, or browser storage.
 - Feature behavior added to `App.tsx` or `src/main/ipc/index.ts` when it should
   be module-owned.

@@ -1,8 +1,26 @@
-import { dialog, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { listAgentModelCatalogs } from '../../agents/application/listAgentModelCatalogs'
 import { isSupportedAgentId } from '../../agents/domain/isSupportedAgentId'
 import type { MainIpcContext } from '../../shared/ipcContext'
-import type { AgentId } from '../../../../shared/types'
+import type {
+  AdapterCapability,
+  AgentId,
+  ImageAttachment,
+  SaveImageAttachmentInput,
+  SupportedAgentId,
+  VerificationRecipe,
+} from '../../../../shared/types'
+
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+}
 
 export function registerSystemHandlers(context: MainIpcContext): void {
   ipcMain.handle('system:open-editor', async (_event, filePath: string) => {
@@ -17,4 +35,146 @@ export function registerSystemHandlers(context: MainIpcContext): void {
     return context.adapters.get(agentId)?.isInstalled() ?? false
   })
   ipcMain.handle('system:list-agent-models', async () => listAgentModelCatalogs(context))
+  ipcMain.handle('system:list-capabilities', async () => listCapabilities(context))
+  ipcMain.handle('system:list-verification-recipes', async () => verificationRecipes)
+  ipcMain.handle('system:save-image-attachment', async (_event, input: SaveImageAttachmentInput) =>
+    saveImageAttachment(input),
+  )
 }
+
+async function saveImageAttachment(input: SaveImageAttachmentInput): Promise<ImageAttachment> {
+  const parsed = parseImageDataUrl(input.dataUrl, input.mimeType)
+  const extension = IMAGE_MIME_EXTENSIONS[parsed.mimeType]
+
+  if (!extension) {
+    throw new Error('Unsupported image type')
+  }
+
+  if (parsed.buffer.length === 0 || parsed.buffer.length > MAX_IMAGE_BYTES) {
+    throw new Error('Image attachment is too large')
+  }
+
+  const dir = path.join(app.getPath('temp'), 'lobrecs-agent', 'attachments')
+  const safeName = safeBaseName(input.name) ?? `clipboard-${Date.now()}`
+  const filePath = path.join(dir, `${safeName}-${randomUUID()}.${extension}`)
+
+  await mkdir(dir, { recursive: true })
+  await writeFile(filePath, parsed.buffer)
+
+  return {
+    filePath,
+    name: input.name ?? `${safeName}.${extension}`,
+    mimeType: parsed.mimeType,
+    size: parsed.buffer.length,
+  }
+}
+
+function parseImageDataUrl(
+  dataUrl: string,
+  fallbackMimeType?: string,
+): { mimeType: string; buffer: Buffer } {
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl)
+
+  if (match) {
+    return {
+      mimeType: match[1].toLowerCase(),
+      buffer: Buffer.from(match[2], 'base64'),
+    }
+  }
+
+  if (!fallbackMimeType?.startsWith('image/')) {
+    throw new Error('Invalid image attachment')
+  }
+
+  return {
+    mimeType: fallbackMimeType.toLowerCase(),
+    buffer: Buffer.from(dataUrl, 'base64'),
+  }
+}
+
+function safeBaseName(name?: string): string | undefined {
+  const baseName = path.basename(name ?? '').replace(/\.[a-z0-9]+$/i, '')
+  const normalized = baseName.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '')
+
+  return normalized || undefined
+}
+
+async function listCapabilities(context: MainIpcContext): Promise<AdapterCapability[]> {
+  return Promise.all(
+    [...context.adapters.entries()].map(async ([agentId, adapter]) => ({
+      agentId,
+      name: adapter.name,
+      installed: await adapter.isInstalled().catch(() => false),
+      ...capabilityFlags(agentId),
+    })),
+  )
+}
+
+function capabilityFlags(
+  agentId: SupportedAgentId,
+): Omit<AdapterCapability, 'agentId' | 'name' | 'installed'> {
+  if (agentId === 'codex') {
+    return {
+      supportsStreamingJson: true,
+      supportsResume: false,
+      supportsFileAttachments: false,
+      supportsCustomAgents: false,
+      supportsMcp: true,
+      supportsApprovalMode: true,
+      supportsModelListing: true,
+    }
+  }
+
+  if (agentId === 'claude-code') {
+    return {
+      supportsStreamingJson: true,
+      supportsResume: true,
+      supportsFileAttachments: true,
+      supportsCustomAgents: true,
+      supportsMcp: true,
+      supportsApprovalMode: true,
+      supportsModelListing: true,
+    }
+  }
+
+  return {
+    supportsStreamingJson: true,
+    supportsResume: false,
+    supportsFileAttachments: false,
+    supportsCustomAgents: true,
+    supportsMcp: true,
+    supportsApprovalMode: false,
+    supportsModelListing: true,
+  }
+}
+
+const verificationRecipes: VerificationRecipe[] = [
+  {
+    id: 'build',
+    label: 'Build',
+    command: 'rtk npm run build',
+    scope: 'build',
+    description: 'Type-check and build production assets.',
+  },
+  {
+    id: 'test',
+    label: 'Tests',
+    command: 'rtk npm test',
+    scope: 'test',
+    description: 'Run the Vitest suite.',
+  },
+  {
+    id: 'lint',
+    label: 'Lint',
+    command: 'rtk npm run lint',
+    scope: 'lint',
+    description: 'Run project linting when a lint script exists.',
+  },
+  {
+    id: 'ui-check',
+    label: 'UI Check',
+    command: 'rtk npm run preview',
+    scope: 'ui',
+    description: 'Launch a preview build for manual or browser signoff.',
+  },
+]

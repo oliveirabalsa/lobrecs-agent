@@ -12,6 +12,7 @@ import { worktreeManager, type WorktreeManager } from '../git/WorktreeManager'
 import { modelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore } from '../store'
+import { askPlanPrompt, type PlanPromptOutcome } from './planPrompt'
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -24,10 +25,12 @@ export interface SwarmDispatchInput {
   agentId: SupportedAgentId
   model: string
   repoPath: string
+  imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
 }
 
 export interface SwarmDispatchResult {
   sessionId?: string
+  threadId?: string
   status?: SessionStatus
   output?: string
 }
@@ -36,6 +39,14 @@ export interface SwarmRouteInput {
   prompt: string
   preferredAgentId: SupportedAgentId
   modelOverride?: string
+}
+
+export interface SwarmPlanConfirmation {
+  sessionId: string
+  title: string
+  options: Array<{ id: string; label: string }>
+  allowFreeText?: boolean
+  timeoutMs?: number
 }
 
 export interface SwarmOrchestratorDependencies {
@@ -47,6 +58,11 @@ export interface SwarmOrchestratorDependencies {
   dispatchSession?: (input: SwarmDispatchInput) => MaybePromise<SwarmDispatchResult | void>
   cancelSession?: (sessionId: string) => MaybePromise<void>
   worktrees?: Pick<WorktreeManager, 'create' | 'remove' | 'reassignSession'>
+  /**
+   * Optional plan-prompt round-trip. Defaults to {@link askPlanPrompt} but
+   * tests inject a no-op so swarm specs stay deterministic.
+   */
+  confirmPlan?: (input: SwarmPlanConfirmation) => MaybePromise<PlanPromptOutcome>
 }
 
 type SpawnedSession = SwarmResult['sessions'][number] & {
@@ -78,6 +94,8 @@ export class SwarmOrchestrator {
     const dependencies = this.requireDependencies()
     const project = await dependencies.getProject(config.projectId)
     if (!project) throw new Error(`Project not found: ${config.projectId}`)
+
+    await this.confirmPlanOrThrow(config)
 
     const result: SwarmResult = {
       swarmId: randomUUID(),
@@ -130,6 +148,39 @@ export class SwarmOrchestrator {
 
   list(): SwarmResult[] {
     return [...this.swarms.values()].map(cloneResult)
+  }
+
+  private async confirmPlanOrThrow(config: SwarmConfig): Promise<void> {
+    const confirm = this.dependencies.confirmPlan
+    if (!confirm) return
+
+    const outcome = await confirm({
+      sessionId: `swarm-plan-${randomUUID()}`,
+      title: 'Implement this plan?',
+      options: [
+        { id: 'yes', label: 'Yes, implement this plan' },
+        { id: 'no', label: 'No, and tell me what to change' },
+      ],
+      allowFreeText: true,
+    })
+
+    if (outcome === 'timeout') {
+      throw new Error('Plan prompt timed out before the user responded')
+    }
+    if (outcome === 'cancelled') {
+      throw new Error('Plan prompt was cancelled before the user responded')
+    }
+    if (outcome.optionId === 'yes') return
+
+    const feedback = outcome.freeText?.trim()
+    const suffix = feedback ? `: ${feedback}` : ''
+    const error = new Error(`User rejected plan${suffix}`) as Error & {
+      code?: string
+      freeText?: string
+    }
+    error.code = 'PLAN_REJECTED'
+    if (feedback) error.freeText = feedback
+    throw error
   }
 
   private async spawnParallel(
@@ -190,6 +241,7 @@ export class SwarmOrchestrator {
     repoPath: string
     swarmId: string
     previousOutput?: string
+    imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
     const provisionalSessionId = randomUUID()
@@ -216,6 +268,7 @@ export class SwarmOrchestrator {
         agentId: decision.agentId,
         model: decision.model,
         repoPath: worktreePath,
+        imageAttachments: input.imageAttachments,
       })
 
       const actualSessionId = dispatchResult?.sessionId ?? provisionalSessionId
@@ -225,6 +278,7 @@ export class SwarmOrchestrator {
 
       return {
         sessionId: actualSessionId,
+        threadId: dispatchResult?.threadId,
         role: input.agentConfig.role,
         worktreePath,
         status: dispatchResult?.status ?? 'running',
@@ -238,7 +292,9 @@ export class SwarmOrchestrator {
     }
   }
 
-  private requireDependencies(): Required<SwarmOrchestratorDependencies> {
+  private requireDependencies(): Required<
+    Omit<SwarmOrchestratorDependencies, 'confirmPlan'>
+  > & Pick<SwarmOrchestratorDependencies, 'confirmPlan'> {
     const { getProject, routeModel, dispatchSession } = this.dependencies
 
     if (!getProject || !routeModel || !dispatchSession) {
@@ -253,6 +309,7 @@ export class SwarmOrchestrator {
       dispatchSession,
       cancelSession: this.dependencies.cancelSession ?? (() => undefined),
       worktrees: this.dependencies.worktrees ?? worktreeManager,
+      confirmPlan: this.dependencies.confirmPlan,
     }
   }
 }
@@ -301,7 +358,7 @@ function createDefaultDependencies(): SwarmOrchestratorDependencies {
     getProject: (projectId) => projectsStore.get(projectId) ?? undefined,
     routeModel: (input) => modelRouter.route(input),
     dispatchSession: async (input) => {
-      const sessionId = await sessionManager.dispatch({
+      const { sessionId, threadId } = await sessionManager.dispatch({
         projectId: input.projectId,
         prompt: input.prompt,
         agentId: input.agentId,
@@ -311,10 +368,18 @@ function createDefaultDependencies(): SwarmOrchestratorDependencies {
         isolate: false,
       })
 
-      return { sessionId, status: 'running' }
+      return { sessionId, threadId, status: 'running' }
     },
     cancelSession: (sessionId) => sessionManager.cancel(sessionId),
     worktrees: worktreeManager,
+    confirmPlan: (input) =>
+      askPlanPrompt({
+        sessionId: input.sessionId,
+        title: input.title,
+        options: input.options,
+        allowFreeText: input.allowFreeText,
+        timeoutMs: input.timeoutMs,
+      }),
   }
 }
 

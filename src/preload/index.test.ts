@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createAgentForgeApi, type AgentForgeApi } from './api'
 import type { AgentEvent } from '../shared/contracts/sessions'
 import type { SwarmConfig } from '../shared/contracts/swarms'
+import type { ThreadDeletedEvent } from '../shared/contracts/threads'
 
 type IpcListener = (event: unknown, payload?: unknown) => void
 
@@ -41,13 +42,16 @@ describe('preload api shape', () => {
     expect(Object.keys(api)).toEqual([
       'projects',
       'sessions',
+      'threads',
       'agent',
       'swarm',
       'router',
       'feedback',
       'cost',
       'automations',
-      'diff',
+      'specs',
+      'runs',
+      'git',
       'on',
       'onShortcut',
       'system',
@@ -114,11 +118,50 @@ describe('preload api shape', () => {
       },
       {
         call: (agentforge) =>
+          agentforge.sessions.listThreadTranscript('thread-1', { limit: 4 }),
+        expected: ['sessions:list-thread-transcript', 'thread-1', { limit: 4 }],
+      },
+      {
+        call: (agentforge) => agentforge.threads.list('project-1'),
+        expected: ['threads:list', 'project-1', undefined],
+      },
+      {
+        call: (agentforge) => agentforge.threads.list('project-1', { includeArchived: true }),
+        expected: ['threads:list', 'project-1', { includeArchived: true }],
+      },
+      {
+        call: (agentforge) => agentforge.threads.get('thread-1'),
+        expected: ['threads:get', 'thread-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.threads.create({ projectId: 'project-1', title: 'New thread' }),
+        expected: ['threads:create', { projectId: 'project-1', title: 'New thread' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.threads.rename({ id: 'thread-1', title: 'Renamed' }),
+        expected: ['threads:rename', { id: 'thread-1', title: 'Renamed' }],
+      },
+      {
+        call: (agentforge) => agentforge.threads.delete('thread-1'),
+        expected: ['threads:delete', 'thread-1'],
+      },
+      {
+        call: (agentforge) => agentforge.threads.pin({ id: 'thread-1', pinned: true }),
+        expected: ['threads:pin', { id: 'thread-1', pinned: true }],
+      },
+      {
+        call: (agentforge) => agentforge.threads.archive('thread-1'),
+        expected: ['threads:archive', 'thread-1'],
+      },
+      {
+        call: (agentforge) =>
           agentforge.agent.dispatch({
             projectId: 'project-1',
             prompt: 'Ship it',
             agentId: 'codex',
-            modelOverride: 'gpt-5.2-codex',
+            modelOverride: 'gpt-5.3-codex',
           }),
         expected: [
           'agent:dispatch',
@@ -126,7 +169,7 @@ describe('preload api shape', () => {
             projectId: 'project-1',
             prompt: 'Ship it',
             agentId: 'codex',
-            modelOverride: 'gpt-5.2-codex',
+            modelOverride: 'gpt-5.3-codex',
           },
         ],
       },
@@ -194,10 +237,77 @@ describe('preload api shape', () => {
         expected: ['automations:run-now', 'automation-1'],
       },
       {
-        call: (agentforge) => agentforge.diff.apply('/tmp/file.ts', 'content'),
-        expected: ['diff:apply', '/tmp/file.ts', 'content'],
+        call: (agentforge) => agentforge.specs.list('project-1'),
+        expected: ['specs:list', 'project-1'],
       },
-      { call: (agentforge) => agentforge.diff.reject(), expected: ['diff:reject'] },
+      {
+        call: (agentforge) =>
+          agentforge.specs.create({
+            projectId: 'project-1',
+            title: 'Spec',
+            goal: 'Implement the work',
+          }),
+        expected: [
+          'specs:create',
+          {
+            projectId: 'project-1',
+            title: 'Spec',
+            goal: 'Implement the work',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.specs.update('spec-1', { goal: 'Refine the goal' }),
+        expected: ['specs:update', 'spec-1', { goal: 'Refine the goal' }],
+      },
+      {
+        call: (agentforge) => agentforge.specs.get('spec-1'),
+        expected: ['specs:get', 'spec-1'],
+      },
+      {
+        call: (agentforge) => agentforge.specs.approve('spec-1'),
+        expected: ['specs:approve', 'spec-1'],
+      },
+      {
+        call: (agentforge) => agentforge.runs.start({ specId: 'spec-1', mode: 'worktree' }),
+        expected: ['runs:start', { specId: 'spec-1', mode: 'worktree' }],
+      },
+      {
+        call: (agentforge) => agentforge.runs.cancel('run-1'),
+        expected: ['runs:cancel', 'run-1'],
+      },
+      {
+        call: (agentforge) => agentforge.runs.compare('spec-1'),
+        expected: ['runs:compare', 'spec-1'],
+      },
+      {
+        call: (agentforge) => agentforge.runs.verify('run-1', 'rtk npm run build'),
+        expected: ['runs:verify', 'run-1', 'rtk npm run build'],
+      },
+      {
+        call: (agentforge) => agentforge.git.diff({ projectId: 'project-1' }),
+        expected: ['git:diff', { projectId: 'project-1' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.stage({ projectId: 'project-1', paths: ['src/main.ts'] }),
+        expected: ['git:stage', { projectId: 'project-1', paths: ['src/main.ts'] }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.revert({ projectId: 'project-1', paths: ['src/main.ts'] }),
+        expected: ['git:revert', { projectId: 'project-1', paths: ['src/main.ts'] }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.commit({ projectId: 'project-1', message: 'feat: add spec' }),
+        expected: ['git:commit', { projectId: 'project-1', message: 'feat: add spec' }],
+      },
+      {
+        call: (agentforge) => agentforge.git.push('project-1'),
+        expected: ['git:push', 'project-1'],
+      },
       {
         call: (agentforge) => agentforge.system.openInEditor('/tmp/file.ts'),
         expected: ['system:open-editor', '/tmp/file.ts'],
@@ -213,6 +323,30 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.system.listAgentModels(),
         expected: ['system:list-agent-models'],
+      },
+      {
+        call: (agentforge) => agentforge.system.listCapabilities(),
+        expected: ['system:list-capabilities'],
+      },
+      {
+        call: (agentforge) => agentforge.system.listVerificationRecipes('project-1'),
+        expected: ['system:list-verification-recipes', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.saveImageAttachment({
+            dataUrl: 'data:image/png;base64,AAAA',
+            name: 'paste.png',
+            mimeType: 'image/png',
+          }),
+        expected: [
+          'system:save-image-attachment',
+          {
+            dataUrl: 'data:image/png;base64,AAAA',
+            name: 'paste.png',
+            mimeType: 'image/png',
+          },
+        ],
       },
     ]
 
@@ -275,6 +409,34 @@ describe('preload api shape', () => {
     expect(callback).not.toHaveBeenCalled()
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       'shortcut:approve',
+      expect.any(Function),
+    )
+  })
+
+  it('keeps thread deletion subscription cleanup behavior', () => {
+    const ipcRenderer = createIpcRendererMock()
+    const api = createAgentForgeApi(
+      ipcRenderer as unknown as Parameters<typeof createAgentForgeApi>[0],
+    )
+    const event: ThreadDeletedEvent = {
+      threadId: 'thread-1',
+      projectId: 'project-1',
+    }
+    const callback = vi.fn()
+
+    const unsubscribe = api.threads.onDeleted(callback)
+    ipcRenderer.emit('thread:deleted', event)
+
+    expect(callback).toHaveBeenCalledWith(event)
+    expect(ipcRenderer.on).toHaveBeenCalledWith('thread:deleted', expect.any(Function))
+
+    callback.mockClear()
+    unsubscribe()
+    ipcRenderer.emit('thread:deleted', event)
+
+    expect(callback).not.toHaveBeenCalled()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      'thread:deleted',
       expect.any(Function),
     )
   })

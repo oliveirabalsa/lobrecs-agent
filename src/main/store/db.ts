@@ -153,6 +153,25 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_verification_results_run ON verification_results(spec_run_id, created_at ASC);
     `,
   },
+  {
+    version: 3,
+    up: `
+      CREATE TABLE IF NOT EXISTS threads (
+        id              TEXT PRIMARY KEY,
+        project_id      TEXT NOT NULL,
+        title           TEXT NOT NULL,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL,
+        pinned          INTEGER NOT NULL DEFAULT 0,
+        last_session_id TEXT,
+        archived_at     INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_threads_project ON threads(project_id);
+      CREATE INDEX IF NOT EXISTS idx_threads_project_updated
+        ON threads(project_id, updated_at DESC);
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
@@ -189,6 +208,18 @@ export function runMigrations(db: Database.Database): void {
   })
 
   migrate(pending)
+
+  // SQLite ADD COLUMN is not idempotent; wrap in try/catch so re-running on an
+  // already-migrated database is safe regardless of schema_version state.
+  ensureSessionsThreadIdColumn(db)
+}
+
+function ensureSessionsThreadIdColumn(db: Database.Database): void {
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN thread_id TEXT')
+  } catch {
+    // Column already exists.
+  }
 }
 
 export function setDbForTests(db: Database.Database | null): void {

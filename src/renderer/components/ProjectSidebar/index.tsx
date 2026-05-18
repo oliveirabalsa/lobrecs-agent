@@ -211,7 +211,7 @@ export function ProjectSidebar({ selectedProjectId, onSelect, onSelectedProjectD
   }
 
   return (
-    <aside className="flex w-[clamp(200px,21vw,260px)] shrink-0 flex-col border-r border-zinc-700 bg-zinc-900">
+    <aside className="flex w-full min-w-0 shrink-0 flex-col bg-zinc-900">
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-3">
         <img
           src={logoUrl}

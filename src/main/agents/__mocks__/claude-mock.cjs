@@ -33,7 +33,44 @@ setTimeout(() => {
       envPrompt: process.env.CLAUDE_PROMPT,
     }),
   )
+  console.log(
+    JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_mock',
+            name: 'Read',
+            input: { file_path: 'package.json' },
+          },
+        ],
+      },
+    }),
+  )
+  console.log(
+    JSON.stringify({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_mock',
+            content: 'mock file output',
+          },
+        ],
+      },
+    }),
+  )
   console.log('raw claude line')
+  if (process.env.CLAUDE_MOCK_SESSION_END_NOISE === '1') {
+    console.error(
+      'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.',
+    )
+    console.error(
+      'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.',
+    )
+  }
   console.error(
     JSON.stringify({
       warning: 'claude warning',
