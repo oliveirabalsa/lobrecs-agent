@@ -26,11 +26,11 @@ describe('deriveSessionActivities', () => {
     ).toHaveLength(1)
   })
 
-  it('suppresses Claude SessionEnd cwd-deleted warning activities loaded from history', () => {
+  it('suppresses Claude SessionEnd hook warning activities loaded from history', () => {
     const activities = deriveSessionActivities([
       stderrEvent(
         'session-1',
-        'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.\n',
+        'SessionEnd hook [_R="${CLAUDE_PLUGIN_ROOT}"; node "$_R/scripts/bun-runner.js" "$_/scripts/worker-service.cjs" hook claude-code session-complete] failed: 1276 | || (${R} == "string" && ${E} && ${E} == +${E})\n',
         1,
       ),
       {
@@ -40,7 +40,30 @@ describe('deriveSessionActivities', () => {
           kind: 'step',
           title: 'Process warning',
           detail:
-            'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.',
+            'SessionEnd hook [_R="${CLAUDE_PLUGIN_ROOT}"; node "$_R/scripts/bun-runner.js" "$_/scripts/worker-service.cjs" hook claude-code session-complete] failed: 1276 | || (${R} == "string" && ${E} && ${E} == +${E})',
+          status: 'error',
+        },
+        timestamp: 1.001,
+      },
+    ])
+
+    expect(activities).toEqual([])
+  })
+
+  it('suppresses Claude plugin worker ENOENT warning activities loaded from history', () => {
+    const detail =
+      '1277 | || (${R} === "string" && ${E} && ${E} == +${E})\n' +
+      'ENOENT: no such file or directory, lstat \'/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401\' path: "/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401", syscall: "lstat", errno: -2, code: "ENOENT" at cue (/Users/leonardooliveirabalsalobre/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs:1281:35133)\n' +
+      'Bun v1.3.6 (macOS arm64)'
+    const activities = deriveSessionActivities([
+      stderrEvent('session-1', detail, 1),
+      {
+        type: 'activity',
+        sessionId: 'session-1',
+        payload: {
+          kind: 'step',
+          title: 'Process warning',
+          detail,
           status: 'error',
         },
         timestamp: 1.001,

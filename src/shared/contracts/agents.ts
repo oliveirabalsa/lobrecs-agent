@@ -51,6 +51,8 @@ export interface ImageAttachment {
   size?: number
 }
 
+export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
+
 export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
   'claude-code': {
     lightweight: 'claude-haiku-4-5-20251001',
@@ -65,9 +67,9 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
     frontier: 'gpt-5.5',
   },
   opencode: {
-    lightweight: 'opencode/minimax-m2.5-free',
-    balanced: 'minimax/MiniMax-M2.5',
-    advanced: 'minimax/MiniMax-M2.7',
-    frontier: 'minimax/MiniMax-M2.7',
+    lightweight: 'minimax-coding-plan/MiniMax-M2',
+    balanced: 'minimax-coding-plan/MiniMax-M2.5',
+    advanced: 'minimax-coding-plan/MiniMax-M2.7',
+    frontier: 'minimax-coding-plan/MiniMax-M2.7',
   },
 }

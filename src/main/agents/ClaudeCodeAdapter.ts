@@ -7,7 +7,7 @@ import {
   fallbackModelsForAgent,
   readClaudeHistoryModels,
 } from './modelDiscovery'
-import { isClaudeSessionEndCwdDeletedWarning } from '../../shared/contracts/agentOutput'
+import { isClaudeSessionEndHookWarning } from '../../shared/contracts/agentOutput'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
 import type { AgentActivity, AgentEvent, AgentModel } from '../../shared/types'
 
@@ -471,9 +471,11 @@ function normalizeClaudeModelId(model: string): string {
 }
 
 function visibleClaudeStderr(text: string): string {
+  if (isClaudeSessionEndHookWarning(text)) return ''
+
   return text
     .split(/(?<=\n)/)
-    .filter((line) => !isClaudeSessionEndCwdDeletedWarning(line))
+    .filter((line) => !isClaudeSessionEndHookWarning(line))
     .join('')
 }
 

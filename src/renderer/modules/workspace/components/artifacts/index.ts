@@ -16,5 +16,11 @@ export type { CalloutProps, CalloutVariant } from './Callout'
 export { ApprovalRequestPill } from './ApprovalRequestPill'
 export type { ApprovalRequestPillProps } from './ApprovalRequestPill'
 
+export { UserQuestionPromptCard } from './UserQuestionPromptCard'
+export type {
+  UserQuestionActivity,
+  UserQuestionPromptCardProps,
+} from './UserQuestionPromptCard'
+
 export { CompletionFooter } from './CompletionFooter'
 export type { CompletionFooterProps } from './CompletionFooter'

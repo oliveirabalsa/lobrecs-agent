@@ -76,10 +76,24 @@ const FALLBACK_MODEL_CATALOGS: AgentModelCatalog[] = [
     installed: true,
     models: [
       {
-        id: 'opencode/minimax-m2.5-free',
-        label: 'opencode/minimax-m2.5-free',
+        id: 'minimax-coding-plan/MiniMax-M2',
+        label: 'minimax-coding-plan/MiniMax-M2',
         agentId: 'opencode',
         tier: 'lightweight',
+        source: 'fallback',
+      },
+      {
+        id: 'minimax-coding-plan/MiniMax-M2.5',
+        label: 'minimax-coding-plan/MiniMax-M2.5',
+        agentId: 'opencode',
+        tier: 'balanced',
+        source: 'fallback',
+      },
+      {
+        id: 'minimax-coding-plan/MiniMax-M2.7',
+        label: 'minimax-coding-plan/MiniMax-M2.7',
+        agentId: 'opencode',
+        tier: 'advanced',
         source: 'fallback',
       },
     ],

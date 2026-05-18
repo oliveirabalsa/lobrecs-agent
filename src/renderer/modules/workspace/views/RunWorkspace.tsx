@@ -1,16 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ApprovalRequest,
   DiffProposal,
   Project,
   SessionStatus,
+  SupportedAgentId,
   ThreadTranscriptTurn,
 } from '../../../../shared/types'
 import { AssistantMessage } from '../components/AssistantMessage'
 import { MessageStream } from '../components/MessageStream'
 import { PlanPromptModal } from '../components/modals/PlanPromptModal'
+import {
+  formatUserQuestionPromptAnswers,
+  UserQuestionPromptModal,
+  type UserQuestionPromptAnswer,
+} from '../components/modals/UserQuestionPromptModal'
 import { UserMessage } from '../components/UserMessage'
-import { useSessionEvents } from '../hooks/useSessionEvents'
+import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
+import type { StartedSessionSummary } from '../../sessions/types'
 
 interface RunWorkspaceProps {
   project: Project
@@ -19,7 +26,9 @@ interface RunWorkspaceProps {
   prompt: string
   status: SessionStatus | null
   startedAt?: number
+  agentId?: Project['agentId']
   model?: string
+  modelOverride?: string
   diffProposals: DiffProposal[]
   approvalRequest: ApprovalRequest | null
   onApprovalRequest: (request: ApprovalRequest | null) => void
@@ -27,6 +36,7 @@ interface RunWorkspaceProps {
   onStatusChange: (status: SessionStatus) => void
   onApproveApproval: () => void | Promise<void>
   onRejectApproval: () => void | Promise<void>
+  onSessionStarted?: (session: StartedSessionSummary) => void
   /**
    * Opens the workspace right panel in diff mode, optionally focusing a
    * specific file. Lifted from `WorkspaceView` so per-file "Review" buttons
@@ -51,7 +61,9 @@ export function RunWorkspace({
   prompt,
   status,
   startedAt,
+  agentId,
   model,
+  modelOverride,
   diffProposals,
   approvalRequest,
   onApprovalRequest,
@@ -59,6 +71,7 @@ export function RunWorkspace({
   onStatusChange,
   onApproveApproval,
   onRejectApproval,
+  onSessionStarted,
   onReviewFile,
 }: RunWorkspaceProps) {
   const {
@@ -66,13 +79,19 @@ export function RunWorkspace({
     activityTimes,
     loading,
     pendingPlanPrompt,
+    pendingUserQuestion,
     resolvePlanPrompt,
+    resolveUserQuestion,
   } = useSessionEvents(sessionId, {
     onApprovalRequest,
     onDiffProposals,
     onStatusChange,
   })
   const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
+  const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
+  const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
+  const [submittingQuestion, setSubmittingQuestion] = useState(false)
+  const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     setPriorTurns([])
@@ -96,6 +115,20 @@ export function RunWorkspace({
     }
   }, [sessionId, threadId])
 
+  useEffect(() => {
+    dismissedUserQuestionIdsRef.current = new Set()
+    setActiveUserQuestion(null)
+    setQuestionSubmitError(null)
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!pendingUserQuestion || activeUserQuestion) return
+    if (dismissedUserQuestionIdsRef.current.has(pendingUserQuestion.promptId)) return
+
+    setActiveUserQuestion(pendingUserQuestion)
+    setQuestionSubmitError(null)
+  }, [activeUserQuestion, pendingUserQuestion])
+
   const pendingApprovals = approvalRequest ? 1 : 0
   const effectiveStatus = status ?? (sessionId ? 'running' : null)
   const seedUserMessage = useMemo(() => {
@@ -117,13 +150,20 @@ export function RunWorkspace({
     () => ({
       diffProposals,
       approvalRequest,
+      pendingUserQuestionPromptId: pendingUserQuestion?.promptId ?? null,
       onReviewFile: handleReviewFile,
       onApproveApproval,
       onRejectApproval,
+      onAnswerUserQuestion: (prompt: UserQuestionActivity) => {
+        dismissedUserQuestionIdsRef.current.delete(prompt.promptId)
+        setActiveUserQuestion(prompt)
+        setQuestionSubmitError(null)
+      },
     }),
     [
       diffProposals,
       approvalRequest,
+      pendingUserQuestion?.promptId,
       handleReviewFile,
       onApproveApproval,
       onRejectApproval,
@@ -146,6 +186,63 @@ export function RunWorkspace({
     },
     [sessionId, resolvePlanPrompt],
   )
+
+  const handleUserQuestionSubmit = useCallback(
+    async (answers: UserQuestionPromptAnswer[]) => {
+      if (!activeUserQuestion || !sessionId) return
+
+      setSubmittingQuestion(true)
+      setQuestionSubmitError(null)
+      const followUpPrompt = formatUserQuestionPromptAnswers(activeUserQuestion, answers)
+      const createdAt = Date.now()
+
+      try {
+        const result = await window.agentforge.agent.dispatch({
+          projectId: project.id,
+          prompt: followUpPrompt,
+          agentId: toSupportedAgentId(agentId),
+          modelOverride,
+          threadId: threadId ?? undefined,
+        })
+        onSessionStarted?.({
+          sessionId: result.sessionId,
+          threadId: result.threadId,
+          prompt: followUpPrompt,
+          routingDecision: null,
+          agentId: toSupportedAgentId(agentId),
+          modelOverride,
+          createdAt,
+        })
+        resolveUserQuestion(activeUserQuestion.promptId)
+        dismissedUserQuestionIdsRef.current.add(activeUserQuestion.promptId)
+        setActiveUserQuestion(null)
+      } catch (error: unknown) {
+        setQuestionSubmitError(
+          error instanceof Error ? error.message : 'Failed to send answers',
+        )
+      } finally {
+        setSubmittingQuestion(false)
+      }
+    },
+    [
+      activeUserQuestion,
+      agentId,
+      modelOverride,
+      onSessionStarted,
+      project.id,
+      resolveUserQuestion,
+      sessionId,
+      threadId,
+    ],
+  )
+
+  const closeUserQuestion = useCallback((open: boolean) => {
+    if (open || !activeUserQuestion) return
+
+    dismissedUserQuestionIdsRef.current.add(activeUserQuestion.promptId)
+    setActiveUserQuestion(null)
+    setQuestionSubmitError(null)
+  }, [activeUserQuestion])
 
   return (
     <div
@@ -198,8 +295,25 @@ export function RunWorkspace({
           }
         />
       ) : null}
+      {activeUserQuestion ? (
+        <UserQuestionPromptModal
+          open
+          prompt={activeUserQuestion}
+          submitting={submittingQuestion}
+          error={questionSubmitError}
+          onOpenChange={closeUserQuestion}
+          onSubmit={handleUserQuestionSubmit}
+        />
+      ) : null}
     </div>
   )
+}
+
+function toSupportedAgentId(agentId: Project['agentId'] | undefined): SupportedAgentId | undefined {
+  if (agentId === 'claude-code' || agentId === 'codex' || agentId === 'opencode') {
+    return agentId
+  }
+  return undefined
 }
 
 function PriorThreadMessages({ turns }: { turns: ThreadTranscriptTurn[] }) {
@@ -231,12 +345,49 @@ function RunSummary({
   model?: string
   pendingApprovals: number
 }) {
+  const [copied, setCopied] = useState(false)
+  const copyPrompt = useCallback(() => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(prompt)
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1_200)
+  }, [prompt])
+
   return (
     <div className="flex min-w-0 flex-col gap-3 border-b border-hairline pb-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0">
-        <div className="line-clamp-2 break-words text-sm leading-6 text-primary">
-          {prompt || 'Ask an agent to start a coding session.'}
-        </div>
+      <div className="min-w-0 flex-1">
+        {prompt ? (
+          <details className="group/prompt rounded-card border border-hairline bg-card/40">
+            <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-2 text-sm leading-6 text-primary">
+              <span className="min-w-0 flex-1 break-words">
+                {prompt}
+              </span>
+              <span className="mt-1 shrink-0 text-muted transition-transform group-open/prompt:rotate-90">
+                {iconChevronRight}
+              </span>
+            </summary>
+            <div className="border-t border-hairline px-3 py-2">
+              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-primary">
+                {prompt}
+              </pre>
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={copyPrompt}
+                  className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-secondary hover:bg-white/5 hover:text-primary"
+                >
+                  <span aria-hidden="true">{iconCopy}</span>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          </details>
+        ) : (
+          <div className="break-words text-sm leading-6 text-primary">
+            Ask an agent to start a coding session.
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
           <span className={statusClass(status)}>{statusLabel(status)}</span>
           {model ? <span>{model}</span> : null}
@@ -246,6 +397,19 @@ function RunSummary({
     </div>
   )
 }
+
+const iconCopy = (
+  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4">
+    <rect x="4" y="4" width="9" height="9" rx="1.5" />
+    <path d="M11 4V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1" />
+  </svg>
+)
+
+const iconChevronRight = (
+  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <path d="m6 4 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
 
 function ApprovalCallout({
   request,

@@ -21,9 +21,19 @@ describe('terminal event handling', () => {
     expect(textFromPayload({ type: 'agent_message', message: 'hello from codex' })).toBe(
       'hello from codex\r\n',
     )
-    expect(textFromPayload({ type: 'message', content: [{ text: 'hello from opencode' }] })).toBe(
-      'hello from opencode',
-    )
+    expect(
+      textFromPayload({ type: 'text', part: { type: 'text', text: 'hello from opencode' } }),
+    ).toBe('hello from opencode')
+    expect(
+      textFromPayload({
+        type: 'tool_use',
+        part: {
+          type: 'tool',
+          tool: 'bash',
+          state: { output: 'opencode tool output' },
+        },
+      }),
+    ).toBe('opencode tool output\r\n')
     expect(textFromPayload({ type: 'metadata', session_id: 'abc' })).toBe('')
   })
 

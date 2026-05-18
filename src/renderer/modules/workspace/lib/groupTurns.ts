@@ -135,6 +135,9 @@ export function groupTurns(
 
   function closeCurrent(): void {
     if (!current) return
+    const normalized = normalizeAssistantTimeline(current.activities, currentTimes)
+    current.activities = normalized.activities
+    currentTimes = normalized.times
     current.streamItems = aggregateStreamItems(
       current.activities,
       currentTimes,
@@ -264,6 +267,72 @@ function aggregateStreamItems(
     i += 1
   }
   return items
+}
+
+export function normalizeAssistantMessages(activities: AgentActivity[]): AgentActivity[] {
+  return normalizeAssistantTimeline(activities, []).activities
+}
+
+function normalizeAssistantTimeline(
+  activities: AgentActivity[],
+  times: number[],
+): { activities: AgentActivity[]; times: number[] } {
+  const normalized: AgentActivity[] = []
+  const normalizedTimes: number[] = []
+  let pendingStreamText = ''
+  let pendingStreamTime: number | undefined
+  let lastAssistantText = ''
+
+  const flushPendingStream = () => {
+    if (!pendingStreamText.trim()) {
+      pendingStreamText = ''
+      pendingStreamTime = undefined
+      return
+    }
+
+    const text = pendingStreamText
+    const at = pendingStreamTime
+    pendingStreamText = ''
+    pendingStreamTime = undefined
+    if (sameAssistantText(text, lastAssistantText)) return
+
+    normalized.push({ kind: 'message', role: 'assistant', text, stream: true })
+    if (at !== undefined) normalizedTimes.push(at)
+    lastAssistantText = text
+  }
+
+  activities.forEach((activity, index) => {
+    if (activity.kind === 'message' && activity.role === 'assistant') {
+      if (activity.stream) {
+        pendingStreamTime ??= times[index]
+        pendingStreamText += activity.text
+        return
+      }
+
+      flushPendingStream()
+      if (sameAssistantText(activity.text, lastAssistantText)) return
+
+      normalized.push(activity)
+      if (times[index] !== undefined) normalizedTimes.push(times[index])
+      lastAssistantText = activity.text
+      return
+    }
+
+    flushPendingStream()
+    normalized.push(activity)
+    if (times[index] !== undefined) normalizedTimes.push(times[index])
+  })
+
+  flushPendingStream()
+  return { activities: normalized, times: normalizedTimes }
+}
+
+function sameAssistantText(a: string, b: string): boolean {
+  return normalizeAssistantText(a) === normalizeAssistantText(b)
+}
+
+function normalizeAssistantText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 function isCommandLike(activity: AgentActivity): boolean {

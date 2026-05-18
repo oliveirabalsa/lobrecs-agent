@@ -17,7 +17,7 @@ import { registerSystemHandlers } from '../modules/system/ipc/registerSystemHand
 import { registerThreadHandlers } from '../modules/threads/ipc/registerThreadHandlers'
 import { ModelRouter } from '../router'
 import { sessionManager } from '../session'
-import { projectsStore } from '../store'
+import { projectsStore, threadsStore } from '../store'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
 
 const modelRouter = new ModelRouter({ adapterRegistry })
@@ -63,10 +63,12 @@ function configureSessionManager(context: MainIpcContext): void {
 function configureSwarmOrchestrator(context: MainIpcContext): void {
   context.swarmOrchestrator.configure({
     getProject: (projectId) => projectsStore.get(projectId) ?? undefined,
+    createThread: (input) => threadsStore.create(input),
     routeModel: (input) => context.modelRouter.route(input),
     dispatchSession: async (input) => {
-      const { sessionId } = await context.sessionManager.dispatch({
+      const { sessionId, threadId } = await context.sessionManager.dispatch({
         projectId: input.projectId,
+        threadId: input.threadId,
         prompt: input.prompt,
         agentId: input.agentId,
         model: input.model,
@@ -75,7 +77,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         isolate: false,
       })
 
-      return { sessionId, status: 'running' }
+      return { sessionId, threadId, status: 'running' }
     },
     cancelSession: (sessionId) => context.sessionManager.cancel(sessionId),
     worktrees: context.worktreeManager,

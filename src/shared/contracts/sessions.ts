@@ -23,6 +23,20 @@ export interface Session {
   completedAt?: number
 }
 
+export interface UserQuestionPromptOption {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface UserQuestionPromptQuestion {
+  id: string
+  header?: string
+  question: string
+  multiSelect: boolean
+  options: UserQuestionPromptOption[]
+}
+
 export type AgentActivity =
   | {
       kind: 'message'
@@ -92,6 +106,12 @@ export type AgentActivity =
       title: string
       options: Array<{ id: string; label: string }>
       allowFreeText?: boolean
+    }
+  | {
+      kind: 'user-question'
+      promptId: string
+      title: string
+      questions: UserQuestionPromptQuestion[]
     }
 
 export interface AgentEvent {

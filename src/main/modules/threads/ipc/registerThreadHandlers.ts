@@ -3,7 +3,9 @@ import { threadsStore } from '../../../store'
 import type {
   CreateThreadInput,
   ListThreadsOptions,
+  SearchThreadsInput,
   Thread,
+  ThreadSearchResult,
   ThreadDeletedEvent,
   ThreadUpdatedEvent,
 } from '../../../../shared/types'
@@ -37,6 +39,13 @@ export function registerThreadHandlers(): void {
   ipcMain.handle('threads:get', async (_event, id: string): Promise<Thread | null> => {
     return threadsStore.get(id)
   })
+
+  ipcMain.handle(
+    'threads:search',
+    async (_event, input: SearchThreadsInput): Promise<ThreadSearchResult[]> => {
+      return threadsStore.search(input)
+    },
+  )
 
   ipcMain.handle('threads:create', async (_event, data: CreateThreadInput): Promise<Thread> => {
     const thread = threadsStore.create(data)

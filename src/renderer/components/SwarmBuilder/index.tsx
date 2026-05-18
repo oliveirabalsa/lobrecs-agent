@@ -18,6 +18,7 @@ import {
 interface Props {
   open: boolean
   projectId: string | null
+  threadId?: string | null
   initialPrompt?: string
   installedAgents?: SupportedAgentId[]
   onClose: () => void
@@ -76,6 +77,7 @@ const TEMPLATES: Array<{
 export function SwarmBuilder({
   open,
   projectId,
+  threadId,
   initialPrompt = '',
   installedAgents = DEFAULT_SWARM_AGENT_IDS,
   onClose,
@@ -181,6 +183,7 @@ export function SwarmBuilder({
     try {
       const result = await window.agentforge.swarm.spawn({
         projectId,
+        threadId: threadId ?? undefined,
         prompt: prompt.trim(),
         strategy,
         agents,

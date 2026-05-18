@@ -10,6 +10,11 @@ export interface SwarmAgentConfig {
 
 export interface SwarmConfig {
   projectId: string
+  /**
+   * Existing conversation thread to append the swarm to. When omitted, the
+   * main process creates one thread for the whole swarm.
+   */
+  threadId?: string
   prompt: string
   strategy: 'parallel' | 'sequential' | 'fan-out'
   agents: SwarmAgentConfig[]
@@ -17,10 +22,11 @@ export interface SwarmConfig {
 
 export interface SwarmResult {
   swarmId: string
+  threadId: string
   strategy: SwarmConfig['strategy']
   sessions: Array<{
     sessionId: string
-    threadId?: string
+    threadId: string
     role: string
     worktreePath: string
     status: SessionStatus | string

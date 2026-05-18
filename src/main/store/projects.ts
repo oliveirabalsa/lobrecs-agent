@@ -31,6 +31,7 @@ function rowToProject(row: ProjectRow): Project {
     repoPath: row.repo_path,
     agentId: row.agent_id,
     modelTier: row.model_tier,
+    context: row.context,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

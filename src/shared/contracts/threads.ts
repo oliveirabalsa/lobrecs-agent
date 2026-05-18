@@ -1,3 +1,5 @@
+import type { Project } from './projects'
+
 /**
  * A Thread groups one or more sessions under a project, providing a Codex-style
  * conversation timeline. Threads carry their own metadata (title, pin state,
@@ -29,6 +31,23 @@ export interface UpdateThreadInput {
 
 export interface ListThreadsOptions {
   includeArchived?: boolean
+}
+
+export interface SearchThreadsInput {
+  query: string
+  limit?: number
+  includeArchived?: boolean
+}
+
+export type ThreadSearchMatchKind = 'recent' | 'thread' | 'project' | 'prompt' | 'message'
+
+export interface ThreadSearchResult {
+  thread: Thread
+  project: Project
+  sessionId?: string
+  matchKind: ThreadSearchMatchKind
+  matchText: string
+  updatedAt: number
 }
 
 /** Payload broadcast on `thread:updated` when thread metadata changes. */

@@ -27,6 +27,7 @@ interface ProjectsSectionProps {
   onCreateProject: () => void
   onRenameProject?: (project: Project) => void
   onDeleteProject?: (project: Project) => void
+  onNewChatForProject?: (project: Project) => void
 }
 
 export function ProjectsSection({
@@ -46,6 +47,7 @@ export function ProjectsSection({
   onCreateProject,
   onRenameProject,
   onDeleteProject,
+  onNewChatForProject,
 }: ProjectsSectionProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
@@ -115,6 +117,7 @@ export function ProjectsSection({
               onSelectThread={onSelectThread}
               onDeleteThread={onDeleteThread}
               onContextMenu={openContextMenu}
+              onNewChat={onNewChatForProject}
             />
           ))
         )}

@@ -204,6 +204,9 @@ function textFromStructuredPayload(payload: unknown): string {
   if (typeof payload.text === 'string') return payload.text
 
   const directFields = [
+    'part',
+    'state',
+    'metadata',
     'result',
     'message',
     'content',

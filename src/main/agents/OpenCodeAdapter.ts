@@ -12,6 +12,21 @@ import type { AgentEvent, AgentModel } from '../../shared/types'
 
 const OPENCODE_COMMAND_ENV = 'OPENCODE_COMMAND'
 
+interface OpenCodeParserState {
+  completionUsage?: OpenCodeCompletionUsage
+}
+
+interface OpenCodeCompletionUsage {
+  usage: {
+    input_tokens?: number
+    output_tokens?: number
+    total_tokens?: number
+    cache_read_tokens?: number
+    cache_write_tokens?: number
+  }
+  cost_usd?: number
+}
+
 export class OpenCodeAdapter implements AgentAdapter {
   readonly id = 'opencode'
   readonly name = 'OpenCode'
@@ -27,11 +42,12 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async dispatch(params: AgentDispatchParams): Promise<AgentSession> {
-    const events = new EventEmitter()
+    const events = createBufferedEventEmitter()
+    const parserState: OpenCodeParserState = {}
     let completed = false
     const emitEvent = (event: AgentEvent): void => {
       if (event.type === 'session-complete') completed = true
-      events.emit('event', event)
+      events.emitBuffered(event)
     }
     const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
     const command = resolveCommand(OPENCODE_COMMAND_ENV, 'opencode')
@@ -39,6 +55,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       'run',
       '--format',
       'json',
+      '--dangerously-skip-permissions',
       '--model',
       params.model,
       '--dir',
@@ -55,7 +72,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       const rl = createInterface({ input: child.stdout })
       rl.on('line', (line) => {
         if (!line.trim()) return
-        emitEvent(parseOpenCodeLine(line, params.sessionId))
+        emitEvent(parseOpenCodeLine(line, params.sessionId, parserState))
       })
     }
 
@@ -74,7 +91,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       emitEvent({
         type: 'session-complete',
         sessionId: params.sessionId,
-        payload: { exitCode: code, signal },
+        payload: completionPayload(code, signal, parserState),
         timestamp: Date.now(),
       } satisfies AgentEvent)
     })
@@ -106,10 +123,18 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 }
 
-function parseOpenCodeLine(line: string, sessionId: string): AgentEvent {
+function parseOpenCodeLine(
+  line: string,
+  sessionId: string,
+  state?: OpenCodeParserState,
+): AgentEvent {
   try {
     const data = JSON.parse(line) as Record<string, unknown>
     const type = typeof data.type === 'string' ? data.type : ''
+    const completionUsage = openCodeCompletionUsage(data)
+    if (completionUsage && state) {
+      state.completionUsage = completionUsage
+    }
 
     if (type.includes('error')) {
       return {
@@ -120,11 +145,19 @@ function parseOpenCodeLine(line: string, sessionId: string): AgentEvent {
       }
     }
 
-    if (type.includes('complete') || type.includes('finish')) {
+    if (
+      type === 'complete' ||
+      type === 'finish' ||
+      type === 'result' ||
+      type === 'session_complete' ||
+      type === 'session_finish' ||
+      type === 'session-complete' ||
+      type === 'session-finish'
+    ) {
       return {
         type: 'session-complete',
         sessionId,
-        payload: data,
+        payload: completionUsage ? { ...data, ...completionUsage } : data,
         timestamp: Date.now(),
       }
     }
@@ -143,4 +176,90 @@ function parseOpenCodeLine(line: string, sessionId: string): AgentEvent {
       timestamp: Date.now(),
     }
   }
+}
+
+function completionPayload(
+  exitCode: number | null,
+  signal: NodeJS.Signals | null,
+  state: OpenCodeParserState,
+): Record<string, unknown> {
+  return state.completionUsage
+    ? { exitCode, signal, ...state.completionUsage }
+    : { exitCode, signal }
+}
+
+function openCodeCompletionUsage(
+  data: Record<string, unknown>,
+): OpenCodeCompletionUsage | undefined {
+  const part = recordField(data, 'part')
+  const tokens = recordField(part, 'tokens') ?? recordField(data, 'tokens')
+  const usage: OpenCodeCompletionUsage['usage'] = {}
+
+  if (tokens) {
+    const inputTokens = numberField(tokens, 'input')
+    const outputTokens = numberField(tokens, 'output')
+    const totalTokens = numberField(tokens, 'total')
+    const cache = recordField(tokens, 'cache')
+    const cacheReadTokens = cache ? numberField(cache, 'read') : undefined
+    const cacheWriteTokens = cache ? numberField(cache, 'write') : undefined
+
+    if (inputTokens !== undefined) usage.input_tokens = inputTokens
+    if (outputTokens !== undefined) usage.output_tokens = outputTokens
+    if (totalTokens !== undefined) usage.total_tokens = totalTokens
+    if (cacheReadTokens !== undefined) usage.cache_read_tokens = cacheReadTokens
+    if (cacheWriteTokens !== undefined) usage.cache_write_tokens = cacheWriteTokens
+  }
+
+  const costUsd = numberField(part, 'cost') ?? numberField(data, 'cost')
+  const hasUsage = Object.keys(usage).length > 0
+  if (!hasUsage && costUsd === undefined) return undefined
+
+  return costUsd === undefined ? { usage } : { usage, cost_usd: costUsd }
+}
+
+function recordField(
+  object: Record<string, unknown> | undefined,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = object?.[key]
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function numberField(object: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = object?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function createBufferedEventEmitter(): EventEmitter & {
+  emitBuffered(event: AgentEvent): void
+} {
+  const events = new EventEmitter() as EventEmitter & {
+    emitBuffered(event: AgentEvent): void
+  }
+  const backlog: AgentEvent[] = []
+  let listenerReady = false
+
+  events.on('newListener', (eventName) => {
+    if (eventName !== 'event' || listenerReady) return
+
+    listenerReady = true
+    queueMicrotask(() => {
+      for (const event of backlog.splice(0)) {
+        events.emit('event', event)
+      }
+    })
+  })
+
+  events.emitBuffered = (event: AgentEvent): void => {
+    if (!listenerReady) {
+      backlog.push(event)
+      return
+    }
+
+    events.emit('event', event)
+  }
+
+  return events
 }

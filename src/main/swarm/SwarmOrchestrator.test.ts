@@ -1,13 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SwarmConfig } from '../../shared/types'
-import { SwarmOrchestrator, type SwarmDispatchInput } from './SwarmOrchestrator'
+import {
+  SwarmOrchestrator,
+  createDefaultDependencies,
+  type SwarmDispatchInput,
+} from './SwarmOrchestrator'
 
 describe('SwarmOrchestrator', () => {
+  it('does not install a hidden plan confirmation in the default launch path', () => {
+    expect(createDefaultDependencies().confirmPlan).toBeUndefined()
+  })
+
   it('spawns parallel agents in isolated worktrees', async () => {
     const worktrees = createFakeWorktrees()
+    const createThread = vi.fn(() => ({ id: 'thread-1' }))
     const dispatched: SwarmDispatchInput[] = []
     const orchestrator = new SwarmOrchestrator({
       getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread,
       routeModel: async (input) => ({
         agentId: input.preferredAgentId,
         model: input.modelOverride ?? 'claude-sonnet-4-6',
@@ -22,8 +32,15 @@ describe('SwarmOrchestrator', () => {
     const result = await orchestrator.spawn(baseConfig())
 
     expect(result.strategy).toBe('parallel')
+    expect(result.threadId).toBe('thread-1')
     expect(result.sessions).toHaveLength(2)
+    expect(result.sessions.map((session) => session.threadId)).toEqual(['thread-1', 'thread-1'])
+    expect(createThread).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      title: 'Swarm: Review the current codebase',
+    })
     expect(worktrees.create).toHaveBeenCalledTimes(2)
+    expect(dispatched.map((call) => call.threadId)).toEqual(['thread-1', 'thread-1'])
     expect(dispatched.map((call) => call.repoPath)).toEqual(['/tmp/worktree-1', '/tmp/worktree-2'])
     expect(dispatched.map((call) => call.agentId)).toEqual(['claude-code', 'codex'])
     expect(dispatched.map((call) => call.model)).toEqual([
@@ -40,6 +57,7 @@ describe('SwarmOrchestrator', () => {
     const routeInputs: Array<{ preferredAgentId: string; modelOverride?: string }> = []
     const orchestrator = new SwarmOrchestrator({
       getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
       routeModel: async (input) => {
         routeInputs.push({
           preferredAgentId: input.preferredAgentId,
@@ -88,26 +106,74 @@ describe('SwarmOrchestrator', () => {
     expect(worktrees.create).toHaveBeenCalledTimes(3)
   })
 
-  it('feeds sequential output into the next agent prompt', async () => {
+  it('appends swarm agents to an existing thread without creating another chat', async () => {
     const worktrees = createFakeWorktrees()
+    const createThread = vi.fn(() => ({ id: 'unexpected-thread' }))
     const dispatched: SwarmDispatchInput[] = []
     const orchestrator = new SwarmOrchestrator({
-      getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
-      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'gpt-5.3-codex' }),
-      dispatchSession: (input) => {
+      getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread,
+      routeModel: async (input) => ({
+        agentId: input.preferredAgentId,
+        model: input.modelOverride ?? 'claude-sonnet-4-6',
+      }),
+      dispatchSession: async (input) => {
         dispatched.push(input)
-        return { sessionId: input.sessionId, status: 'running', output: `output from ${input.role}` }
+        return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
       },
       worktrees,
     })
 
-    await orchestrator.spawn({
+    const result = await orchestrator.spawn({
+      ...baseConfig(),
+      threadId: 'active-thread',
+    })
+
+    expect(result.threadId).toBe('active-thread')
+    expect(result.sessions.map((session) => session.threadId)).toEqual([
+      'active-thread',
+      'active-thread',
+    ])
+    expect(dispatched.map((call) => call.threadId)).toEqual([
+      'active-thread',
+      'active-thread',
+    ])
+    expect(createThread).not.toHaveBeenCalled()
+  })
+
+  it('waits for sequential completion before launching the next agent prompt', async () => {
+    const worktrees = createFakeWorktrees()
+    const dispatched: SwarmDispatchInput[] = []
+    const completions = new Map<string, Deferred<{ status: 'done'; output: string }>>()
+    const orchestrator = new SwarmOrchestrator({
+      getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'gpt-5.3-codex' }),
+      dispatchSession: (input) => {
+        dispatched.push(input)
+        completions.set(input.sessionId, deferred<{ status: 'done'; output: string }>())
+        return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
+      },
+      waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+      worktrees,
+    })
+
+    const result = await orchestrator.spawn({
       ...baseConfig(),
       strategy: 'sequential',
     })
 
-    expect(dispatched).toHaveLength(2)
+    expect(result.sessions).toHaveLength(1)
+    expect(dispatched).toHaveLength(1)
     expect(dispatched[0].prompt).not.toContain('Context from previous step')
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: 'output from analyzer',
+    })
+
+    await waitFor(() => dispatched.length === 2)
+
+    expect(dispatched.map((call) => call.threadId)).toEqual(['thread-1', 'thread-1'])
     expect(dispatched[1].prompt).toContain('Context from previous step')
     expect(dispatched[1].prompt).toContain('output from analyzer')
   })
@@ -117,8 +183,13 @@ describe('SwarmOrchestrator', () => {
     const cancelSession = vi.fn()
     const orchestrator = new SwarmOrchestrator({
       getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
       routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'claude-sonnet-4-6' }),
-      dispatchSession: (input) => ({ sessionId: input.sessionId, status: 'running' }),
+      dispatchSession: (input) => ({
+        sessionId: input.sessionId,
+        threadId: input.threadId,
+        status: 'running',
+      }),
       cancelSession,
       worktrees,
     })
@@ -172,4 +243,30 @@ function createFakeWorktrees() {
       }
     }),
   }
+}
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (error: unknown) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  throw new Error('Timed out waiting for condition')
 }

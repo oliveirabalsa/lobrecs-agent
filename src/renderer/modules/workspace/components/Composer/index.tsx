@@ -13,8 +13,7 @@ import type {
   SessionStatus,
   SupportedAgentId,
 } from '../../../../../shared/types'
-import { Button, Spinner } from '../../../../components/ui'
-import { ApprovalModeChip } from './ApprovalModeChip'
+import { Spinner } from '../../../../components/ui'
 import { AttachButton } from './AttachButton'
 import { AttachmentStrip } from './AttachmentStrip'
 import { ModelChip } from './ModelChip'
@@ -54,6 +53,8 @@ export interface ComposerProps {
   contextPercent?: number | null
   /** Optional worktree branch label for the footer. */
   worktreeBranch?: string | null
+  hasProjectContext?: boolean
+  onContextClick?: () => void
   onSessionStarted: (session: ComposerStartedSession) => void
 }
 
@@ -103,6 +104,8 @@ export function Composer({
   onCancelSession,
   contextPercent = null,
   worktreeBranch = null,
+  hasProjectContext = false,
+  onContextClick,
   onSessionStarted,
 }: ComposerProps) {
   const state = useComposerState({ projectId: project.id, prefillPrompt })
@@ -115,8 +118,6 @@ export function Composer({
     clearAttachments,
     attaching,
     setAttaching,
-    approvalMode,
-    setApprovalMode,
     modelSelection,
     setModelSelection,
     modelGroups,
@@ -315,7 +316,6 @@ export function Composer({
               disabled={submitting}
               onFilesSelected={(files) => void attachImageFiles(files)}
             />
-            <ApprovalModeChip mode={approvalMode} onChange={setApprovalMode} />
             {busyReason ? (
               <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
             ) : null}
@@ -334,21 +334,6 @@ export function Composer({
               routerPreview={routerPreview}
               onSelect={setModelSelection}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Voice input (coming soon)"
-              disabled
-              leadingIcon={<MicIcon />}
-              // Tooltip via title attribute — Radix tooltip skipped for now.
-              onClick={() => {
-                /* no-op until voice input ships */
-              }}
-              className="cursor-not-allowed"
-            />
-            <span title="Coming soon" className="sr-only">
-              Voice input coming soon
-            </span>
             <SendButton
               running={running}
               canSend={canSend}
@@ -369,27 +354,12 @@ export function Composer({
         </div>
       ) : null}
 
-      <StatusFooter worktreeBranch={worktreeBranch} contextPercent={contextPercent} />
+      <StatusFooter
+        worktreeBranch={worktreeBranch}
+        contextPercent={contextPercent}
+        hasProjectContext={hasProjectContext}
+        onContextClick={onContextClick}
+      />
     </form>
-  )
-}
-
-function MicIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="9" y="3" width="6" height="12" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0" />
-      <line x1="12" y1="19" x2="12" y2="22" />
-    </svg>
   )
 }

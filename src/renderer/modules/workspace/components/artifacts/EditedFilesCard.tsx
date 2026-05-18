@@ -1,3 +1,4 @@
+import { DiffEditor } from '@monaco-editor/react'
 import { useMemo, useState } from 'react'
 import type { DiffProposal } from '../../../../../shared/types'
 import { Button } from '../../../../components/ui'
@@ -169,35 +170,52 @@ function FileRow({
 }
 
 function InlineDiffPreview({ proposal }: { proposal: DiffProposal }) {
-  const proposed = proposal.proposedContent ?? ''
-  const original = proposal.originalContent ?? ''
-  const snippet = (text: string, max = 40) => {
-    const lines = text.split('\n')
-    const trimmed = lines.slice(0, max)
-    const more = lines.length - trimmed.length
-    return more > 0 ? `${trimmed.join('\n')}\n… ${more} more line${more === 1 ? '' : 's'}` : trimmed.join('\n')
-  }
-
   return (
-    <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-      <div className="min-w-0">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-accent-del">
-          Before
-        </div>
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded border border-hairline bg-card px-2 py-1.5 font-mono text-[11px] text-secondary">
-          {snippet(original) || '(empty)'}
-        </pre>
-      </div>
-      <div className="min-w-0">
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-accent-add">
-          After
-        </div>
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded border border-hairline bg-card px-2 py-1.5 font-mono text-[11px] text-secondary">
-          {snippet(proposed) || '(empty)'}
-        </pre>
-      </div>
+    <div className="h-72 min-w-0 overflow-hidden rounded border border-hairline bg-card">
+      <DiffEditor
+        key={proposal.filePath}
+        height="100%"
+        theme="vs-dark"
+        original={proposal.originalContent || ''}
+        modified={proposal.proposedContent || ''}
+        language={languageFromPath(proposal.filePath)}
+        options={{
+          readOnly: true,
+          originalEditable: false,
+          renderSideBySide: false,
+          minimap: { enabled: false },
+          fontSize: 11,
+          lineHeight: 17,
+          scrollBeyondLastLine: false,
+          automaticLayout: true,
+          wordWrap: 'on',
+        }}
+      />
     </div>
   )
+}
+
+function languageFromPath(filePath: string) {
+  const extension = filePath.split('.').at(-1)?.toLowerCase()
+
+  switch (extension) {
+    case 'ts':
+    case 'tsx':
+      return 'typescript'
+    case 'js':
+    case 'jsx':
+      return 'javascript'
+    case 'json':
+      return 'json'
+    case 'css':
+      return 'css'
+    case 'html':
+      return 'html'
+    case 'md':
+      return 'markdown'
+    default:
+      return 'plaintext'
+  }
 }
 
 const iconFileEdit = (

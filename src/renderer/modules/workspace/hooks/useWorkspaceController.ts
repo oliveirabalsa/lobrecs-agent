@@ -6,12 +6,9 @@ import type {
   Session,
   SessionStatus,
 } from '../../../../shared/types'
-import {
-  isSessionStatus,
-  useTabs,
-  type ActiveSessionMeta,
-  type StartedSessionSummary,
-} from '../../sessions'
+import { isSessionStatus } from '../../sessions/domain/sessionStatus'
+import { useTabs, type Tab } from '../../sessions/state/tabs'
+import type { ActiveSessionMeta, StartedSessionSummary } from '../../sessions/types'
 
 export type MainView = 'workspace' | 'costs' | 'automations'
 
@@ -47,6 +44,64 @@ function toStartedSessionAgentId(
     return agentId
   }
   return undefined
+}
+
+export interface WorkspaceSwarmStartedResult {
+  swarmId: string
+  threadId: string
+  sessions: Array<{
+    sessionId: string
+    threadId: string
+    role: string
+    status: string
+    agentId?: Project['agentId']
+    model?: string
+  }>
+}
+
+export interface SwarmWorkspaceState {
+  activeSession: ActiveSessionMeta
+  tab: Tab
+}
+
+export function buildSwarmWorkspaceState(
+  result: WorkspaceSwarmStartedResult,
+  projectId: string,
+  createdAt = Date.now(),
+): SwarmWorkspaceState | null {
+  const visibleSession = result.sessions.at(-1)
+  if (!visibleSession) return null
+
+  const status = isSessionStatus(visibleSession.status) ? visibleSession.status : 'running'
+  const model = visibleSession.model
+    ? `${visibleSession.agentId ?? 'agent'} / ${visibleSession.model}`
+    : 'swarm'
+  const prompt =
+    result.sessions.length > 1
+      ? `Swarm ${result.swarmId.slice(0, 8)} (${result.sessions.length} agents)`
+      : `[${visibleSession.role}] swarm`
+
+  return {
+    activeSession: {
+      id: visibleSession.sessionId,
+      threadId: result.threadId,
+      prompt,
+      status,
+      routingDecision: null,
+      agentId: visibleSession.agentId,
+      modelOverride: visibleSession.model ?? 'swarm',
+      createdAt,
+    },
+    tab: {
+      sessionId: visibleSession.sessionId,
+      projectId,
+      prompt,
+      status,
+      model,
+      tier: 'balanced',
+      createdAt,
+    },
+  }
 }
 
 export function useWorkspaceController() {
@@ -156,6 +211,10 @@ export function useWorkspaceController() {
       })
   }
 
+  function handleProjectUpdated(project: Project) {
+    setSelectedProject((current) => (current?.id === project.id ? project : current))
+  }
+
   function handleSessionStarted(summary: StartedSessionSummary) {
     setActiveSession({
       id: summary.sessionId,
@@ -231,6 +290,15 @@ export function useWorkspaceController() {
       setBannerError(error instanceof Error ? error.message : 'Failed to reject request')
     }
   }
+
+  useEffect(() => {
+    const unsubscribe = window.agentforge.onShortcut('shortcut:approve', () => {
+      if (!approvalRequest || !activeSessionId) return
+      void handleApproveApproval()
+    })
+
+    return unsubscribe
+  }, [activeSessionId, approvalRequest])
 
   async function handleRerunActiveSession(): Promise<StartedSessionSummary | null> {
     const prompt = activeSession?.prompt.trim()
@@ -334,6 +402,26 @@ export function useWorkspaceController() {
     setBannerError(null)
   }
 
+  useEffect(() => {
+    if (!activeThreadId || !selectedProject?.id) return
+
+    const unsubscribe = window.agentforge.threads.onUpdated((event) => {
+      const thread = event.thread
+      if (thread.id !== activeThreadId || thread.projectId !== selectedProject.id) return
+      if (!thread.lastSessionId || thread.lastSessionId === activeSessionId) return
+
+      void window.agentforge.sessions
+        .get(thread.lastSessionId)
+        .then((session) => {
+          if (!session || session.threadId !== activeThreadId) return
+          handleOpenSession(session)
+        })
+        .catch(() => undefined)
+    })
+
+    return unsubscribe
+  }, [activeSessionId, activeThreadId, selectedProject?.id])
+
   async function handleCloseTab(sessionId: string) {
     const tab = tabs.tabs.find((item) => item.sessionId === sessionId)
     if (tab?.status === 'running' || tab?.status === 'awaiting-approval') {
@@ -358,45 +446,14 @@ export function useWorkspaceController() {
     }
   }
 
-  function handleSwarmStarted(result: {
-    swarmId: string
-    sessions: Array<{
-      sessionId: string
-      threadId?: string
-      role: string
-      status: string
-      agentId?: Project['agentId']
-      model?: string
-    }>
-  }) {
-    for (const session of result.sessions) {
-      tabs.addTab({
-        sessionId: session.sessionId,
-        projectId: selectedProject?.id ?? '',
-        prompt: `[${session.role}] swarm ${result.swarmId.slice(0, 8)}`,
-        status: isSessionStatus(session.status) ? session.status : 'running',
-        model: session.model
-          ? `${session.agentId ?? 'agent'} / ${session.model}`
-          : 'swarm',
-        tier: 'balanced',
-        createdAt: Date.now(),
-      })
-    }
+  function handleSwarmStarted(result: WorkspaceSwarmStartedResult) {
+    const state = buildSwarmWorkspaceState(result, selectedProject?.id ?? '')
+    if (!state) return
 
-    const first = result.sessions[0]
-    if (first) {
-      setActiveSession({
-        id: first.sessionId,
-        threadId: first.threadId,
-        prompt: `[${first.role}] swarm`,
-        status: isSessionStatus(first.status) ? first.status : 'running',
-        routingDecision: null,
-        agentId: first.agentId,
-        modelOverride: first.model ?? 'swarm',
-        createdAt: Date.now(),
-      })
-      setMainView('workspace')
-    }
+    tabs.addTab(state.tab)
+    setActiveSession(state.activeSession)
+    if (selectedProject) writeActiveThread(selectedProject.id, result.threadId)
+    setMainView('workspace')
   }
 
   async function handleFeedback(
@@ -415,6 +472,19 @@ export function useWorkspaceController() {
   function handleNewTab() {
     setMainView('workspace')
     clearActiveThread()
+  }
+
+  function handleNewChatForProject(project: Project) {
+    // Clear the stored active thread for this project so handleProjectSelect
+    // won't try to restore it asynchronously, then open a blank workspace.
+    writeActiveThread(project.id, null)
+    setSelectedProject(project)
+    setActiveSession(null)
+    tabs.resetTabs()
+    setDiffProposals([])
+    setApprovalRequest(null)
+    setBannerError(null)
+    setMainView('workspace')
   }
 
   return {
@@ -437,6 +507,7 @@ export function useWorkspaceController() {
     setSwarmOpen,
     handleSelectedProjectDeleted,
     handleProjectSelect,
+    handleProjectUpdated,
     handleSessionStarted,
     updateActiveStatus,
     handleApprovalRequest,
@@ -452,5 +523,6 @@ export function useWorkspaceController() {
     handleSwarmStarted,
     handleFeedback,
     handleNewTab,
+    handleNewChatForProject,
   }
 }

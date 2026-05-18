@@ -22,25 +22,37 @@ describe('modelDiscovery', () => {
     expect(models[0]).toMatchObject({ agentId: 'codex', tier: 'frontier' })
   })
 
-  it('parses OpenCode model lines', () => {
-    const models = parseOpenCodeModels('opencode/minimax-m2.5-free\nminimax/MiniMax-M2.7\n')
+  it('parses only OpenCode MiniMax token-plan model lines', () => {
+    const models = parseOpenCodeModels(
+      [
+        'opencode/minimax-m2.5-free',
+        'minimax/MiniMax-M2.7',
+        'minimax-cn-coding-plan/MiniMax-M2.7',
+        'minimax-coding-plan/MiniMax-M2',
+        'minimax-coding-plan/MiniMax-M2.5',
+        'minimax-coding-plan/MiniMax-M2.7',
+      ].join('\n'),
+    )
 
     expect(models.map((model) => model.id)).toEqual([
-      'opencode/minimax-m2.5-free',
-      'minimax/MiniMax-M2.7',
+      'minimax-coding-plan/MiniMax-M2',
+      'minimax-coding-plan/MiniMax-M2.5',
+      'minimax-coding-plan/MiniMax-M2.7',
     ])
   })
 
   it('picks the closest available model for the requested tier', () => {
-    const models = parseOpenCodeModels('opencode/minimax-m2.5-free\nminimax/MiniMax-M2.7\n')
+    const models = parseOpenCodeModels(
+      'minimax-coding-plan/MiniMax-M2\nminimax-coding-plan/MiniMax-M2.7\n',
+    )
 
-    expect(pickModelForTier(models, 'frontier')?.id).toBe('minimax/MiniMax-M2.7')
+    expect(pickModelForTier(models, 'frontier')?.id).toBe('minimax-coding-plan/MiniMax-M2.7')
   })
 
   it('infers tiers for unknown local model names', () => {
     expect(inferModelTier('claude-haiku-4-5-20251001')).toBe('lightweight')
     expect(inferModelTier('claude-opus-4-7')).toBe('frontier')
-    expect(inferModelTier('minimax/MiniMax-M2.7')).toBe('advanced')
+    expect(inferModelTier('minimax-coding-plan/MiniMax-M2.7')).toBe('advanced')
   })
 
   it('keeps Claude fallback models concrete instead of displaying short aliases', () => {

@@ -2,8 +2,10 @@ import type { IpcRendererEvent } from 'electron'
 import type {
   CreateThreadInput,
   ListThreadsOptions,
+  SearchThreadsInput,
   Thread,
   ThreadDeletedEvent,
+  ThreadSearchResult,
   ThreadUpdatedEvent,
 } from '../../shared/contracts/threads'
 import type { IpcInvoker, IpcSubscriber } from './ipc'
@@ -11,6 +13,7 @@ import type { IpcInvoker, IpcSubscriber } from './ipc'
 export interface ThreadsApi {
   list(projectId: string, opts?: ListThreadsOptions): Promise<Thread[]>
   get(id: string): Promise<Thread | null>
+  search(input: SearchThreadsInput): Promise<ThreadSearchResult[]>
   create(data: CreateThreadInput): Promise<Thread>
   rename(params: { id: string; title: string }): Promise<Thread>
   delete(id: string): Promise<void>
@@ -33,6 +36,7 @@ export function createThreadsApi(
   return {
     list: (projectId, opts) => ipcRenderer.invoke('threads:list', projectId, opts),
     get: (id) => ipcRenderer.invoke('threads:get', id),
+    search: (input) => ipcRenderer.invoke('threads:search', input),
     create: (data) => ipcRenderer.invoke('threads:create', data),
     rename: (params) => ipcRenderer.invoke('threads:rename', params),
     delete: (id) => ipcRenderer.invoke('threads:delete', id),

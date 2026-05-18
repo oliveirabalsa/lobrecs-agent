@@ -37,6 +37,7 @@ describe('projectsStore', () => {
     })
 
     expect(projectsStore.list().map((project) => project.id)).toEqual([newer.id, older.id])
+    expect(projectsStore.get(newer.id)?.context).toBe('project instructions')
     expect(projectsStore.getContext(newer.id)).toBe('project instructions')
   })
 
@@ -64,6 +65,7 @@ describe('projectsStore', () => {
       repoPath: '/repo/initial',
       agentId: 'claude-code',
       modelTier: 'frontier',
+      context: 'new context',
       updatedAt: 3_000,
     })
     expect(projectsStore.getContext(project.id)).toBe('new context')

@@ -14,9 +14,9 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'gpt-5.4': { inputPer1M: 2, outputPer1M: 8 },
   'gpt-5.5': { inputPer1M: 5, outputPer1M: 20 },
   minimax: { inputPer1M: 0.1, outputPer1M: 0.3 },
-  'opencode/minimax-m2.5-free': { inputPer1M: 0, outputPer1M: 0 },
-  'minimax/MiniMax-M2.5': { inputPer1M: 0.1, outputPer1M: 0.3 },
-  'minimax/MiniMax-M2.7': { inputPer1M: 0.1, outputPer1M: 0.3 },
+  'minimax-coding-plan/MiniMax-M2': { inputPer1M: 0.1, outputPer1M: 0.3 },
+  'minimax-coding-plan/MiniMax-M2.5': { inputPer1M: 0.1, outputPer1M: 0.3 },
+  'minimax-coding-plan/MiniMax-M2.7': { inputPer1M: 0.1, outputPer1M: 0.3 },
 }
 
 export function estimateCost(model: string, tokensIn: number, tokensOut: number): number {

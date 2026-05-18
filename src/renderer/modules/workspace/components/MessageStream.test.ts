@@ -48,6 +48,26 @@ describe('splitFinalAssistant', () => {
     const result = splitFinalAssistant(items)
 
     expect(result.finalAssistantText).toBe('final answer')
-    expect(result.renderable.map((item) => item.kind)).toEqual(['file-change'])
+    expect(result.renderable).toEqual([])
+    expect(result.trailingCodeChanges.map((item) => item.kind)).toEqual(['file-change'])
+  })
+
+  it('keeps code changes after the final answer and before completion metrics', () => {
+    const items: StreamItem[] = [
+      { kind: 'message', role: 'assistant', text: 'summary' },
+      {
+        kind: 'file-change',
+        filePath: 'src/example.ts',
+        changeType: 'modified',
+        status: 'pending',
+      },
+      { kind: 'completion', status: 'done', summary: 'Session complete' },
+    ]
+
+    const result = splitFinalAssistant(items)
+
+    expect(result.finalAssistantText).toBe('summary')
+    expect(result.renderable).toEqual([])
+    expect(result.trailingCodeChanges).toHaveLength(1)
   })
 })

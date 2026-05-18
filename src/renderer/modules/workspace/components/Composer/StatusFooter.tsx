@@ -3,29 +3,45 @@ interface StatusFooterProps {
   worktreeBranch?: string | null
   /** Percentage 0–100 (or null if unknown). */
   contextPercent: number | null
+  hasProjectContext?: boolean
+  onContextClick?: () => void
 }
 
 /**
- * 22px Cursor-style accent row below the composer card. Left shows the
- * working location (`⊡ Local` or `Worktree: <branch>`); right shows the
- * context usage indicator.
+ * 22px Cursor-style accent row below the composer card. Left shows a worktree
+ * label when available; right opens project context.
  */
-export function StatusFooter({ worktreeBranch, contextPercent }: StatusFooterProps) {
-  // TODO: derive worktree branch from active session metadata once exposed.
-  const locationLabel = worktreeBranch ? `Worktree: ${worktreeBranch}` : 'Local'
+export function StatusFooter({
+  worktreeBranch,
+  contextPercent,
+  hasProjectContext = false,
+  onContextClick,
+}: StatusFooterProps) {
+  const locationLabel = worktreeBranch ? `Worktree: ${worktreeBranch}` : null
   const contextLabel =
-    contextPercent === null ? '— context' : `${Math.max(0, Math.min(100, Math.round(contextPercent)))}% context`
+    contextPercent === null ? 'Context' : `${Math.max(0, Math.min(100, Math.round(contextPercent)))}% context`
 
   return (
     <div className="flex h-[22px] min-w-0 items-center justify-between gap-3 px-3 text-[11px] text-muted">
-      <span className="inline-flex min-w-0 items-center gap-1">
-        <span className="shrink-0" aria-hidden="true">⊡</span>
-        <span className="truncate">{locationLabel}</span>
-      </span>
-      <span className="inline-flex shrink-0 items-center gap-1">
-        <span aria-hidden="true">○</span>
+      {locationLabel ? (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <span className="shrink-0" aria-hidden="true">⊡</span>
+          <span className="truncate">{locationLabel}</span>
+        </span>
+      ) : (
+        <span aria-hidden="true" />
+      )}
+      <button
+        type="button"
+        onClick={onContextClick}
+        disabled={!onContextClick}
+        className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-primary disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted"
+        aria-label="Edit project context"
+        title="Edit project context"
+      >
+        <span aria-hidden="true">{hasProjectContext ? '●' : '○'}</span>
         <span>{contextLabel}</span>
-      </span>
+      </button>
     </div>
   )
 }

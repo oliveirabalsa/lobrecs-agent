@@ -63,4 +63,35 @@ describe('renderStreamItem diff actions', () => {
     expect(props.proposals).toEqual([proposal])
     expect(props.onReview).toBe(onReview)
   })
+
+  it('renders agent question prompts as answerable cards', () => {
+    const onAnswer = vi.fn()
+    const prompt = {
+      kind: 'user-question',
+      promptId: 'user-question:1',
+      title: 'Agent questions',
+      questions: [
+        {
+          id: 'question-1',
+          header: 'Scope',
+          question: 'Which area?',
+          multiSelect: false,
+          options: [{ id: 'option-1', label: 'Sidebar' }],
+        },
+      ],
+    } satisfies Extract<StreamItem, { kind: 'user-question' }>
+
+    const node = renderStreamItem(prompt, 'question', {
+      sessionId: 'session-1',
+      running: false,
+      pendingUserQuestionPromptId: prompt.promptId,
+      onAnswerUserQuestion: onAnswer,
+    })
+
+    const props = elementProps<{ prompt: typeof prompt; active?: boolean; onAnswer?: unknown }>(node)
+
+    expect(props.prompt).toBe(prompt)
+    expect(props.active).toBe(true)
+    expect(props.onAnswer).toBe(onAnswer)
+  })
 })

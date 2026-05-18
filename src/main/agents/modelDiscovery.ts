@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { MODEL_MAP } from '../../shared/types'
+import { MODEL_MAP, OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER } from '../../shared/types'
 import type { AgentModel, ModelTier, SupportedAgentId } from '../../shared/types'
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
@@ -74,8 +74,13 @@ export function parseOpenCodeModels(output: string): AgentModel[] {
     .split(/\r?\n/)
     .map((line) => line.replace(ANSI_PATTERN, '').trim())
     .filter((line) => line.includes('/') && !line.includes(' '))
+    .filter(isOpenCodeMiniMaxTokenPlanModel)
 
   return dedupeModels(ids.map((id) => createAgentModel('opencode', id, 'cli')))
+}
+
+export function isOpenCodeMiniMaxTokenPlanModel(id: string): boolean {
+  return id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)
 }
 
 export function createAgentModel(

@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import type {
   CreateThreadInput,
   ListThreadsOptions,
+  Project,
+  SearchThreadsInput,
   Thread,
+  ThreadSearchMatchKind,
+  ThreadSearchResult,
   UpdateThreadInput,
 } from '../../shared/types'
 import { getDb } from './db'
@@ -18,6 +22,19 @@ type ThreadRow = {
   archived_at: number | null
 }
 
+type ThreadSearchRow = ThreadRow & {
+  project_name: string
+  project_repo_path: string
+  project_agent_id: Project['agentId']
+  project_model_tier: Project['modelTier']
+  project_context: string | null
+  project_created_at: number
+  project_updated_at: number
+  session_id: string | null
+  session_prompt: string | null
+  event_payload: string | null
+}
+
 function rowToThread(row: ThreadRow): Thread {
   return {
     id: row.id,
@@ -28,6 +45,19 @@ function rowToThread(row: ThreadRow): Thread {
     pinned: row.pinned === 1,
     lastSessionId: row.last_session_id ?? undefined,
     archivedAt: row.archived_at ?? undefined,
+  }
+}
+
+function rowToSearchProject(row: ThreadSearchRow): Project {
+  return {
+    id: row.project_id,
+    name: row.project_name,
+    repoPath: row.project_repo_path,
+    agentId: row.project_agent_id,
+    modelTier: row.project_model_tier,
+    context: row.project_context,
+    createdAt: row.project_created_at,
+    updatedAt: row.project_updated_at,
   }
 }
 
@@ -57,6 +87,62 @@ export const threadsStore = {
       | ThreadRow
       | undefined
     return row ? rowToThread(row) : null
+  },
+
+  search(input: SearchThreadsInput): ThreadSearchResult[] {
+    const query = normalizeSearchQuery(input.query)
+    const limit = normalizeSearchLimit(input.limit)
+    const includeArchived = input.includeArchived ?? false
+    const params: unknown[] = []
+    const archivedSql = includeArchived ? '' : 'AND t.archived_at IS NULL'
+    const querySql = query
+      ? `
+        AND (
+          lower(t.title) LIKE ? ESCAPE '\\'
+          OR lower(p.name) LIKE ? ESCAPE '\\'
+          OR lower(s.prompt) LIKE ? ESCAPE '\\'
+          OR lower(e.payload) LIKE ? ESCAPE '\\'
+        )
+      `
+      : ''
+
+    if (query) {
+      const like = `%${escapeLike(query)}%`
+      params.push(like, like, like, like)
+    }
+
+    params.push(limit * 8)
+
+    const rows = getDb()
+      .prepare(
+        `
+          SELECT
+            t.*,
+            p.name AS project_name,
+            p.repo_path AS project_repo_path,
+            p.agent_id AS project_agent_id,
+            p.model_tier AS project_model_tier,
+            p.context AS project_context,
+            p.created_at AS project_created_at,
+            p.updated_at AS project_updated_at,
+            s.id AS session_id,
+            s.prompt AS session_prompt,
+            e.payload AS event_payload
+          FROM threads t
+          JOIN projects p ON p.id = t.project_id
+          LEFT JOIN sessions s ON s.thread_id = t.id
+          LEFT JOIN session_events e ON e.session_id = s.id
+          WHERE 1 = 1
+          AND t.last_session_id IS NOT NULL
+          ${archivedSql}
+          ${querySql}
+          ORDER BY t.pinned DESC, t.updated_at DESC, t.created_at DESC, s.created_at DESC, e.id DESC
+          LIMIT ?
+        `,
+      )
+      .all(...params) as ThreadSearchRow[]
+
+    return collapseSearchRows(rows, query).slice(0, limit)
   },
 
   create(data: CreateThreadInput & { id?: string; createdAt?: number }): Thread {
@@ -202,6 +288,113 @@ export const threadsStore = {
     migrate(orphanRows)
     return orphanRows.length
   },
+}
+
+function collapseSearchRows(rows: ThreadSearchRow[], query: string): ThreadSearchResult[] {
+  const byThread = new Map<string, ThreadSearchResult & { score: number }>()
+
+  for (const row of rows) {
+    const candidate = createSearchResult(row, query)
+    const existing = byThread.get(candidate.thread.id)
+    if (!existing || candidate.score > existing.score) {
+      byThread.set(candidate.thread.id, candidate)
+    }
+  }
+
+  return [...byThread.values()]
+    .sort((left, right) => right.score - left.score || right.updatedAt - left.updatedAt)
+    .map(({ score: _score, ...result }) => result)
+}
+
+function createSearchResult(
+  row: ThreadSearchRow,
+  query: string,
+): ThreadSearchResult & { score: number } {
+  const thread = rowToThread(row)
+  const project = rowToSearchProject(row)
+  const messageText = textFromPayload(row.event_payload)
+  const fields: Array<{
+    kind: ThreadSearchMatchKind
+    text: string
+    score: number
+  }> = query
+    ? [
+        { kind: 'thread', text: thread.title, score: 500 },
+        { kind: 'project', text: project.name, score: 400 },
+        { kind: 'prompt', text: row.session_prompt ?? '', score: 300 },
+        { kind: 'message', text: messageText, score: 200 },
+      ]
+    : [{ kind: 'recent', text: thread.title, score: 100 }]
+
+  const match = fields.find((field) => includesQuery(field.text, query)) ?? fields[0]
+
+  return {
+    thread,
+    project,
+    sessionId: row.session_id ?? undefined,
+    matchKind: match.kind,
+    matchText: snippetForText(match.text || thread.title, query),
+    updatedAt: thread.updatedAt,
+    score: match.score + Math.min(thread.updatedAt / 1_000_000_000_000, 1),
+  }
+}
+
+function normalizeSearchQuery(query: string): string {
+  return query.trim().toLowerCase()
+}
+
+function normalizeSearchLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return 30
+  return Math.min(Math.max(Math.floor(limit), 1), 80)
+}
+
+function escapeLike(query: string): string {
+  return query.replace(/[\\%_]/g, (match) => `\\${match}`)
+}
+
+function includesQuery(text: string, query: string): boolean {
+  if (!query) return true
+  return text.toLowerCase().includes(query)
+}
+
+function snippetForText(text: string, query: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  if (!query || trimmed.length <= 180) return trimmed
+
+  const index = trimmed.toLowerCase().indexOf(query)
+  if (index < 0) return trimmed.slice(0, 180).trimEnd()
+
+  const start = Math.max(0, index - 70)
+  const end = Math.min(trimmed.length, index + query.length + 90)
+  const prefix = start > 0 ? '...' : ''
+  const suffix = end < trimmed.length ? '...' : ''
+
+  return `${prefix}${trimmed.slice(start, end).trim()}${suffix}`
+}
+
+function textFromPayload(payload: string | null): string {
+  if (!payload) return ''
+
+  try {
+    const parsed = JSON.parse(payload) as unknown
+    return textFromUnknown(parsed)
+  } catch {
+    return payload
+  }
+}
+
+function textFromUnknown(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return ''
+
+  const record = value as Record<string, unknown>
+  for (const field of ['text', 'message', 'content', 'summary', 'result', 'output']) {
+    const item = record[field]
+    if (typeof item === 'string') return item
+  }
+
+  return JSON.stringify(record)
 }
 
 function requireThread(id: string): Thread {

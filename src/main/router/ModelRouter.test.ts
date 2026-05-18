@@ -112,7 +112,7 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('opencode/minimax-m2.5-free')
+    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
   })
 
   it('does not dispatch an unavailable adapter just because it has a manual override', async () => {
@@ -130,7 +130,7 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('minimax/MiniMax-M2.7')
+    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2.7')
     expect(decision.reasoning).toContain('unavailable')
   })
 

@@ -14,11 +14,12 @@ import {
   textFromPayload,
 } from '../../../components/TerminalPanel/events'
 import {
-  isClaudeSessionEndCwdDeletedWarning,
+  isClaudeSessionEndHookWarning,
   processWarningKey,
 } from '../../../../shared/contracts/agentOutput'
 
 export type PlanPromptActivity = Extract<AgentActivity, { kind: 'plan-prompt' }>
+export type UserQuestionActivity = Extract<AgentActivity, { kind: 'user-question' }>
 
 interface TimedActivity {
   activity: AgentActivity
@@ -40,6 +41,7 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
   // Resolved set lives in a ref so updates don't cause a render of their own —
   // the version bump above is what triggers the recompute when needed.
   const resolvedPromptIdsRef = useRef<Set<string>>(new Set())
+  const resolvedUserQuestionIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     optionsRef.current = options
@@ -48,6 +50,7 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
   // Reset the resolved set when switching sessions.
   useEffect(() => {
     resolvedPromptIdsRef.current = new Set()
+    resolvedUserQuestionIdsRef.current = new Set()
     setResolvedPromptVersion((v) => v + 1)
   }, [sessionId])
 
@@ -113,9 +116,26 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     // refreshes when the resolved set mutates.
   }, [activities, resolvedPromptVersion])
 
+  const pendingUserQuestion = useMemo<UserQuestionActivity | null>(() => {
+    // Search from the end so the latest unresolved agent question wins.
+    for (let i = activities.length - 1; i >= 0; i -= 1) {
+      const activity = activities[i]
+      if (activity.kind !== 'user-question') continue
+      if (resolvedUserQuestionIdsRef.current.has(activity.promptId)) continue
+      return activity
+    }
+    return null
+  }, [activities, resolvedPromptVersion])
+
   const resolvePlanPrompt = useCallback((promptId: string) => {
     if (resolvedPromptIdsRef.current.has(promptId)) return
     resolvedPromptIdsRef.current.add(promptId)
+    setResolvedPromptVersion((v) => v + 1)
+  }, [])
+
+  const resolveUserQuestion = useCallback((promptId: string) => {
+    if (resolvedUserQuestionIdsRef.current.has(promptId)) return
+    resolvedUserQuestionIdsRef.current.add(promptId)
     setResolvedPromptVersion((v) => v + 1)
   }, [])
 
@@ -125,7 +145,9 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     activityTimes,
     loading,
     pendingPlanPrompt,
+    pendingUserQuestion,
     resolvePlanPrompt,
+    resolveUserQuestion,
   }
 }
 
@@ -190,7 +212,7 @@ function activityFromEvent(
     const text = textFromPayload(event.payload)
     const detail = text.trim()
     if (!detail) return []
-    if (isClaudeSessionEndCwdDeletedWarning(detail)) return []
+    if (isClaudeSessionEndHookWarning(detail)) return []
 
     const key = processWarningKey(detail)
     if (warningState.explicitProcessWarnings.has(key)) return []
@@ -285,7 +307,7 @@ function isClaudeProcessWarningActivity(activity: AgentActivity): boolean {
     activity.kind === 'step' &&
     activity.title === 'Process warning' &&
     typeof activity.detail === 'string' &&
-    isClaudeSessionEndCwdDeletedWarning(activity.detail)
+    isClaudeSessionEndHookWarning(activity.detail)
   )
 }
 

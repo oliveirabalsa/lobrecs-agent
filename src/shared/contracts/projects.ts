@@ -6,6 +6,7 @@ export interface Project {
   repoPath: string
   agentId: AgentId
   modelTier: ModelTier
+  context?: string | null
   createdAt: number
   updatedAt: number
 }

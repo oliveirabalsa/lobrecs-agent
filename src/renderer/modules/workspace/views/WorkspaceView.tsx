@@ -16,6 +16,7 @@ import {
 } from '../../sessions'
 import { SwarmBuilder } from '../../swarms'
 import { Composer } from '../components/Composer'
+import { ProjectContextDialog } from '../components/ProjectContextDialog'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import type { MainView } from '../hooks/useWorkspaceController'
@@ -51,11 +52,13 @@ interface WorkspaceViewProps {
   onApproveApproval: () => void | Promise<void>
   onRejectApproval: () => void | Promise<void>
   onSessionStarted: (session: StartedSessionSummary) => void
+  onProjectUpdated?: (project: Project) => void
   onSwarmStarted: (result: {
     swarmId: string
+    threadId: string
     sessions: Array<{
       sessionId: string
-      threadId?: string
+      threadId: string
       role: string
       status: string
       agentId?: Project['agentId']
@@ -117,11 +120,14 @@ export function WorkspaceView({
   onApproveApproval,
   onRejectApproval,
   onSessionStarted,
+  onProjectUpdated,
   onSwarmStarted,
   onOpenSidebar,
 }: WorkspaceViewProps) {
   const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() => readPanelOpen())
   const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() => readPanelMode())
+  const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
+  const [contextDialogOpen, setContextDialogOpen] = useState(false)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
 
@@ -266,7 +272,11 @@ export function WorkspaceView({
                           prompt={activeSession?.prompt ?? ''}
                           status={activeSession?.status ?? null}
                           startedAt={activeSession?.createdAt}
+                          agentId={activeSession?.agentId ?? activeSession?.routingDecision?.agentId}
                           model={
+                            activeSession?.modelOverride ?? activeSession?.routingDecision?.model
+                          }
+                          modelOverride={
                             activeSession?.modelOverride ?? activeSession?.routingDecision?.model
                           }
                           diffProposals={diffProposals}
@@ -276,6 +286,7 @@ export function WorkspaceView({
                           onStatusChange={onStatusChange}
                           onApproveApproval={onApproveApproval}
                           onRejectApproval={onRejectApproval}
+                          onSessionStarted={onSessionStarted}
                           onReviewFile={openDiffPanel}
                         />
                       ) : (
@@ -296,6 +307,8 @@ export function WorkspaceView({
                             prefillPrompt={prefillPrompt}
                             onCancelSession={onCancelSession}
                             onSessionStarted={onSessionStarted}
+                            hasProjectContext={Boolean(selectedProject.context?.trim())}
+                            onContextClick={() => setContextDialogOpen(true)}
                           />
                         </div>
                       </div>
@@ -309,7 +322,13 @@ export function WorkspaceView({
               </div>
 
               {mainView === 'workspace' && rightPanelOpen ? (
-                <aside className="absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/40 sm:w-[420px] xl:relative xl:inset-auto xl:z-auto xl:w-[420px] xl:min-w-[320px] xl:max-w-[720px] xl:shrink-0 xl:shadow-none 2xl:w-[520px]">
+                <aside
+                  className={
+                    rightPanelFullscreen
+                      ? 'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
+                      : 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/40 sm:w-[420px] xl:relative xl:inset-auto xl:z-auto xl:w-[420px] xl:min-w-[320px] xl:max-w-[720px] xl:shrink-0 xl:shadow-none 2xl:w-[520px]'
+                  }
+                >
                   <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline px-2">
                     <RightPanelTab
                       label="Diff"
@@ -325,7 +344,19 @@ export function WorkspaceView({
                     <div className="flex-1" />
                     <button
                       type="button"
-                      onClick={() => setRightPanelOpenState(false)}
+                      onClick={() => setRightPanelFullscreen((value) => !value)}
+                      aria-label={rightPanelFullscreen ? 'Exit full screen' : 'Full screen panel'}
+                      title={rightPanelFullscreen ? 'Exit full screen' : 'Full screen'}
+                      className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+                    >
+                      {rightPanelFullscreen ? iconMinimize : iconMaximize}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRightPanelFullscreen(false)
+                        setRightPanelOpenState(false)
+                      }}
                       aria-label="Close panel"
                       className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
                     >
@@ -363,9 +394,16 @@ export function WorkspaceView({
             <SwarmBuilder
               open={swarmOpen}
               projectId={selectedProject.id}
+              threadId={activeSession?.threadId ?? null}
               initialPrompt={activeSession?.prompt ?? prefillPrompt ?? ''}
               onClose={() => onSwarmOpenChange(false)}
               onSwarmStarted={(_swarmId, result) => onSwarmStarted(result)}
+            />
+            <ProjectContextDialog
+              project={selectedProject}
+              open={contextDialogOpen}
+              onOpenChange={setContextDialogOpen}
+              onSaved={(project) => onProjectUpdated?.(project)}
             />
           </>
         ) : (
@@ -464,3 +502,29 @@ function MenuIcon() {
     </svg>
   )
 }
+
+const iconMaximize = (
+  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <path d="M5.5 2.5h-3v3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M2.5 2.5 6 6" strokeLinecap="round" />
+    <path d="M10.5 2.5h3v3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M13.5 2.5 10 6" strokeLinecap="round" />
+    <path d="M5.5 13.5h-3v-3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M2.5 13.5 6 10" strokeLinecap="round" />
+    <path d="M10.5 13.5h3v-3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M13.5 13.5 10 10" strokeLinecap="round" />
+  </svg>
+)
+
+const iconMinimize = (
+  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <path d="M6 2.5v3.5H2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M2.5 6 6 2.5" strokeLinecap="round" />
+    <path d="M10 2.5v3.5h3.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M13.5 6 10 2.5" strokeLinecap="round" />
+    <path d="M6 13.5V10H2.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M2.5 10 6 13.5" strokeLinecap="round" />
+    <path d="M10 13.5V10h3.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M13.5 10 10 13.5" strokeLinecap="round" />
+  </svg>
+)

@@ -11,14 +11,15 @@ import type {
 import { worktreeManager, type WorktreeManager } from '../git/WorktreeManager'
 import { modelRouter } from '../router'
 import { sessionManager } from '../session'
-import { projectsStore } from '../store'
-import { askPlanPrompt, type PlanPromptOutcome } from './planPrompt'
+import { projectsStore, sessionsStore, threadsStore } from '../store'
+import type { PlanPromptOutcome } from './planPrompt'
 
 type MaybePromise<T> = T | Promise<T>
 
 export interface SwarmDispatchInput {
   sessionId: string
   swarmId: string
+  threadId: string
   projectId: string
   prompt: string
   role: string
@@ -49,18 +50,31 @@ export interface SwarmPlanConfirmation {
   timeoutMs?: number
 }
 
+export interface SwarmCreateThreadInput {
+  projectId: string
+  title: string
+}
+
+export interface SwarmCompletionResult {
+  status: SessionStatus
+  output?: string
+}
+
 export interface SwarmOrchestratorDependencies {
   getProject?: (projectId: string) => MaybePromise<Pick<Project, 'id' | 'repoPath'> | undefined>
+  createThread?: (input: SwarmCreateThreadInput) => MaybePromise<{ id: string }>
   routeModel?: (input: SwarmRouteInput) => MaybePromise<{
     agentId: SupportedAgentId
     model: RoutingDecision['model']
   }>
   dispatchSession?: (input: SwarmDispatchInput) => MaybePromise<SwarmDispatchResult | void>
+  waitForSessionCompletion?: (sessionId: string) => MaybePromise<SwarmCompletionResult>
   cancelSession?: (sessionId: string) => MaybePromise<void>
   worktrees?: Pick<WorktreeManager, 'create' | 'remove' | 'reassignSession'>
   /**
-   * Optional plan-prompt round-trip. Defaults to {@link askPlanPrompt} but
-   * tests inject a no-op so swarm specs stay deterministic.
+   * Optional plan-prompt round-trip for flows that explicitly need an extra
+   * confirmation. Manual Swarm Builder launches already confirm intent in the
+   * builder UI, so the default must not block on a hidden renderer prompt.
    */
   confirmPlan?: (input: SwarmPlanConfirmation) => MaybePromise<PlanPromptOutcome>
 }
@@ -97,8 +111,18 @@ export class SwarmOrchestrator {
 
     await this.confirmPlanOrThrow(config)
 
+    const threadId =
+      config.threadId ??
+      (
+        await dependencies.createThread({
+          projectId: config.projectId,
+          title: buildSwarmThreadTitle(config),
+        })
+      ).id
+
     const result: SwarmResult = {
       swarmId: randomUUID(),
+      threadId,
       strategy: config.strategy,
       sessions: [],
     }
@@ -106,11 +130,11 @@ export class SwarmOrchestrator {
     this.swarms.set(result.swarmId, result)
 
     if (config.strategy === 'parallel') {
-      result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId)
+      result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId, threadId)
     } else if (config.strategy === 'sequential') {
-      result.sessions = await this.spawnSequential(config, project.repoPath, result.swarmId)
+      result.sessions = await this.spawnSequential(config, project.repoPath, result.swarmId, threadId)
     } else {
-      result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId)
+      result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId, threadId)
     }
 
     return cloneResult(result)
@@ -187,6 +211,7 @@ export class SwarmOrchestrator {
     config: SwarmConfig,
     repoPath: string,
     swarmId: string,
+    threadId: string,
   ): Promise<SpawnedSession[]> {
     return Promise.all(
       config.agents.map((agentConfig) =>
@@ -196,6 +221,7 @@ export class SwarmOrchestrator {
           projectId: config.projectId,
           repoPath,
           swarmId,
+          threadId,
         }),
       ),
     )
@@ -205,33 +231,86 @@ export class SwarmOrchestrator {
     config: SwarmConfig,
     repoPath: string,
     swarmId: string,
+    threadId: string,
   ): Promise<SpawnedSession[]> {
-    const sessions: SpawnedSession[] = []
-    let previousOutput = ''
+    const [firstAgent, ...remainingAgents] = config.agents
+    if (!firstAgent) return []
 
-    for (const agentConfig of config.agents) {
-      const session = await this.spawnAgent({
-        agentConfig,
-        basePrompt: config.prompt,
-        projectId: config.projectId,
-        repoPath,
-        swarmId,
-        previousOutput,
-      })
+    const firstSession = await this.spawnAgent({
+      agentConfig: firstAgent,
+      basePrompt: config.prompt,
+      projectId: config.projectId,
+      repoPath,
+      swarmId,
+      threadId,
+    })
 
-      previousOutput = session.output ?? previousOutput
-      sessions.push(session)
-    }
+    void this.continueSequentialSwarm({
+      swarmId,
+      threadId,
+      projectId: config.projectId,
+      repoPath,
+      basePrompt: config.prompt,
+      remainingAgents,
+      previousSession: firstSession,
+    }).catch(() => {
+      const swarm = this.swarms.get(swarmId)
+      const lastSession = swarm?.sessions.at(-1)
+      if (lastSession && lastSession.status === 'running') {
+        lastSession.status = 'error'
+      }
+    })
 
-    return sessions
+    return [firstSession]
   }
 
   private async spawnFanOut(
     config: SwarmConfig,
     repoPath: string,
     swarmId: string,
+    threadId: string,
   ): Promise<SpawnedSession[]> {
-    return this.spawnParallel(config, repoPath, swarmId)
+    return this.spawnParallel(config, repoPath, swarmId, threadId)
+  }
+
+  private async continueSequentialSwarm(input: {
+    swarmId: string
+    threadId: string
+    projectId: string
+    repoPath: string
+    basePrompt: string
+    remainingAgents: SwarmAgentConfig[]
+    previousSession: SpawnedSession
+  }): Promise<void> {
+    let previousSession = input.previousSession
+    let previousOutput = previousSession.output ?? ''
+
+    for (const agentConfig of input.remainingAgents) {
+      if (!this.swarms.has(input.swarmId)) return
+
+      const completion = await this.waitForCompletion(previousSession)
+      previousSession.status = completion.status
+      if (completion.output?.trim()) previousOutput = completion.output
+      if (completion.status !== 'done') return
+      if (!this.swarms.has(input.swarmId)) return
+
+      const nextSession = await this.spawnAgent({
+        agentConfig,
+        basePrompt: input.basePrompt,
+        projectId: input.projectId,
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        previousOutput,
+      })
+
+      this.swarms.get(input.swarmId)?.sessions.push(nextSession)
+      previousSession = nextSession
+      previousOutput = nextSession.output ?? previousOutput
+    }
+
+    const completion = await this.waitForCompletion(previousSession)
+    previousSession.status = completion.status
   }
 
   private async spawnAgent(input: {
@@ -240,6 +319,7 @@ export class SwarmOrchestrator {
     projectId: string
     repoPath: string
     swarmId: string
+    threadId: string
     previousOutput?: string
     imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
   }): Promise<SpawnedSession> {
@@ -262,6 +342,7 @@ export class SwarmOrchestrator {
       const dispatchResult = await dependencies.dispatchSession({
         sessionId: provisionalSessionId,
         swarmId: input.swarmId,
+        threadId: input.threadId,
         projectId: input.projectId,
         prompt,
         role: input.agentConfig.role,
@@ -278,7 +359,7 @@ export class SwarmOrchestrator {
 
       return {
         sessionId: actualSessionId,
-        threadId: dispatchResult?.threadId,
+        threadId: dispatchResult?.threadId ?? input.threadId,
         role: input.agentConfig.role,
         worktreePath,
         status: dispatchResult?.status ?? 'running',
@@ -292,21 +373,36 @@ export class SwarmOrchestrator {
     }
   }
 
+  private async waitForCompletion(session: SpawnedSession): Promise<SwarmCompletionResult> {
+    const wait = this.dependencies.waitForSessionCompletion
+    if (!wait) {
+      return {
+        status: session.output?.trim() ? 'done' : normalizeCompletionStatus(session.status),
+        output: session.output,
+      }
+    }
+
+    return wait(session.sessionId)
+  }
+
   private requireDependencies(): Required<
     Omit<SwarmOrchestratorDependencies, 'confirmPlan'>
   > & Pick<SwarmOrchestratorDependencies, 'confirmPlan'> {
-    const { getProject, routeModel, dispatchSession } = this.dependencies
+    const { getProject, createThread, routeModel, dispatchSession } = this.dependencies
 
-    if (!getProject || !routeModel || !dispatchSession) {
+    if (!getProject || !createThread || !routeModel || !dispatchSession) {
       throw new Error(
-        'SwarmOrchestrator dependencies are not configured. Wire project lookup, model routing, and session dispatch before spawning swarms.',
+        'SwarmOrchestrator dependencies are not configured. Wire project lookup, thread creation, model routing, and session dispatch before spawning swarms.',
       )
     }
 
     return {
       getProject,
+      createThread,
       routeModel,
       dispatchSession,
+      waitForSessionCompletion:
+        this.dependencies.waitForSessionCompletion ?? (() => ({ status: 'running' })),
       cancelSession: this.dependencies.cancelSession ?? (() => undefined),
       worktrees: this.dependencies.worktrees ?? worktreeManager,
       confirmPlan: this.dependencies.confirmPlan,
@@ -316,6 +412,9 @@ export class SwarmOrchestrator {
 
 function validateConfig(config: SwarmConfig): void {
   if (!config.projectId.trim()) throw new Error('Swarm projectId is required')
+  if (config.threadId !== undefined && !config.threadId.trim()) {
+    throw new Error('Swarm threadId must be a non-empty string when provided')
+  }
   if (!config.prompt.trim()) throw new Error('Swarm prompt is required')
   if (!['parallel', 'sequential', 'fan-out'].includes(config.strategy)) {
     throw new Error(`Unsupported swarm strategy: ${config.strategy}`)
@@ -326,6 +425,13 @@ function validateConfig(config: SwarmConfig): void {
   for (const [index, agent] of config.agents.entries()) {
     if (!agent.role.trim()) throw new Error(`Agent ${index + 1} role is required`)
   }
+}
+
+function buildSwarmThreadTitle(config: SwarmConfig): string {
+  const prefix = config.strategy === 'sequential' ? 'Sequential swarm' : 'Swarm'
+  const prompt = config.prompt.trim()
+  const title = prompt ? `${prefix}: ${prompt}` : prefix
+  return title.slice(0, 200)
 }
 
 function buildAgentPrompt(
@@ -346,6 +452,20 @@ function buildAgentPrompt(
   return lines.join('\n')
 }
 
+function normalizeCompletionStatus(status: SessionStatus | string): SessionStatus {
+  if (
+    status === 'running' ||
+    status === 'awaiting-approval' ||
+    status === 'done' ||
+    status === 'error' ||
+    status === 'cancelled'
+  ) {
+    return status
+  }
+
+  return 'running'
+}
+
 function cloneResult(result: SwarmResult): SwarmResult {
   return {
     ...result,
@@ -353,13 +473,98 @@ function cloneResult(result: SwarmResult): SwarmResult {
   }
 }
 
-function createDefaultDependencies(): SwarmOrchestratorDependencies {
+async function waitForStoredSessionCompletion(
+  sessionId: string,
+): Promise<SwarmCompletionResult> {
+  for (;;) {
+    const session = sessionsStore.get(sessionId)
+    if (!session) throw new Error(`Session not found: ${sessionId}`)
+
+    const events = sessionsStore.listEvents(sessionId)
+    const terminalEvent = events.find(
+      (event) => event.type === 'session-complete' || event.type === 'error',
+    )
+
+    if (session.status === 'cancelled') {
+      return { status: 'cancelled', output: extractSessionOutput(events) }
+    }
+
+    if (terminalEvent && isTerminalStatus(session.status)) {
+      return { status: session.status, output: extractSessionOutput(events) }
+    }
+
+    await delay(750)
+  }
+}
+
+function extractSessionOutput(
+  events: ReturnType<typeof sessionsStore.listEvents>,
+): string | undefined {
+  const assistantMessages = events
+    .filter((event) => event.type === 'activity')
+    .map((event) => assistantMessageText(event.payload))
+    .filter((text): text is string => Boolean(text?.trim()))
+
+  const assistantOutput = lastNonEmpty(assistantMessages)
+  if (assistantOutput) return assistantOutput
+
+  const stdoutMessages = events
+    .filter((event) => event.type === 'stdout')
+    .map((event) => textFromPayload(event.payload))
+    .filter((text) => text.trim())
+
+  return lastNonEmpty(stdoutMessages)
+}
+
+function assistantMessageText(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const record = payload as Record<string, unknown>
+  return record.kind === 'message' &&
+    record.role === 'assistant' &&
+    typeof record.text === 'string'
+    ? record.text
+    : undefined
+}
+
+function textFromPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (!payload || typeof payload !== 'object') return ''
+
+  const record = payload as Record<string, unknown>
+  for (const key of ['text', 'result', 'message', 'content', 'summary', 'output']) {
+    const value = record[key]
+    if (typeof value === 'string') return value
+  }
+
+  return ''
+}
+
+function lastNonEmpty(values: string[]): string | undefined {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const text = values[index].trim()
+    if (text) return text
+  }
+
+  return undefined
+}
+
+function isTerminalStatus(status: SessionStatus): boolean {
+  return status === 'done' || status === 'error' || status === 'cancelled'
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function createDefaultDependencies(): SwarmOrchestratorDependencies {
   return {
     getProject: (projectId) => projectsStore.get(projectId) ?? undefined,
+    createThread: (input) => threadsStore.create(input),
     routeModel: (input) => modelRouter.route(input),
     dispatchSession: async (input) => {
       const { sessionId, threadId } = await sessionManager.dispatch({
         projectId: input.projectId,
+        threadId: input.threadId,
         prompt: input.prompt,
         agentId: input.agentId,
         model: input.model,
@@ -370,16 +575,9 @@ function createDefaultDependencies(): SwarmOrchestratorDependencies {
 
       return { sessionId, threadId, status: 'running' }
     },
+    waitForSessionCompletion: waitForStoredSessionCompletion,
     cancelSession: (sessionId) => sessionManager.cancel(sessionId),
     worktrees: worktreeManager,
-    confirmPlan: (input) =>
-      askPlanPrompt({
-        sessionId: input.sessionId,
-        title: input.title,
-        options: input.options,
-        allowFreeText: input.allowFreeText,
-        timeoutMs: input.timeoutMs,
-      }),
   }
 }
 

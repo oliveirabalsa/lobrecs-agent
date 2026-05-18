@@ -20,9 +20,12 @@ interface SidebarProps {
   onSelectProject: (project: Project) => void
   onSelectThread: (project: Project, thread: Thread) => void
   onNewChat: () => void
+  onNewChatForProject?: (project: Project) => void
   onSelectedProjectDeleted?: () => void
   onActiveThreadDeleted?: () => void
   onSearch?: () => void
+  onPlugins?: () => void
+  onAutomations?: () => void
   onOpenSettings?: () => void
   /**
    * Optional slot overrides — if provided, these replace the corresponding
@@ -59,9 +62,12 @@ export function Sidebar({
   onSelectProject,
   onSelectThread,
   onNewChat,
+  onNewChatForProject,
   onSelectedProjectDeleted,
   onActiveThreadDeleted,
   onSearch,
+  onPlugins,
+  onAutomations,
   onOpenSettings,
   slots,
 }: SidebarProps) {
@@ -181,12 +187,18 @@ export function Sidebar({
         onCreateProject={() => void handleCreateProject()}
         onRenameProject={(project) => void handleRenameProject(project)}
         onDeleteProject={(project) => void handleDeleteProject(project)}
+        onNewChatForProject={onNewChatForProject}
       />
     )
 
   const actionsSlot =
     slots?.actions ?? (
-      <SidebarActions onNewChat={onNewChat} onSearch={onSearch} />
+      <SidebarActions
+        onNewChat={onNewChat}
+        onSearch={onSearch}
+        onPlugins={onPlugins}
+        onAutomations={onAutomations}
+      />
     )
 
   const footerSlot = slots?.footer ?? <SidebarFooter onOpenSettings={onOpenSettings} />

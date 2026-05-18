@@ -134,6 +134,10 @@ describe('preload api shape', () => {
         expected: ['threads:get', 'thread-1'],
       },
       {
+        call: (agentforge) => agentforge.threads.search({ query: 'diff', limit: 12 }),
+        expected: ['threads:search', { query: 'diff', limit: 12 }],
+      },
+      {
         call: (agentforge) =>
           agentforge.threads.create({ projectId: 'project-1', title: 'New thread' }),
         expected: ['threads:create', { projectId: 'project-1', title: 'New thread' }],

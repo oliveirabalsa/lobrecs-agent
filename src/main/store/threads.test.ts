@@ -162,6 +162,42 @@ describe('threadsStore', () => {
     expect(sessionsStore.getThreadId(session.id)).toBe(thread.id)
     expect(sessionsStore.get(session.id)).not.toBeNull()
   })
+
+  it('searches openable threads across projects, prompts, and messages', () => {
+    const alpha = createProject('Alpha')
+    const beta = createProject('Beta')
+    const alphaThread = threadsStore.create({ projectId: alpha.id, title: 'Search palette' })
+    const betaThread = threadsStore.create({ projectId: beta.id, title: 'Other work' })
+    const archivedThread = threadsStore.create({ projectId: alpha.id, title: 'Archived diff' })
+
+    const alphaSession = createSession(alpha.id, alphaThread.id, 'wire command palette')
+    const betaSession = createSession(beta.id, betaThread.id, 'fix stale state')
+    const archivedSession = createSession(alpha.id, archivedThread.id, 'diff viewer')
+
+    threadsStore.linkSession(alphaThread.id, alphaSession.id)
+    threadsStore.linkSession(betaThread.id, betaSession.id)
+    threadsStore.linkSession(archivedThread.id, archivedSession.id)
+    threadsStore.archive(archivedThread.id)
+    addAssistantMessage(betaSession.id, 'The diff result is ready to review')
+
+    expect(threadsStore.search({ query: 'palette' }).map((result) => result.thread.id)).toEqual([
+      alphaThread.id,
+    ])
+
+    const messageMatch = threadsStore.search({ query: 'diff' })
+    expect(messageMatch.map((result) => result.thread.id)).toEqual([betaThread.id])
+    expect(messageMatch[0]).toMatchObject({
+      project: { id: beta.id, name: 'Beta' },
+      sessionId: betaSession.id,
+      matchKind: 'message',
+    })
+
+    expect(
+      threadsStore
+        .search({ query: 'diff', includeArchived: true })
+        .map((result) => result.thread.id),
+    ).toEqual([archivedThread.id, betaThread.id])
+  })
 })
 
 function createProject(name = 'Project') {
@@ -170,5 +206,25 @@ function createProject(name = 'Project') {
     repoPath: `/repo/${name.toLowerCase()}`,
     agentId: 'claude-code',
     modelTier: 'balanced',
+  })
+}
+
+function createSession(projectId: string, threadId: string, prompt: string) {
+  return sessionsStore.create({
+    projectId,
+    threadId,
+    agentId: 'claude-code',
+    model: 'claude-sonnet-4-6',
+    prompt,
+    status: 'done',
+  })
+}
+
+function addAssistantMessage(sessionId: string, text: string): void {
+  sessionsStore.addEvent({
+    type: 'activity',
+    sessionId,
+    payload: { kind: 'message', role: 'assistant', text },
+    timestamp: Date.now(),
   })
 }

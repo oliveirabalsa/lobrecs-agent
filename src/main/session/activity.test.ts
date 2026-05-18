@@ -64,12 +64,28 @@ describe('agent activity normalization', () => {
     })
   })
 
-  it('suppresses Claude SessionEnd cwd-deleted hook warnings from timeline activities', () => {
+  it('suppresses Claude SessionEnd hook warnings from timeline activities', () => {
     const activities = deriveActivityEvents({
       type: 'stderr',
       sessionId: 'session-1',
       payload: {
-        text: 'SessionEnd hook [matcher: claude-code session-complete] failed: error: The current working directory was deleted, cannot run hook.\n',
+        text: 'SessionEnd hook [_R="${CLAUDE_PLUGIN_ROOT}"; node "$_R/scripts/bun-runner.js" "$_/scripts/worker-service.cjs" hook claude-code session-complete] failed: 1276 | || (${R} == "string" && ${E} && ${E} == +${E})\n',
+      },
+      timestamp: 1,
+    })
+
+    expect(activities).toEqual([])
+  })
+
+  it('suppresses Claude plugin worker ENOENT warnings from timeline activities', () => {
+    const activities = deriveActivityEvents({
+      type: 'stderr',
+      sessionId: 'session-1',
+      payload: {
+        text:
+          '1277 | || (${R} === "string" && ${E} && ${E} == +${E})\n' +
+          'ENOENT: no such file or directory, lstat \'/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401\' path: "/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401", syscall: "lstat", errno: -2, code: "ENOENT" at cue (/Users/leonardooliveirabalsalobre/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs:1281:35133)\n' +
+          'Bun v1.3.6 (macOS arm64)',
       },
       timestamp: 1,
     })
@@ -170,6 +186,166 @@ describe('agent activity normalization', () => {
         name: 'shell',
         output: 'tests passed',
         status: 'done',
+      }),
+    ])
+  })
+
+  it('turns Codex AskUserQuestion tool calls into structured question prompts', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.completed',
+        item: {
+          type: 'function_call',
+          name: 'AskUserQuestion',
+          call_id: 'call-questions',
+          arguments: JSON.stringify({
+            questions: [
+              {
+                header: 'Scope',
+                question: 'Which areas should I focus?',
+                multiSelect: true,
+                options: [
+                  {
+                    label: 'Sidebar entrances (Recommended)',
+                    description: 'Animate project and thread rows.',
+                  },
+                  {
+                    label: 'Message stream',
+                    description: 'Animate new turns and artifacts.',
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: 'user-question:call-questions',
+        title: 'Scope',
+        questions: [
+          expect.objectContaining({
+            id: 'question-1',
+            header: 'Scope',
+            question: 'Which areas should I focus?',
+            multiSelect: true,
+            options: [
+              expect.objectContaining({
+                id: 'question-1-option-1',
+                label: 'Sidebar entrances (Recommended)',
+              }),
+              expect.objectContaining({
+                id: 'question-1-option-2',
+                label: 'Message stream',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ])
+  })
+
+  it('suppresses Codex AskUserQuestion tool result placeholders', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.completed',
+        item: {
+          type: 'function_call_output',
+          name: 'AskUserQuestion',
+          output: 'Answer questions?',
+        },
+      },
+      timestamp: 1,
+    })
+
+    expect(activities).toEqual([])
+  })
+
+  it('turns OpenCode JSON events into visible messages, tools, and usage', () => {
+    const events: AgentEvent[] = [
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'step_start',
+          part: { type: 'step-start' },
+        },
+        timestamp: 1,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_use',
+          part: {
+            type: 'tool',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/repo\n',
+              metadata: { exit: 0 },
+            },
+          },
+        },
+        timestamp: 2,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'text',
+          part: { type: 'text', text: 'OpenCode response' },
+        },
+        timestamp: 3,
+      },
+      {
+        type: 'session-complete',
+        sessionId: 'session-1',
+        payload: {
+          exitCode: 0,
+          usage: { input_tokens: 8, output_tokens: 6 },
+          cost_usd: 0.0002,
+        },
+        timestamp: 4,
+      },
+    ]
+
+    const activities = events.flatMap(deriveActivityEvents).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({ kind: 'step', title: 'Thinking', status: 'running' }),
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'bash',
+        input: { command: 'pwd' },
+        status: 'done',
+      }),
+      expect.objectContaining({
+        kind: 'tool-result',
+        name: 'bash',
+        output: '/repo\n',
+        status: 'done',
+      }),
+      expect.objectContaining({
+        kind: 'message',
+        role: 'assistant',
+        text: 'OpenCode response',
+      }),
+      expect.objectContaining({
+        kind: 'completion',
+        status: 'done',
+        tokensIn: 8,
+        tokensOut: 6,
+        costUsd: 0.0002,
       }),
     ])
   })

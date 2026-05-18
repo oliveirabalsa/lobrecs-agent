@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import type { ThreadSearchResult } from '../../shared/types'
+import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
 import { useWorkspaceController } from '../modules/workspace'
 import { useWorkspaceHistory } from '../modules/workspace/hooks/useWorkspaceHistory'
@@ -15,6 +17,7 @@ export function RendererApp() {
   const history = useWorkspaceHistory()
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const openThreadById = useCallback(
     async (threadId: string) => {
@@ -80,18 +83,53 @@ export function RendererApp() {
     setMobileSidebarOpen(false)
   }, [workspace])
 
+  const handleNewChatForProject = useCallback(
+    (project: Parameters<typeof workspace.handleNewChatForProject>[0]) => {
+      workspace.handleNewChatForProject(project)
+      setMobileSidebarOpen(false)
+    },
+    [workspace],
+  )
+
   const handleRerunSession = useCallback(async () => {
     const summary = await workspace.handleRerunActiveSession()
     if (summary) history.push(summary.threadId)
   }, [history, workspace])
 
-  // Cmd+T → New chat (was: new tab). Cmd+W → close current workspace/thread.
+  const handleOpenSearch = useCallback(() => {
+    setSearchOpen(true)
+    setMobileSidebarOpen(false)
+  }, [])
+
+  const handleOpenAutomations = useCallback(() => {
+    workspace.setMainView('automations')
+    setMobileSidebarOpen(false)
+  }, [workspace])
+
+  const handleOpenSearchResult = useCallback(
+    async (result: ThreadSearchResult) => {
+      const sessionId = result.sessionId ?? result.thread.lastSessionId
+      if (!sessionId) return
+
+      const session = await window.agentforge.sessions.get(sessionId).catch(() => null)
+      if (!session) return
+
+      workspace.handleOpenSession(session, result.project)
+      history.push(result.thread.id)
+    },
+    [history, workspace],
+  )
+
+  // Cmd+T → New chat. Cmd+W → close current workspace/thread. Cmd+K → Search.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.key === 't' || event.key === 'T') {
         event.preventDefault()
         handleNewChat()
+      } else if (event.key === 'k' || event.key === 'K') {
+        event.preventDefault()
+        handleOpenSearch()
       } else if (event.key === 'w' || event.key === 'W') {
         if (workspace.activeSessionId) {
           event.preventDefault()
@@ -101,7 +139,7 @@ export function RendererApp() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleNewChat, workspace])
+  }, [handleNewChat, handleOpenSearch, workspace])
 
   const handleHistoryBack = useCallback(() => {
     const target = history.back()
@@ -140,8 +178,11 @@ export function RendererApp() {
           onSelectProject={handleSelectProject}
           onSelectThread={(project, thread) => void handleSelectThread(project, thread)}
           onNewChat={handleNewChat}
+          onNewChatForProject={handleNewChatForProject}
           onSelectedProjectDeleted={workspace.handleSelectedProjectDeleted}
           onActiveThreadDeleted={workspace.handleNewTab}
+          onSearch={handleOpenSearch}
+          onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
       </div>
@@ -151,11 +192,11 @@ export function RendererApp() {
           <button
             type="button"
             aria-label="Close sidebar"
-            className="absolute inset-0 bg-black/55"
+            className="motion-fade-in absolute inset-0 bg-black/55"
             onClick={() => setMobileSidebarOpen(false)}
           />
           <div
-            className="relative h-full max-w-full shadow-2xl shadow-black/50"
+            className="motion-slide-in-left relative h-full max-w-full shadow-2xl shadow-black/50"
             style={{ width: 'min(86vw, 320px)' }}
           >
             <Sidebar
@@ -169,8 +210,11 @@ export function RendererApp() {
               onSelectProject={handleSelectProject}
               onSelectThread={(project, thread) => void handleSelectThread(project, thread)}
               onNewChat={handleNewChat}
+              onNewChatForProject={handleNewChatForProject}
               onSelectedProjectDeleted={workspace.handleSelectedProjectDeleted}
               onActiveThreadDeleted={workspace.handleNewTab}
+              onSearch={handleOpenSearch}
+              onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
             />
           </div>
         </div>
@@ -208,10 +252,19 @@ export function RendererApp() {
             workspace.handleSessionStarted(summary)
             history.push(summary.threadId)
           }}
-          onSwarmStarted={workspace.handleSwarmStarted}
+          onProjectUpdated={workspace.handleProjectUpdated}
+          onSwarmStarted={(result) => {
+            workspace.handleSwarmStarted(result)
+            history.push(result.threadId)
+          }}
           onOpenSidebar={() => setMobileSidebarOpen(true)}
         />
       </div>
+      <SearchPalette
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onOpenResult={(result) => void handleOpenSearchResult(result)}
+      />
     </div>
   )
 }

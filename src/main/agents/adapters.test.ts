@@ -17,8 +17,11 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_COMMAND
     delete process.env.CLAUDE_MOCK_RESULT_MODE
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
+    delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
     delete process.env.CODEX_COMMAND
     delete process.env.OPENCODE_COMMAND
+    delete process.env.OPENCODE_MOCK_IMMEDIATE
+    delete process.env.OPENCODE_MOCK_STEP_FINISH
     processPool.killAll()
   })
 
@@ -123,6 +126,29 @@ describe('agent adapters', () => {
     expect(stderrText).not.toContain('current working directory was deleted')
   })
 
+  it('filters Claude plugin worker ENOENT noise from stderr', async () => {
+    process.env.CLAUDE_COMMAND = claudeMock
+    process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE = '1'
+    const adapter = new ClaudeCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'claude-worker-noise-session',
+      prompt: 'Trigger plugin worker noise',
+      repoPath: process.cwd(),
+      model: 'haiku',
+    })
+    const events = await collectEvents(session)
+    const stderrText = events
+      .filter((event) => event.type === 'stderr')
+      .map((event) => payloadField(event, 'text'))
+      .join('\n')
+
+    expect(stderrText).toContain('claude warning')
+    expect(stderrText).not.toContain('worker-service.cjs')
+    expect(stderrText).not.toContain('agentforge-36c16d57')
+    expect(stderrText).not.toContain('ENOENT')
+  })
+
   it('dispatches Codex and maps approval requests', async () => {
     process.env.CODEX_COMMAND = codexMock
     const adapter = new CodexAdapter()
@@ -180,22 +206,75 @@ describe('agent adapters', () => {
       sessionId: 'opencode-session',
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
-      model: 'opencode/minimax-m2.5-free',
+      model: 'minimax-coding-plan/MiniMax-M2.5',
     })
     const events = await collectEvents(session)
     const stdout = events.find((event) => event.type === 'stdout')
+    const complete = events.find((event) => event.type === 'session-complete')
 
     expect(payloadField(stdout, 'argv')).toEqual(
       expect.arrayContaining([
         'run',
         '--format',
         'json',
+        '--dangerously-skip-permissions',
         '--model',
-        'opencode/minimax-m2.5-free',
+        'minimax-coding-plan/MiniMax-M2.5',
       ]),
     )
     expect(events.some((event) => event.type === 'stderr')).toBe(true)
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+    expect(payloadField(complete, 'usage')).toMatchObject({
+      input_tokens: 8,
+      output_tokens: 6,
+    })
+    expect(payloadField(complete, 'cost_usd')).toBe(0.0002)
+  })
+
+  it('buffers fast OpenCode completion events until the session manager subscribes', async () => {
+    process.env.OPENCODE_COMMAND = opencodeMock
+    process.env.OPENCODE_MOCK_IMMEDIATE = '1'
+    const adapter = new OpenCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'opencode-fast-session',
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'minimax-coding-plan/MiniMax-M2.5',
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const events = await collectEvents(session)
+
+    expect(events.some((event) => payloadText(event) === 'Hello from OpenCode mock')).toBe(true)
+    expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+  })
+
+  it('keeps OpenCode step_finish output from ending the session early', async () => {
+    process.env.OPENCODE_COMMAND = opencodeMock
+    process.env.OPENCODE_MOCK_STEP_FINISH = '1'
+    const adapter = new OpenCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'opencode-step-finish-session',
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'minimax-coding-plan/MiniMax-M2.5',
+    })
+    const events = await collectEvents(session)
+
+    const stdoutEvents = events.filter((event) => event.type === 'stdout')
+    const stepFinishIndex = stdoutEvents.findIndex(
+      (event) => payloadField(event, 'type') === 'step_finish',
+    )
+    const textIndex = stdoutEvents.findIndex(
+      (event) => payloadText(event) === 'Hello from OpenCode mock',
+    )
+
+    expect(stepFinishIndex).toBeGreaterThanOrEqual(0)
+    expect(textIndex).toBeGreaterThan(stepFinishIndex)
+    expect(events.filter((event) => event.type === 'session-complete')).toHaveLength(1)
   })
 })
 
@@ -216,6 +295,15 @@ function payloadField(event: AgentEvent | undefined, field: string): unknown {
   if (!event || typeof event.payload !== 'object' || event.payload === null) return undefined
 
   return (event.payload as Record<string, unknown>)[field]
+}
+
+function payloadText(event: AgentEvent | undefined): unknown {
+  const part = payloadField(event, 'part')
+  if (part && typeof part === 'object' && 'text' in part) {
+    return (part as Record<string, unknown>).text
+  }
+
+  return payloadField(event, 'text')
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {

@@ -3,19 +3,14 @@ interface SidebarFooterProps {
 }
 
 export function SidebarFooter({ onOpenSettings }: SidebarFooterProps) {
-  const disabled = !onOpenSettings
-  const stateClasses = disabled
-    ? 'cursor-not-allowed text-muted/60'
-    : 'text-secondary hover:bg-white/5 hover:text-primary'
+  if (!onOpenSettings) return <footer className="mt-auto" />
 
   return (
     <footer className="mt-auto border-t border-hairline px-1.5 py-1.5">
       <button
         type="button"
         onClick={onOpenSettings}
-        disabled={disabled}
-        title={disabled ? 'Settings coming soon' : undefined}
-        className={`no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left transition-colors ${stateClasses}`}
+        className="no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left text-secondary transition-colors hover:bg-white/5 hover:text-primary"
       >
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted">
           <CogIcon />

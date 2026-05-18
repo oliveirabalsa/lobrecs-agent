@@ -4,8 +4,10 @@ import type {
   ApprovalRequest,
   DiffProposal,
   SessionStatus,
+  UserQuestionPromptOption,
+  UserQuestionPromptQuestion,
 } from '../../shared/types'
-import { isClaudeSessionEndCwdDeletedWarning } from '../../shared/contracts/agentOutput'
+import { isClaudeSessionEndHookWarning } from '../../shared/contracts/agentOutput'
 
 export function deriveActivityEvents(event: AgentEvent): AgentEvent[] {
   if (event.type === 'activity') return []
@@ -30,7 +32,7 @@ export function activityFromEvent(event: AgentEvent): AgentActivity | AgentActiv
   if (event.type === 'stderr') {
     const text = textFromPayload(event.payload)
     if (!text.trim()) return null
-    if (isClaudeSessionEndCwdDeletedWarning(text)) return null
+    if (isClaudeSessionEndHookWarning(text)) return null
 
     return {
       kind: 'step',
@@ -106,6 +108,9 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   }
 
   const type = typeof payload.type === 'string' ? payload.type : ''
+  const openCodeActivity = activityFromOpenCodePayload(payload, type)
+  if (openCodeActivity !== undefined) return openCodeActivity
+
   const codexActivity = activityFromCodexPayload(payload, type)
   if (codexActivity !== undefined) return codexActivity
 
@@ -153,6 +158,76 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   return null
 }
 
+function activityFromOpenCodePayload(
+  payload: Record<string, unknown>,
+  type: string,
+): AgentActivity | AgentActivity[] | null | undefined {
+  const part = isRecord(payload.part) ? payload.part : undefined
+  const partType = part ? stringField(part, 'type') : undefined
+
+  if (type === 'step_start' || partType === 'step-start') {
+    return { kind: 'step', title: 'Thinking', status: 'running' }
+  }
+
+  if (type === 'step_finish' || partType === 'step-finish') {
+    return { kind: 'step', title: 'Thinking', status: 'done' }
+  }
+
+  if (type === 'text' || partType === 'text') {
+    const text = stringField(part ?? payload, 'text')
+    return text ? { kind: 'message', role: 'assistant', text, stream: true } : null
+  }
+
+  if (type === 'tool_use' || partType === 'tool') {
+    return openCodeToolActivity(payload, part)
+  }
+
+  return undefined
+}
+
+function openCodeToolActivity(
+  payload: Record<string, unknown>,
+  part: Record<string, unknown> | undefined,
+): AgentActivity | AgentActivity[] | null {
+  const source = part ?? payload
+  const state = isRecord(source.state) ? source.state : undefined
+  const metadata = isRecord(state?.metadata) ? state.metadata : undefined
+  const toolName = stringField(source, 'tool') ?? stringField(payload, 'tool') ?? 'tool'
+  const status = stringField(state ?? source, 'status')
+  const exitCode = metadata ? numberField(metadata, 'exit') : undefined
+  const isError =
+    status === 'error' ||
+    status === 'failed' ||
+    (exitCode !== undefined && exitCode !== 0)
+  const callStatus: Extract<AgentActivity, { kind: 'tool-call' }>['status'] = isError
+    ? 'error'
+    : status === 'completed' || status === 'done'
+      ? 'done'
+      : 'running'
+  const call: AgentActivity = {
+    kind: 'tool-call',
+    name: toolName,
+    input: state?.input ?? source.input,
+    status: callStatus,
+  }
+  const output =
+    stringField(state ?? {}, 'output') ??
+    stringField(metadata ?? {}, 'output') ??
+    stringField(source, 'output')
+
+  if (!output) return call
+
+  return [
+    call,
+    {
+      kind: 'tool-result',
+      name: toolName,
+      output,
+      status: isError ? 'error' : 'done',
+    },
+  ]
+}
+
 function activityFromCodexPayload(
   payload: Record<string, unknown>,
   type: string,
@@ -187,6 +262,9 @@ function activityFromCodexPayload(
   }
 
   if (type === 'item.completed') {
+    const userQuestion = userQuestionActivityFromToolCall(item)
+    if (userQuestion) return userQuestion
+
     const text = textFromPayload(item)
     if (isMessageItem(itemType) && text.trim()) {
       return { kind: 'message', role: 'assistant', text, stream: true }
@@ -198,9 +276,14 @@ function activityFromCodexPayload(
     }
 
     if (isToolResultItem(itemType)) {
+      const toolName = toolNameFromItem(item, itemType)
+      if (isUserQuestionToolName(toolName) || text.trim() === 'Answer questions?') {
+        return null
+      }
+
       return {
         kind: 'tool-result',
-        name: toolNameFromItem(item, itemType) ?? 'tool',
+        name: toolName ?? 'tool',
         output: text.trim() ? text : undefined,
         status: type.includes('error') ? 'error' : 'done',
       }
@@ -242,6 +325,119 @@ function activityFromCodexPayload(
   }
 
   return undefined
+}
+
+function userQuestionActivityFromToolCall(
+  item: Record<string, unknown>,
+): Extract<AgentActivity, { kind: 'user-question' }> | null {
+  const toolName = stringField(item, 'name') ?? stringField(item, 'tool')
+  if (!isUserQuestionToolName(toolName)) return null
+
+  const input = structuredToolInput(item.arguments ?? item.input ?? item.params)
+  const rawQuestions = isRecord(input) && Array.isArray(input.questions)
+    ? input.questions
+    : []
+  const questions = rawQuestions
+    .map((question, questionIndex) => normalizeUserQuestion(question, questionIndex))
+    .filter((question): question is UserQuestionPromptQuestion => question !== null)
+
+  if (questions.length === 0) return null
+
+  const title =
+    questions.length === 1
+      ? questions[0].header ?? 'Agent question'
+      : 'Agent questions'
+
+  return {
+    kind: 'user-question',
+    promptId: userQuestionPromptId(item, questions),
+    title,
+    questions,
+  }
+}
+
+function structuredToolInput(input: unknown): Record<string, unknown> | null {
+  if (isRecord(input)) return input
+  if (typeof input !== 'string') return null
+
+  try {
+    const parsed = JSON.parse(input) as unknown
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeUserQuestion(
+  value: unknown,
+  questionIndex: number,
+): UserQuestionPromptQuestion | null {
+  if (!isRecord(value)) return null
+
+  const question = stringField(value, 'question') ?? stringField(value, 'text')
+  if (!question) return null
+
+  const options = Array.isArray(value.options)
+    ? value.options
+        .map((option, optionIndex) =>
+          normalizeUserQuestionOption(option, questionIndex, optionIndex),
+        )
+        .filter((option): option is UserQuestionPromptOption => option !== null)
+    : []
+
+  return {
+    id: stringField(value, 'id') ?? `question-${questionIndex + 1}`,
+    header: stringField(value, 'header'),
+    question,
+    multiSelect: value.multiSelect === true,
+    options,
+  }
+}
+
+function normalizeUserQuestionOption(
+  value: unknown,
+  questionIndex: number,
+  optionIndex: number,
+): UserQuestionPromptOption | null {
+  if (!isRecord(value)) return null
+
+  const label = stringField(value, 'label')
+  if (!label) return null
+
+  return {
+    id: stringField(value, 'id') ?? `question-${questionIndex + 1}-option-${optionIndex + 1}`,
+    label,
+    description: stringField(value, 'description'),
+  }
+}
+
+function userQuestionPromptId(
+  item: Record<string, unknown>,
+  questions: UserQuestionPromptQuestion[],
+): string {
+  const directId =
+    stringField(item, 'call_id') ??
+    stringField(item, 'callId') ??
+    stringField(item, 'id')
+  if (directId) return `user-question:${directId}`
+
+  return `user-question:${hashString(JSON.stringify(questions))}`
+}
+
+function isUserQuestionToolName(name: string | undefined): boolean {
+  if (!name) return false
+
+  return ['askuserquestion', 'ask_user_question', 'request_user_input'].includes(
+    name.toLowerCase(),
+  )
+}
+
+function hashString(value: string): string {
+  let hash = 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(31, hash) + value.charCodeAt(index)
+  }
+  return (hash >>> 0).toString(36)
 }
 
 function normalizeApproval(payload: unknown): ApprovalRequest {
@@ -342,7 +538,11 @@ function usageFromPayload(
   return {
     tokensIn: numberField(usage, 'input_tokens') ?? numberField(usage, 'tokensIn'),
     tokensOut: numberField(usage, 'output_tokens') ?? numberField(usage, 'tokensOut'),
-    costUsd: numberField(usage, 'cost_usd') ?? numberField(usage, 'costUsd'),
+    costUsd:
+      numberField(usage, 'cost_usd') ??
+      numberField(usage, 'costUsd') ??
+      numberField(object, 'cost_usd') ??
+      numberField(object, 'costUsd'),
   }
 }
 

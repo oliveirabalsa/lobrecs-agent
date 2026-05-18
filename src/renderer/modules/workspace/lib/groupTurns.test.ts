@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentActivity } from '../../../../shared/types'
-import { groupTurns } from './groupTurns'
+import { groupTurns, normalizeAssistantMessages } from './groupTurns'
 
 describe('groupTurns', () => {
   it('returns an empty array when there are no activities and no seed prompt', () => {
@@ -219,6 +219,33 @@ describe('groupTurns', () => {
     expect(result[0].status).toBe('running')
     expect(result[0].completion).toBeUndefined()
     expect(result[0].endedAt).toBeUndefined()
+  })
+
+  it('coalesces streamed assistant chunks before rendering the turn', () => {
+    const [turn] = groupTurns([
+      { kind: 'message', role: 'assistant', text: 'Now I ', stream: true },
+      { kind: 'message', role: 'assistant', text: 'have the full picture.', stream: true },
+    ])
+
+    expect(turn.activities).toEqual([
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Now I have the full picture.',
+        stream: true,
+      },
+    ])
+  })
+
+  it('drops exact duplicate assistant text sent after streaming completes', () => {
+    const activities: AgentActivity[] = [
+      { kind: 'message', role: 'assistant', text: 'Done.', stream: true },
+      { kind: 'message', role: 'assistant', text: 'Done.' },
+    ]
+
+    expect(normalizeAssistantMessages(activities)).toEqual([
+      { kind: 'message', role: 'assistant', text: 'Done.', stream: true },
+    ])
   })
 
   it('produces stable, unique turn ids', () => {

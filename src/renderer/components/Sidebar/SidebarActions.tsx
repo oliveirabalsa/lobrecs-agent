@@ -36,18 +36,20 @@ export function SidebarActions({
         disabled={!onSearch}
         shortcut="⌘K"
       />
-      <ActionRow
-        icon={<PluginsIcon />}
-        label="Plugins"
-        onClick={onPlugins}
-        disabled={!onPlugins}
-      />
-      <ActionRow
-        icon={<AutomationsIcon />}
-        label="Automations"
-        onClick={onAutomations}
-        disabled={!onAutomations}
-      />
+      {onPlugins ? (
+        <ActionRow
+          icon={<PluginsIcon />}
+          label="Plugins"
+          onClick={onPlugins}
+        />
+      ) : null}
+      {onAutomations ? (
+        <ActionRow
+          icon={<AutomationsIcon />}
+          label="Automations"
+          onClick={onAutomations}
+        />
+      ) : null}
     </nav>
   )
 }

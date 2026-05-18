@@ -192,7 +192,10 @@ export function MessageStream({
   }
 
   return (
-    <div ref={containerRef} className="mx-auto flex w-full max-w-[820px] flex-col gap-4">
+    <div
+      ref={containerRef}
+      className="motion-fade-in mx-auto flex w-full max-w-[820px] flex-col gap-4"
+    >
       {turns.map((turn, index) => {
         const isLastTurn = index === turns.length - 1
         const isRunning = isLastTurn ? running : false
@@ -208,6 +211,7 @@ export function MessageStream({
             isLast={isLastTurn}
             running={isRunning}
             ctx={ctx}
+            turnIndex={index}
           />
         )
       })}
@@ -220,11 +224,13 @@ function TurnBlock({
   isLast,
   running,
   ctx,
+  turnIndex,
 }: {
   turn: Turn
   isLast: boolean
   running: boolean
   ctx: RendererContext
+  turnIndex: number
 }) {
   const isCompactionTurn =
     turn.streamItems.length === 1 && turn.streamItems[0].kind === 'compaction'
@@ -233,9 +239,12 @@ function TurnBlock({
     return <Divider label="Context automatically compacted" />
   }
 
-  const { renderable, finalAssistantText } = splitFinalAssistant(turn.streamItems, {
-    separateFinalAssistant: !running && turn.completion !== undefined,
-  })
+  const { renderable, finalAssistantText, trailingCodeChanges } = splitFinalAssistant(
+    turn.streamItems,
+    {
+      separateFinalAssistant: !running && turn.completion !== undefined,
+    },
+  )
   const showWorkingState = running || turn.completion !== undefined
   const totalMs =
     turn.endedAt !== undefined ? Math.max(0, turn.endedAt - turn.startedAt) : undefined
@@ -249,7 +258,10 @@ function TurnBlock({
       totalMs !== undefined)
 
   return (
-    <section className="flex flex-col gap-3">
+    <section
+      className="motion-fade-up-in flex flex-col gap-3"
+      style={{ animationDelay: `${Math.min(turnIndex, 8) * 20}ms` }}
+    >
       {turn.userMessage ? (
         <UserMessage
           text={turn.userMessage.text}
@@ -263,9 +275,15 @@ function TurnBlock({
 
       {renderable.length > 0 ? (
         <div className="flex flex-col gap-2">
-          {renderable.map((item, idx) =>
-            renderStreamItem(item, `${turn.id}-${idx}`, ctx),
-          )}
+          {renderable.map((item, idx) => (
+            <div
+              key={`${turn.id}-${idx}`}
+              className="motion-fade-up-in"
+              style={{ animationDelay: `${Math.min(idx, 8) * 16}ms` }}
+            >
+              {renderStreamItem(item, `${turn.id}-${idx}`, ctx)}
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -275,6 +293,14 @@ function TurnBlock({
 
       {finalAssistantText !== undefined ? (
         <AssistantMessage text={finalAssistantText} showActions={isLast && !running} />
+      ) : null}
+
+      {trailingCodeChanges.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          {trailingCodeChanges.map((item, idx) =>
+            renderStreamItem(item, `${turn.id}-code-${idx}`, ctx),
+          )}
+        </div>
       ) : null}
 
       {hasCompletionMetrics ? (
@@ -292,6 +318,7 @@ function TurnBlock({
 interface FinalAssistantSplit {
   renderable: StreamItem[]
   finalAssistantText?: string
+  trailingCodeChanges: StreamItem[]
 }
 
 /**
@@ -309,14 +336,16 @@ export function splitFinalAssistant(
   options: { separateFinalAssistant?: boolean } = {},
 ): FinalAssistantSplit {
   const completionlessItems = items.filter((item) => item.kind !== 'completion')
+  const trailingCodeChanges = completionlessItems.filter(isCodeChangeItem)
+  const assistantCandidates = completionlessItems.filter((item) => !isCodeChangeItem(item))
   if (options.separateFinalAssistant === false) {
-    return { renderable: completionlessItems }
+    return { renderable: completionlessItems, trailingCodeChanges: [] }
   }
 
   let lastAssistantIndex = -1
   let lastAssistantText: string | undefined
-  for (let i = completionlessItems.length - 1; i >= 0; i -= 1) {
-    const item = completionlessItems[i]
+  for (let i = assistantCandidates.length - 1; i >= 0; i -= 1) {
+    const item = assistantCandidates[i]
     if (item.kind === 'message' && item.role === 'assistant') {
       lastAssistantIndex = i
       lastAssistantText = item.text
@@ -326,12 +355,21 @@ export function splitFinalAssistant(
 
   if (lastAssistantIndex === -1) {
     return {
-      renderable: completionlessItems,
+      renderable: assistantCandidates,
+      trailingCodeChanges,
     }
   }
 
-  const renderable = completionlessItems.filter((_, index) => index !== lastAssistantIndex)
-  return { renderable, finalAssistantText: lastAssistantText }
+  const renderable = assistantCandidates.filter((_, index) => index !== lastAssistantIndex)
+  return { renderable, finalAssistantText: lastAssistantText, trailingCodeChanges }
+}
+
+function isCodeChangeItem(item: StreamItem): boolean {
+  return (
+    item.kind === 'file-change' ||
+    item.kind === 'edited-files-group' ||
+    item.kind === 'diff-summary'
+  )
 }
 
 function StreamSkeleton() {

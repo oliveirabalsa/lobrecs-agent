@@ -12,7 +12,9 @@ import {
   CompletionFooter,
   EditedFilesCard,
   RanCommandsPill,
+  UserQuestionPromptCard,
 } from '../components/artifacts'
+import type { UserQuestionActivity } from '../components/artifacts'
 import type { StreamItem } from './groupTurns'
 
 /**
@@ -26,9 +28,12 @@ export interface RendererContext {
   diffProposals?: DiffProposal[]
   /** Pending approval request, surfaced by ApprovalRequestPill. */
   approvalRequest?: ApprovalRequest | null
+  /** Latest unresolved agent question. Used to highlight its timeline card. */
+  pendingUserQuestionPromptId?: string | null
   onReviewFile?: (filePath?: string) => void
   onApproveApproval?: () => void | Promise<void>
   onRejectApproval?: () => void | Promise<void>
+  onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
 }
 
 const EMPTY_CONTEXT: RendererContext = {
@@ -86,6 +91,16 @@ export function renderStreamItem(
     case 'plan-prompt':
       // Handled by `MessageStream` (Divider) and `RunWorkspace` (modal).
       return null
+
+    case 'user-question':
+      return (
+        <UserQuestionPromptCard
+          key={key}
+          prompt={item}
+          active={ctx.pendingUserQuestionPromptId === item.promptId}
+          onAnswer={ctx.onAnswerUserQuestion}
+        />
+      )
 
     case 'completion':
       return (
