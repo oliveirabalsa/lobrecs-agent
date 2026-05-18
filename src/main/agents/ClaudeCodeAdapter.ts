@@ -471,8 +471,6 @@ function normalizeClaudeModelId(model: string): string {
 }
 
 function visibleClaudeStderr(text: string): string {
-  if (isClaudeSessionEndHookWarning(text)) return ''
-
   return text
     .split(/(?<=\n)/)
     .filter((line) => !isClaudeSessionEndHookWarning(line))
