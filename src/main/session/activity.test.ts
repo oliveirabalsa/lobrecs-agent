@@ -251,6 +251,82 @@ describe('agent activity normalization', () => {
     ])
   })
 
+  it('turns Codex AskUserQuestion started items into structured question prompts', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.started',
+        item: {
+          type: 'function_call',
+          name: 'AskUserQuestion',
+          call_id: 'call-questions',
+          arguments: {
+            questions: [
+              {
+                header: 'Cursor style',
+                question: 'How should the cursor behave?',
+                options: [{ label: 'Always blink' }],
+              },
+            ],
+          },
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: 'user-question:call-questions',
+        title: 'Cursor style',
+        questions: [
+          expect.objectContaining({
+            question: 'How should the cursor behave?',
+            options: [
+              expect.objectContaining({
+                label: 'Always blink',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ])
+  })
+
+  it('turns generic AskUserQuestion tool-call events into structured question prompts', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'tool_call',
+        tool: 'AskUserQuestion',
+        id: 'call-generic',
+        input: {
+          questions: [
+            {
+              question: 'Should I continue?',
+              options: [{ label: 'Yes' }],
+            },
+          ],
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: 'user-question:call-generic',
+        questions: [
+          expect.objectContaining({
+            question: 'Should I continue?',
+          }),
+        ],
+      }),
+    ])
+  })
+
   it('suppresses Codex AskUserQuestion tool result placeholders', () => {
     const activities = deriveActivityEvents({
       type: 'stdout',

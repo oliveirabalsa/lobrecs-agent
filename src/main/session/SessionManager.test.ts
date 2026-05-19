@@ -161,6 +161,81 @@ describe('SessionManager', () => {
     expect(sessionsStore.get(sessionId)?.status).toBe('running')
   })
 
+  it('pauses an active session when the agent asks the user a question', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'ask before editing',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    adapter.emit({
+      type: 'stdout',
+      sessionId,
+      payload: {
+        type: 'item.started',
+        item: {
+          type: 'function_call',
+          name: 'AskUserQuestion',
+          call_id: 'call-question',
+          arguments: JSON.stringify({
+            questions: [
+              {
+                header: 'Scope',
+                question: 'Which files should I focus?',
+                options: [{ label: 'Renderer only' }],
+              },
+            ],
+          }),
+        },
+      },
+      timestamp: 10,
+    })
+
+    expect(sessionsStore.get(sessionId)?.status).toBe('awaiting-input')
+    expect(manager.isActive(sessionId)).toBe(false)
+    expect(adapter.cancel).toHaveBeenCalledTimes(1)
+    expect(
+      sessionsStore.listEvents(sessionId).some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'user-question',
+      ),
+    ).toBe(true)
+
+    adapter.emit({
+      type: 'stdout',
+      sessionId,
+      payload: { text: 'Skipping the question and choosing a default.' },
+      timestamp: 11,
+    })
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 12,
+    })
+
+    expect(sessionsStore.get(sessionId)?.status).toBe('awaiting-input')
+    expect(
+      sessionsStore
+        .listEvents(sessionId)
+        .some((event) => event.payload && JSON.stringify(event.payload).includes('Skipping')),
+    ).toBe(false)
+    expect(broadcasts.map((event) => event.type)).toEqual(['stdout', 'activity'])
+  })
+
   it('links follow-up sessions to an existing thread id', async () => {
     const project = createProject()
     const thread = threadsStore.create({ projectId: project.id, title: 'Existing thread' })

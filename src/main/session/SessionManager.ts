@@ -2,6 +2,7 @@ import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import type {
+  AgentActivity,
   AgentEvent,
   AgentId,
   AgentRuntimeSettings,
@@ -98,6 +99,7 @@ export class SessionManager {
   private readonly broadcastEvent: EventBroadcaster
   private readonly worktreeIsolation: boolean
   private readonly processWarningsBySession = new Map<string, Set<string>>()
+  private readonly sessionsPausedForUserInput = new Set<string>()
   private readonly pendingQueues = new Map<string, QueuedMessage[]>()
   private estimateCost: CostEstimator
 
@@ -132,6 +134,7 @@ export class SessionManager {
       agentId: params.agentId,
       model: params.model,
       prompt: params.prompt,
+      imageAttachments: params.imageAttachments,
       status: 'running',
       threadId,
     })
@@ -217,6 +220,7 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
+    this.sessionsPausedForUserInput.delete(sessionId)
     const session = sessionsStore.get(sessionId)
 
     if (session && !terminalSessionStatuses.has(session.status)) {
@@ -356,6 +360,8 @@ export class SessionManager {
   }
 
   private handleAgentEvent(event: AgentEvent): void {
+    if (this.sessionsPausedForUserInput.has(event.sessionId)) return
+
     if (event.type === 'approval-request') {
       if (this.isTerminalSession(event.sessionId)) return
 
@@ -418,11 +424,36 @@ export class SessionManager {
   }
 
   private recordActivityEvents(event: AgentEvent): void {
+    let shouldPauseForUserInput = false
+
     for (const activityEvent of deriveActivityEvents(event)) {
       if (this.hasSeenProcessWarning(activityEvent)) continue
 
       this.recordEvent(activityEvent)
+      if (isUserQuestionActivity(activityEvent.payload)) {
+        shouldPauseForUserInput = true
+      }
     }
+
+    if (shouldPauseForUserInput) {
+      this.pauseForUserInput(event.sessionId)
+    }
+  }
+
+  private pauseForUserInput(sessionId: string): void {
+    const session = sessionsStore.get(sessionId)
+    if (!session || terminalSessionStatuses.has(session.status)) return
+
+    sessionsStore.updateStatus(sessionId, 'awaiting-input')
+    const active = this.activeSessions.get(sessionId)
+    this.sessionsPausedForUserInput.add(sessionId)
+    this.activeSessions.delete(sessionId)
+    this.processWarningsBySession.delete(sessionId)
+
+    if (!active) return
+
+    active.cancel()
+    void this.removeWorktree(sessionId, active)
   }
 
   private hasSeenProcessWarning(event: AgentEvent): boolean {
@@ -639,6 +670,7 @@ export class SessionManager {
     this.broadcastEvent(event)
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
+    this.sessionsPausedForUserInput.delete(sessionId)
   }
 }
 
@@ -649,6 +681,17 @@ function processWarningActivityKey(event: AgentEvent): string | null {
   if (!isProcessWarningPayload(event.payload)) return null
 
   return processWarningKey(event.payload.detail)
+}
+
+function isUserQuestionActivity(payload: unknown): payload is Extract<
+  AgentActivity,
+  { kind: 'user-question' }
+> {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { kind?: unknown }).kind === 'user-question'
+  )
 }
 
 function completionStatus(event: AgentEvent): SessionStatus {
@@ -784,6 +827,7 @@ function isSessionStatus(value: string): value is SessionStatus {
   return (
     value === 'running' ||
     value === 'awaiting-approval' ||
+    value === 'awaiting-input' ||
     value === 'done' ||
     value === 'error' ||
     value === 'cancelled'

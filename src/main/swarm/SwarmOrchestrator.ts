@@ -577,6 +577,7 @@ function normalizeCompletionStatus(status: SessionStatus | string): SessionStatu
   if (
     status === 'running' ||
     status === 'awaiting-approval' ||
+    status === 'awaiting-input' ||
     status === 'done' ||
     status === 'error' ||
     status === 'cancelled'
@@ -605,6 +606,10 @@ async function waitForStoredSessionCompletion(
     const terminalEvent = events.find(
       (event) => event.type === 'session-complete' || event.type === 'error',
     )
+
+    if (session.status === 'awaiting-input') {
+      return { status: 'awaiting-input', output: extractSessionOutput(events) }
+    }
 
     if (session.status === 'cancelled') {
       return { status: 'cancelled', output: extractSessionOutput(events) }

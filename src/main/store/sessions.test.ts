@@ -182,7 +182,14 @@ describe('sessionsStore', () => {
     const project = createProject()
     const thread = threadsStore.create({ projectId: project.id, title: 'Follow-up thread' })
 
-    const first = createThreadSession(thread.id, project.id, 'first prompt', 1_000)
+    const first = createThreadSession(thread.id, project.id, 'first prompt', 1_000, [
+      {
+        filePath: '/tmp/first.png',
+        name: 'first.png',
+        mimeType: 'image/png',
+        size: 1_024,
+      },
+    ])
     const second = createThreadSession(thread.id, project.id, 'second prompt', 2_000)
     const third = createThreadSession(thread.id, project.id, 'third prompt', 3_000)
     const active = createThreadSession(thread.id, project.id, 'active prompt', 4_000)
@@ -192,23 +199,47 @@ describe('sessionsStore', () => {
     addAssistantMessage(third.id, 'third answer')
     addAssistantMessage(active.id, 'active answer')
 
+    expect(sessionsStore.get(first.id)?.imageAttachments).toEqual([
+      {
+        filePath: '/tmp/first.png',
+        name: 'first.png',
+        mimeType: 'image/png',
+        size: 1_024,
+      },
+    ])
     expect(
       sessionsStore
-        .listThreadTranscript(thread.id, { limit: 2, excludeSessionId: active.id })
+        .listThreadTranscript(thread.id, { limit: 3, excludeSessionId: active.id })
         .map((turn) => ({
           sessionId: turn.sessionId,
           prompt: turn.prompt,
+          imageAttachments: turn.imageAttachments,
           assistantText: turn.assistantText,
         })),
     ).toEqual([
       {
+        sessionId: first.id,
+        prompt: 'first prompt',
+        imageAttachments: [
+          {
+            filePath: '/tmp/first.png',
+            name: 'first.png',
+            mimeType: 'image/png',
+            size: 1_024,
+          },
+        ],
+        assistantText: 'first answer',
+      },
+      {
         sessionId: second.id,
         prompt: 'second prompt',
+        imageAttachments: undefined,
         assistantText: 'second answer',
       },
       {
         sessionId: third.id,
         prompt: 'third prompt',
+        imageAttachments: undefined,
         assistantText: 'third answer',
       },
     ])
@@ -229,6 +260,12 @@ function createThreadSession(
   projectId: string,
   prompt: string,
   createdAt: number,
+  imageAttachments?: Array<{
+    filePath: string
+    name?: string
+    mimeType?: string
+    size?: number
+  }>,
 ) {
   return sessionsStore.create({
     projectId,
@@ -236,6 +273,7 @@ function createThreadSession(
     agentId: 'claude-code',
     model: 'claude-sonnet-4-6',
     prompt,
+    imageAttachments,
     status: 'done',
     createdAt,
     completedAt: createdAt + 100,

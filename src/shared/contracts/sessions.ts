@@ -1,9 +1,10 @@
-import type { AgentId } from './agents'
+import type { AgentId, ImageAttachment } from './agents'
 import type { ApprovalRequest } from './diffs'
 
 export type SessionStatus =
   | 'running'
   | 'awaiting-approval'
+  | 'awaiting-input'
   | 'done'
   | 'error'
   | 'cancelled'
@@ -15,6 +16,7 @@ export interface Session {
   agentId: AgentId
   model: string
   prompt: string
+  imageAttachments?: ImageAttachment[]
   status: SessionStatus
   tokensIn: number
   tokensOut: number
@@ -138,6 +140,7 @@ export interface ThreadTranscriptTurn {
   sessionId: string
   threadId: string
   prompt: string
+  imageAttachments?: ImageAttachment[]
   assistantText?: string
   status: SessionStatus
   createdAt: number

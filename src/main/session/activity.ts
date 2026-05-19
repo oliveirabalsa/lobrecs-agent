@@ -115,6 +115,9 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   if (codexActivity !== undefined) return codexActivity
 
   if (type.includes('tool_call') || type.includes('tool-call') || type.includes('tool.use')) {
+    const userQuestion = userQuestionActivityFromToolCall(payload)
+    if (userQuestion) return userQuestion
+
     return {
       kind: 'tool-call',
       name: stringField(payload, 'name') ?? stringField(payload, 'tool') ?? 'tool',
@@ -124,10 +127,16 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   }
 
   if (type.includes('tool_result') || type.includes('tool-result')) {
+    const toolName = stringField(payload, 'name') ?? stringField(payload, 'tool')
+    const output = textFromPayload(payload)
+    if (isUserQuestionToolName(toolName) || output.trim() === 'Answer questions?') {
+      return null
+    }
+
     return {
       kind: 'tool-result',
-      name: stringField(payload, 'name') ?? stringField(payload, 'tool') ?? 'tool',
-      output: textFromPayload(payload),
+      name: toolName ?? 'tool',
+      output,
       status: type.includes('error') ? 'error' : 'done',
     }
   }
@@ -248,6 +257,9 @@ function activityFromCodexPayload(
       return { kind: 'step', title: 'Thinking', status: 'running' }
     }
 
+    const userQuestion = userQuestionActivityFromToolCall(item)
+    if (userQuestion) return userQuestion
+
     const toolName = toolNameFromItem(item, itemType)
     if (toolName) {
       return {
@@ -320,6 +332,34 @@ function activityFromCodexPayload(
     return text.trim() ? { kind: 'message', role: 'assistant', text, stream: true } : null
   }
 
+  const directUserQuestion = userQuestionActivityFromToolCall(item)
+  if (directUserQuestion) return directUserQuestion
+
+  if (isToolResultItem(itemType)) {
+    const toolName = toolNameFromItem(item, itemType)
+    const text = textFromPayload(item)
+    if (isUserQuestionToolName(toolName) || text.trim() === 'Answer questions?') {
+      return null
+    }
+
+    return {
+      kind: 'tool-result',
+      name: toolName ?? 'tool',
+      output: text.trim() ? text : undefined,
+      status: type.includes('error') ? 'error' : 'done',
+    }
+  }
+
+  const directToolName = toolNameFromItem(item, itemType)
+  if (directToolName) {
+    return {
+      kind: 'tool-call',
+      name: directToolName,
+      input: toolInputFromItem(item),
+      status: itemIncludesError(item) ? 'error' : 'running',
+    }
+  }
+
   if (type.startsWith('thread.') || type.startsWith('turn.') || type.startsWith('item.')) {
     return null
   }
@@ -333,7 +373,7 @@ function userQuestionActivityFromToolCall(
   const toolName = stringField(item, 'name') ?? stringField(item, 'tool')
   if (!isUserQuestionToolName(toolName)) return null
 
-  const input = structuredToolInput(item.arguments ?? item.input ?? item.params)
+  const input = structuredToolInput(item.arguments ?? item.input ?? item.params) ?? item
   const rawQuestions = isRecord(input) && Array.isArray(input.questions)
     ? input.questions
     : []

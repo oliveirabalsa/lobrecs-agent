@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentEvent,
   AgentId,
+  ImageAttachment,
   ListThreadTranscriptOptions,
   Session,
   SessionStatus,
@@ -15,6 +16,7 @@ type SessionRow = {
   agent_id: AgentId
   model: string
   prompt: string
+  image_attachments: string | null
   status: SessionStatus
   tokens_in: number
   tokens_out: number
@@ -38,6 +40,7 @@ export type CreateSessionInput = {
   agentId: AgentId
   model: string
   prompt: string
+  imageAttachments?: ImageAttachment[] | null
   status?: SessionStatus
   tokensIn?: number
   tokensOut?: number
@@ -60,6 +63,7 @@ function rowToSession(row: SessionRow): Session {
     agentId: row.agent_id,
     model: row.model,
     prompt: row.prompt,
+    imageAttachments: parseImageAttachments(row.image_attachments),
     status: row.status,
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
@@ -102,9 +106,9 @@ export const sessionsStore = {
         `
           INSERT INTO sessions (
             id, project_id, agent_id, model, prompt, status,
-            tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
+            image_attachments, tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -114,6 +118,7 @@ export const sessionsStore = {
         data.model,
         data.prompt,
         status,
+        serializeImageAttachments(data.imageAttachments),
         data.tokensIn ?? 0,
         data.tokensOut ?? 0,
         data.costUsd ?? 0,
@@ -213,15 +218,19 @@ export const sessionsStore = {
       )
       .all(...params) as SessionRow[]
 
-    return rows.reverse().map((row) => ({
-      sessionId: row.id,
-      threadId,
-      prompt: row.prompt,
-      assistantText: extractAssistantText(sessionsStore.listEvents(row.id)),
-      status: row.status,
-      createdAt: row.created_at,
-      completedAt: row.completed_at ?? undefined,
-    }))
+    return rows.reverse().map((row) => {
+      const session = rowToSession(row)
+      return {
+        sessionId: session.id,
+        threadId,
+        prompt: session.prompt,
+        imageAttachments: session.imageAttachments,
+        assistantText: extractAssistantText(sessionsStore.listEvents(row.id)),
+        status: session.status,
+        createdAt: session.createdAt,
+        completedAt: session.completedAt,
+      }
+    })
   },
 
   delete(id: string): void {
@@ -249,6 +258,41 @@ export const sessionsStore = {
   linkToThread(sessionId: string, threadId: string): void {
     getDb().prepare('UPDATE sessions SET thread_id = ? WHERE id = ?').run(threadId, sessionId)
   },
+}
+
+function serializeImageAttachments(
+  imageAttachments: ImageAttachment[] | null | undefined,
+): string | null {
+  if (!imageAttachments || imageAttachments.length === 0) return null
+  return JSON.stringify(imageAttachments)
+}
+
+function parseImageAttachments(value: string | null): ImageAttachment[] | undefined {
+  if (!value) return undefined
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) return undefined
+
+    const attachments = parsed.filter(isImageAttachment)
+    return attachments.length > 0 ? attachments : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isImageAttachment(value: unknown): value is ImageAttachment {
+  if (!value || typeof value !== 'object') return false
+
+  const record = value as Record<string, unknown>
+  return (
+    typeof record.filePath === 'string' &&
+    (!('name' in record) || record.name === undefined || typeof record.name === 'string') &&
+    (!('mimeType' in record) ||
+      record.mimeType === undefined ||
+      typeof record.mimeType === 'string') &&
+    (!('size' in record) || record.size === undefined || typeof record.size === 'number')
+  )
 }
 
 function requireSession(id: string): Session {

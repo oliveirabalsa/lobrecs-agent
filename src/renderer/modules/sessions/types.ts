@@ -1,4 +1,5 @@
 import type {
+  ImageAttachment,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -9,6 +10,7 @@ export interface ActiveSessionMeta {
   id: string
   threadId?: string
   prompt: string
+  imageAttachments?: ImageAttachment[]
   status: SessionStatus
   routingDecision: RoutingDecision | null
   agentId?: Project['agentId']
@@ -25,6 +27,7 @@ export interface StartedSessionSummary {
   sessionId: string
   threadId: string
   prompt: string
+  imageAttachments?: ImageAttachment[]
   routingDecision: RoutingDecision | null
   agentId?: SupportedAgentId
   modelOverride?: string

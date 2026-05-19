@@ -197,6 +197,12 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: 6,
+    up: `
+      ALTER TABLE sessions ADD COLUMN image_attachments TEXT;
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
