@@ -297,7 +297,8 @@ export function Composer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    const isComposing = Boolean((event.nativeEvent as { isComposing?: boolean }).isComposing)
+    if (event.key === 'Enter' && !event.shiftKey && !isComposing) {
       event.preventDefault()
       void submit()
       return
