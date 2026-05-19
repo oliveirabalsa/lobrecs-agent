@@ -44,7 +44,7 @@ export function registerIpcHandlers(): void {
   registerAutomationHandlers(context)
   registerSpecHandlers()
   registerRunHandlers(context)
-  registerGitHandlers()
+  registerGitHandlers(context)
   registerSettingsHandlers(context)
   registerSystemHandlers(context)
   registerUpdateHandlers()

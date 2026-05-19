@@ -1,6 +1,9 @@
 import type {
+  GitCommitAnalysisResult,
   GitCommandResult,
   GitCommitInput,
+  GitCommitPlanExecutionInput,
+  GitCommitPlanExecutionResult,
   GitDiffRequest,
   GitFileSelection,
 } from '../../shared/contracts/git'
@@ -12,6 +15,8 @@ export interface GitApi {
   revert(request: GitFileSelection): Promise<GitCommandResult>
   commit(input: GitCommitInput): Promise<GitCommandResult>
   push(projectId: string): Promise<GitCommandResult>
+  analyzeCommitPlan(projectId: string): Promise<GitCommitAnalysisResult>
+  executeCommitPlan(input: GitCommitPlanExecutionInput): Promise<GitCommitPlanExecutionResult>
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
@@ -21,5 +26,7 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     revert: (request) => ipcRenderer.invoke('git:revert', request),
     commit: (input) => ipcRenderer.invoke('git:commit', input),
     push: (projectId) => ipcRenderer.invoke('git:push', projectId),
+    analyzeCommitPlan: (projectId) => ipcRenderer.invoke('git:analyze-commit-plan', projectId),
+    executeCommitPlan: (input) => ipcRenderer.invoke('git:execute-commit-plan', input),
   }
 }

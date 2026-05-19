@@ -1,14 +1,18 @@
-import { spawn } from 'node:child_process'
 import { ipcMain } from 'electron'
-import { projectsStore } from '../../../store'
+import type { MainIpcContext } from '../../shared/ipcContext'
+import { requireProject } from '../../projects/application/requireProject'
+import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
+import { runGit } from '../infrastructure/runGit'
 import type {
-  GitCommandResult,
   GitCommitInput,
   GitDiffRequest,
   GitFileSelection,
+  GitCommitPlanExecutionInput,
 } from '../../../../shared/types'
 
-export function registerGitHandlers(): void {
+export function registerGitHandlers(context: MainIpcContext): void {
+  const workflowService = new GitCommitWorkflowService(context)
+
   ipcMain.handle('git:diff', async (_event, request: GitDiffRequest) => {
     const project = requireProject(request.projectId)
     const args =
@@ -44,37 +48,14 @@ export function registerGitHandlers(): void {
     const project = requireProject(projectId)
     return runGit(['push'], project.repoPath)
   })
-}
 
-function requireProject(projectId: string) {
-  const project = projectsStore.get(projectId)
-  if (!project) {
-    throw new Error(`Project not found: ${projectId}`)
-  }
+  ipcMain.handle('git:analyze-commit-plan', async (_event, projectId: string) =>
+    workflowService.analyzeCommitPlan(projectId),
+  )
 
-  return project
-}
-
-function runGit(args: string[], cwd: string): Promise<GitCommandResult> {
-  return new Promise((resolve) => {
-    const child = spawn('git', args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', (error) => {
-      resolve({ exitCode: 1, stdout, stderr: error.message })
-    })
-    child.on('exit', (code) => {
-      resolve({ exitCode: code ?? 0, stdout, stderr })
-    })
-  })
+  ipcMain.handle(
+    'git:execute-commit-plan',
+    async (_event, input: GitCommitPlanExecutionInput) =>
+      workflowService.executeCommitPlan(input),
+  )
 }

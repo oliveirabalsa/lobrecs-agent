@@ -1,3 +1,5 @@
+import type { SupportedAgentId } from './agents'
+
 export type DiffScope = 'working-tree' | 'staged' | 'head'
 
 export interface GitDiffRequest {
@@ -19,6 +21,61 @@ export interface GitFileSelection {
 export interface GitCommitInput {
   projectId: string
   message: string
+}
+
+export type GitFileChangeStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'copied'
+  | 'untracked'
+  | 'type-changed'
+
+export interface GitChangedFile {
+  path: string
+  status: GitFileChangeStatus
+  previousPath?: string
+}
+
+export interface GitCommitSuggestion {
+  id: string
+  message: string
+  summary: string
+  files: string[]
+}
+
+export interface GitCommitAnalysisModel {
+  agentId: SupportedAgentId
+  model: string
+}
+
+export interface GitCommitAnalysisResult {
+  projectId: string
+  fingerprint: string
+  branch: string
+  statusSummary: string
+  analysisSummary: string
+  changedFiles: GitChangedFile[]
+  suggestions: GitCommitSuggestion[]
+  analysis: GitCommitAnalysisModel
+}
+
+export interface GitCommitPlanExecutionInput {
+  projectId: string
+  fingerprint: string
+  suggestions: GitCommitSuggestion[]
+}
+
+export interface GitExecutedCommit {
+  hash: string
+  message: string
+  files: string[]
+}
+
+export interface GitCommitPlanExecutionResult {
+  commits: GitExecutedCommit[]
+  push: GitCommandResult
 }
 
 export interface StagedState {

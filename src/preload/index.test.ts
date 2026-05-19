@@ -317,6 +317,40 @@ describe('preload api shape', () => {
         expected: ['git:push', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.git.analyzeCommitPlan('project-1'),
+        expected: ['git:analyze-commit-plan', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.executeCommitPlan({
+            projectId: 'project-1',
+            fingerprint: 'fingerprint-1',
+            suggestions: [
+              {
+                id: 'commit-1',
+                message: 'feat(workspace): refresh commit review flow',
+                summary: 'UI updates.',
+                files: ['src/renderer/CommitAndPushDialog.tsx'],
+              },
+            ],
+          }),
+        expected: [
+          'git:execute-commit-plan',
+          {
+            projectId: 'project-1',
+            fingerprint: 'fingerprint-1',
+            suggestions: [
+              {
+                id: 'commit-1',
+                message: 'feat(workspace): refresh commit review flow',
+                summary: 'UI updates.',
+                files: ['src/renderer/CommitAndPushDialog.tsx'],
+              },
+            ],
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.settings.getGlobal(),
         expected: ['settings:get-global'],
       },
