@@ -87,6 +87,9 @@ interface WorkspaceViewProps {
   onSteer: (prompt: string) => void | Promise<void>
   onRemoveQueueItem: (messageId: string) => void | Promise<void>
   onClearQueue: () => void | Promise<void>
+  /** When true, WorkspaceView opens the terminal as soon as it mounts (used when switching from settings view). */
+  openTerminalOnMount?: boolean
+  onTerminalOpened?: () => void
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
@@ -158,6 +161,8 @@ export function WorkspaceView({
   onSteer,
   onRemoveQueueItem,
   onClearQueue,
+  openTerminalOnMount,
+  onTerminalOpened,
 }: WorkspaceViewProps) {
   const { globalSettings } = useSettings()
   const activeThreadId = activeSession?.threadId ?? null
@@ -282,6 +287,44 @@ export function WorkspaceView({
   useEffect(() => {
     setContextPercent(null)
   }, [activeSessionId])
+
+  const handleToggleTerminal = useCallback(() => {
+    if (bottomPanelOpen) {
+      setBottomPanelOpen(false)
+    } else {
+      if (!bottomPanelInitialTab && selectedProject?.repoPath) {
+        terminalCountRef.current += 1
+        const tab = createTerminalTab(
+          'shell',
+          'Terminal',
+          selectedProject.repoPath,
+          terminalCountRef.current,
+        )
+        setBottomPanelInitialTab(tab)
+      }
+      setBottomPanelOpen(true)
+    }
+  }, [bottomPanelOpen, bottomPanelInitialTab, selectedProject?.repoPath])
+
+  // Handle Ctrl+; from within WorkspaceView (when it's already mounted).
+  useEffect(() => {
+    const unsubToggle = window.agentforge.onShortcut('shortcut:toggle-terminal', handleToggleTerminal)
+    const unsubFullscreen = window.agentforge.onShortcut(
+      'shortcut:toggle-terminal-fullscreen',
+      () => setBottomPanelFullscreen((prev) => !prev),
+    )
+    return () => {
+      unsubToggle()
+      unsubFullscreen()
+    }
+  }, [handleToggleTerminal])
+
+  // Open terminal immediately when mounted via keyboard shortcut from settings view.
+  useEffect(() => {
+    if (!openTerminalOnMount) return
+    handleToggleTerminal()
+    onTerminalOpened?.()
+  }, [openTerminalOnMount]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenCliEditor = useCallback(
     (editor: EditorInfo) => {

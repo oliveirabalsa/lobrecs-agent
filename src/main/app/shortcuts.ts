@@ -20,8 +20,7 @@ export function registerAppShortcuts(getMainWindow: MainWindowProvider): void {
   })
 
   globalShortcut.register('CommandOrControl+M', () => {
-    const win = getMainWindow()
-    if (win) win.setFullScreen(!win.isFullScreen())
+    getMainWindow()?.webContents.send('shortcut:toggle-terminal-fullscreen')
   })
 }
 
