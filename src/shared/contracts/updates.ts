@@ -30,6 +30,8 @@ export interface AppUpdateState {
   canCheck: boolean
   canDownload: boolean
   canInstall: boolean
+  canManualDownload?: boolean
+  releaseUrl?: string
   update?: AppUpdateRelease
   progress?: AppUpdateProgress
   error?: string

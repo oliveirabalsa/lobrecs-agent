@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import electronUpdater, {
   type AppUpdater,
   type ProgressInfo,
@@ -14,6 +14,7 @@ import {
 
 const AUTO_CHECK_DELAY_MS = 3_000
 const { autoUpdater } = electronUpdater
+const RELEASES_URL = 'https://github.com/oliveirabalsa/lobrecs-agent-releases/releases/latest'
 
 export interface CheckForUpdatesOptions {
   automatic?: boolean
@@ -119,6 +120,10 @@ export class AppUpdateService {
     this.updater.quitAndInstall(false, true)
   }
 
+  async openReleaseUrl(): Promise<void> {
+    await shell.openExternal(RELEASES_URL)
+  }
+
   private async doCheckForUpdates(): Promise<AppUpdateState> {
     this.setState({
       phase: 'checking',
@@ -188,6 +193,16 @@ export class AppUpdateService {
       }
       return this.state
     } catch (error) {
+      if (isMacosCodeSigningError(error)) {
+        return this.setState({
+          phase: 'error',
+          progress: undefined,
+          error: errorMessage(error),
+          message: 'Automatic install is unavailable — the app is not code-signed. Download the update manually from GitHub.',
+          canManualDownload: true,
+          releaseUrl: RELEASES_URL,
+        })
+      }
       return this.setState({
         phase: 'error',
         progress: undefined,
@@ -348,6 +363,15 @@ function finiteNumber(value: number): number {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function isMacosCodeSigningError(error: unknown): boolean {
+  const msg = errorMessage(error)
+  return (
+    process.platform === 'darwin' &&
+    (msg.includes('code failed to satisfy specified code requirement') ||
+      msg.includes('did not pass validation'))
+  )
 }
 
 export const appUpdateService = new AppUpdateService()

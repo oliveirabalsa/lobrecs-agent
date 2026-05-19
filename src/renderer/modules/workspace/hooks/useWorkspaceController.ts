@@ -598,6 +598,7 @@ export function useWorkspaceController() {
     swarmOpen,
     isBusy,
     busyReason,
+    toggleTerminal: () => setMainView('workspace'),
     setDiffProposals,
     handleDiffProposals,
     setMainView,

@@ -22,6 +22,7 @@ function AppUpdatePanelView({
     checkForUpdates,
     downloadUpdate,
     installAndRestart,
+    openReleaseUrl,
   } = update
   const viewModel = createAppUpdateViewModel(state)
   const progressPercent = state?.progress?.percent ?? 0
@@ -76,7 +77,16 @@ function AppUpdatePanelView({
           ) : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {viewModel.primaryAction && viewModel.primaryLabel ? (
+            {state?.canManualDownload ? (
+              <button
+                type="button"
+                onClick={() => void openReleaseUrl()}
+                className="rounded bg-accent-primary px-2.5 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-accent-primary/85"
+              >
+                Get Update
+              </button>
+            ) : null}
+            {!state?.canManualDownload && viewModel.primaryAction && viewModel.primaryLabel ? (
               <button
                 type="button"
                 onClick={() => runAction(viewModel.primaryAction as AppUpdatePrimaryAction)}

@@ -171,6 +171,14 @@ export function RendererApp() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleNewChat, handleOpenSearch, workspace])
 
+  // Ctrl+; → toggle terminal panel.
+  useEffect(() => {
+    const unsubscribeTerminal = window.agentforge.onShortcut('shortcut:toggle-terminal', () => {
+      workspace.toggleTerminal?.()
+    })
+    return unsubscribeTerminal
+  }, [workspace])
+
   const handleHistoryBack = useCallback(() => {
     const target = history.back()
     if (!target) return

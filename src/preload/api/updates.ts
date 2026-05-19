@@ -10,6 +10,7 @@ export interface UpdatesApi {
   check(): Promise<AppUpdateState>
   download(): Promise<AppUpdateState>
   installAndRestart(): Promise<void>
+  openReleaseUrl(): Promise<void>
   onStatus(callback: (state: AppUpdateState) => void): () => void
 }
 
@@ -19,6 +20,7 @@ export function createUpdatesApi(ipcRenderer: IpcInvoker & IpcSubscriber): Updat
     check: () => ipcRenderer.invoke('updates:check'),
     download: () => ipcRenderer.invoke('updates:download'),
     installAndRestart: () => ipcRenderer.invoke('updates:install-and-restart'),
+    openReleaseUrl: () => ipcRenderer.invoke('updates:open-release-url'),
     onStatus: (callback) => {
       const handler = (_event: IpcRendererEvent, payload: AppUpdateState) => callback(payload)
       ipcRenderer.on(APP_UPDATE_STATUS_CHANNEL, handler)

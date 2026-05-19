@@ -47,6 +47,10 @@ export function useAppUpdate() {
       () => run(() => window.agentforge.updates.installAndRestart()),
       [run],
     ),
+    openReleaseUrl: useCallback(
+      () => run(() => window.agentforge.updates.openReleaseUrl()),
+      [run],
+    ),
     clearActionError: useCallback(() => setActionError(null), []),
   }
 }
