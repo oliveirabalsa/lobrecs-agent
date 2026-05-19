@@ -24,6 +24,7 @@ export function RendererApp() {
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [shellView, setShellView] = useState<'workspace' | 'settings'>('workspace')
+  const [openTerminalOnMount, setOpenTerminalOnMount] = useState(false)
 
   // Keep the mobile drawer mounted while opening, and during the close
   // animation so the `data-state="closed"` exit keyframes can play before
@@ -171,13 +172,17 @@ export function RendererApp() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleNewChat, handleOpenSearch, workspace])
 
-  // Ctrl+; → toggle terminal panel.
+  // Ctrl+; — when in settings, switch back to workspace and signal WorkspaceView to open terminal.
+  // When already in workspace, WorkspaceView handles the toggle directly via its own listener.
   useEffect(() => {
-    const unsubscribeTerminal = window.agentforge.onShortcut('shortcut:toggle-terminal', () => {
-      workspace.toggleTerminal?.()
+    const unsub = window.agentforge.onShortcut('shortcut:toggle-terminal', () => {
+      if (shellView === 'settings') {
+        setShellView('workspace')
+        setOpenTerminalOnMount(true)
+      }
     })
-    return unsubscribeTerminal
-  }, [workspace])
+    return unsub
+  }, [shellView])
 
   const handleHistoryBack = useCallback(() => {
     const target = history.back()
@@ -328,6 +333,8 @@ export function RendererApp() {
           onSteer={workspace.handleSteer}
           onRemoveQueueItem={workspace.handleRemoveQueueItem}
           onClearQueue={workspace.handleClearQueue}
+          openTerminalOnMount={openTerminalOnMount}
+          onTerminalOpened={() => setOpenTerminalOnMount(false)}
           />
         )}
       </div>
