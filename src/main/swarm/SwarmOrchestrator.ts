@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
+  AgentActivity,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -148,6 +149,7 @@ export class SwarmOrchestrator {
         threadId,
         settings,
       )
+      this.injectSwarmFileSummary(result.sessions)
     } else {
       result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId, threadId)
     }
@@ -413,6 +415,44 @@ export class SwarmOrchestrator {
 
     const completion = await this.waitForCompletion(previousSession)
     previousSession.status = completion.status
+  }
+
+  private injectSwarmFileSummary(sessions: SpawnedSession[]): void {
+    if (sessions.length <= 1) return
+    const lastSession = sessions.at(-1)
+    if (!lastSession) return
+
+    // Collect file-change activities from all non-last sessions (implementers).
+    // Deduplicates by filePath so the last session to touch a file wins.
+    type FileChangePayload = Extract<AgentActivity, { kind: 'file-change' }>
+    const fileChanges = new Map<string, FileChangePayload>()
+
+    for (const session of sessions.slice(0, -1)) {
+      for (const event of sessionsStore.listEvents(session.sessionId)) {
+        if (event.type !== 'activity') continue
+        const payload = event.payload as AgentActivity
+        if (!payload || typeof payload !== 'object') continue
+        if (payload.kind !== 'file-change') continue
+        fileChanges.set(payload.filePath, payload)
+      }
+    }
+
+    if (fileChanges.size === 0) return
+
+    // Persist synthetic file-change activities into the last session's event log.
+    // groupTurns treats file-change as a post-completion artifact so these will
+    // stay in the reviewer's final turn and render as EditedFilesCard.
+    const baseTimestamp = Date.now()
+    let i = 0
+    for (const payload of fileChanges.values()) {
+      sessionsStore.addEvent({
+        type: 'activity',
+        sessionId: lastSession.sessionId,
+        payload,
+        timestamp: baseTimestamp + i,
+      })
+      i += 1
+    }
   }
 
   private async spawnAgent(input: {
