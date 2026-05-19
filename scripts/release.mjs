@@ -26,6 +26,7 @@ function exec(command, args, silent = false) {
       encoding: 'utf8',
       stdio: silent ? ['pipe', 'pipe', 'pipe'] : 'inherit',
     })
+    if (result == null) return ''
     return result.trim()
   } catch (err) {
     error(`Command failed: ${command} ${args.join(' ')}\n${err.message}`)
