@@ -10,6 +10,12 @@ import {
   CLI_EDITOR_TERMINAL_OPTIONS,
   CLI_EDITOR_TERMINAL_THEME,
 } from './cliEditorTerminalAppearance'
+import {
+  cursorStyleForState,
+  DEFAULT_CLI_EDITOR_CURSOR_STATE,
+  readCliEditorCursorStateChunk,
+  type CliEditorCursorState,
+} from './cliEditorCursorState'
 
 interface CliEditorTerminalOverlayProps {
   editorId: string
@@ -27,9 +33,13 @@ export function CliEditorTerminalOverlay({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const sessionIdRef = useRef(createTerminalSessionId())
   const exitedRef = useRef(false)
+  const cursorEscapeTailRef = useRef('')
   const [session, setSession] = useState<CliEditorTerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exitEvent, setExitEvent] = useState<CliEditorTerminalExitEvent | null>(null)
+  const [cursorState, setCursorState] = useState<CliEditorCursorState>(
+    DEFAULT_CLI_EDITOR_CURSOR_STATE,
+  )
 
   useEffect(() => {
     const container = containerRef.current
@@ -71,8 +81,26 @@ export function CliEditorTerminalOverlay({
       void window.agentforge.system.writeCliEditorTerminal({ sessionId, data })
     })
 
+    const applyCursorState = (nextState: CliEditorCursorState) => {
+      const nextOptions = cursorStyleForState(nextState)
+      term.options.cursorStyle = nextOptions.cursorStyle
+      term.options.cursorBlink = nextOptions.cursorBlink
+    }
+
+    applyCursorState(DEFAULT_CLI_EDITOR_CURSOR_STATE)
+
     const offData = window.agentforge.system.onCliEditorTerminalData((event) => {
       if (event.sessionId !== sessionId) return
+      const parsed = readCliEditorCursorStateChunk(cursorEscapeTailRef.current, event.data)
+      cursorEscapeTailRef.current = parsed.remainder
+      if (parsed.state) {
+        applyCursorState(parsed.state)
+        setCursorState((current) =>
+          current.mode === parsed.state?.mode && current.shape === parsed.state?.shape
+            ? current
+            : parsed.state!,
+        )
+      }
       term.write(event.data)
     })
     const offExit = window.agentforge.system.onCliEditorTerminalExit((event) => {
@@ -84,6 +112,10 @@ export function CliEditorTerminalOverlay({
 
     const resizeObserver = new ResizeObserver(fitAndResize)
     resizeObserver.observe(container)
+    const handlePointerFocus = () => {
+      window.requestAnimationFrame(() => term.focus())
+    }
+    container.addEventListener('mousedown', handlePointerFocus)
     fitAndResize()
 
     term.write(`Starting ${editorName} in ${repoPath}\r\n`)
@@ -116,6 +148,7 @@ export function CliEditorTerminalOverlay({
       dataDisposable.dispose()
       offData()
       offExit()
+      container.removeEventListener('mousedown', handlePointerFocus)
       term.dispose()
 
       if (!exitedRef.current) {
@@ -151,16 +184,21 @@ export function CliEditorTerminalOverlay({
           <div className="truncate text-[10px] text-muted">{repoPath}</div>
         </div>
 
-        <div
-          className={`rounded px-2 py-0.5 text-[10px] font-medium ${
-            error
-              ? 'bg-accent-del/10 text-accent-del'
-              : exitEvent
-                ? 'bg-white/5 text-muted'
-                : 'bg-accent-add/10 text-accent-add'
-          }`}
-        >
-          {statusLabel}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className={cursorBadgeClass(cursorState)}>
+            {cursorState.label} cursor
+          </div>
+          <div
+            className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+              error
+                ? 'bg-accent-del/10 text-accent-del'
+                : exitEvent
+                  ? 'bg-white/5 text-muted'
+                  : 'bg-accent-add/10 text-accent-add'
+            }`}
+          >
+            {statusLabel}
+          </div>
         </div>
       </div>
 
@@ -174,6 +212,18 @@ function createTerminalSessionId(): string {
   if (randomId) return randomId
 
   return `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function cursorBadgeClass(cursorState: CliEditorCursorState): string {
+  switch (cursorState.mode) {
+    case 'insert':
+      return 'rounded border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-medium text-sky-200'
+    case 'replace':
+      return 'rounded border border-fuchsia-400/30 bg-fuchsia-400/10 px-2 py-0.5 text-[10px] font-medium text-fuchsia-200'
+    case 'normal':
+    default:
+      return 'rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-200'
+  }
 }
 
 function BackIcon() {

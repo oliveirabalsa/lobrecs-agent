@@ -12,7 +12,6 @@ import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
 import { CostDashboard } from '../../costs'
 import {
-  SessionHeader,
   TerminalPanel,
   type ActiveSessionMeta,
   type StartedSessionSummary,
@@ -380,24 +379,6 @@ export function WorkspaceView({
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {mainView === 'workspace' ? (
                   <>
-                    {activeSessionId ? (
-                      <div className="shrink-0 border-b border-hairline px-3 sm:px-4">
-                        <div className="mx-auto w-full max-w-[820px]">
-                          <SessionHeader
-                            project={selectedProject}
-                            sessionId={activeSessionId}
-                            prompt={activeSession?.prompt ?? ''}
-                            status={activeSession?.status ?? null}
-                            routingDecision={activeSession?.routingDecision ?? null}
-                            modelOverride={activeSession?.modelOverride}
-                            onCancel={onCancelSession}
-                            onFork={onForkSession}
-                            onFeedback={onFeedback}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
-
                     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                       {activeSessionId ? (
                         <RunWorkspace
@@ -405,6 +386,7 @@ export function WorkspaceView({
                           sessionId={activeSessionId}
                           threadId={activeSession?.threadId ?? null}
                           prompt={activeSession?.prompt ?? ''}
+                          imageAttachments={activeSession?.imageAttachments}
                           status={activeSession?.status ?? null}
                           startedAt={activeSession?.createdAt}
                           agentId={activeSession?.agentId ?? activeSession?.routingDecision?.agentId}

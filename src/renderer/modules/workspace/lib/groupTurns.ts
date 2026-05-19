@@ -1,4 +1,4 @@
-import type { AgentActivity } from '../../../../shared/types'
+import type { AgentActivity, ImageAttachment } from '../../../../shared/types'
 
 /**
  * A "turn" groups one user message together with all the activities the
@@ -16,10 +16,11 @@ export type TurnStatus =
   | 'error'
   | 'cancelled'
   | 'awaiting-approval'
+  | 'awaiting-input'
 
 export interface TurnUserMessage {
   text: string
-  attachments?: unknown[]
+  attachments?: ImageAttachment[]
   at?: number
 }
 
@@ -281,7 +282,10 @@ function normalizeAssistantTimeline(
   const normalizedTimes: number[] = []
   let pendingStreamText = ''
   let pendingStreamTime: number | undefined
-  let lastAssistantText = ''
+  // Track every normalized assistant text emitted this turn so that
+  // re-emissions (e.g. Codex item.completed after streaming deltas) are
+  // suppressed even when an intermediate activity reset "last seen".
+  const seenAssistantTexts = new Set<string>()
 
   const flushPendingStream = () => {
     if (!pendingStreamText.trim()) {
@@ -294,11 +298,12 @@ function normalizeAssistantTimeline(
     const at = pendingStreamTime
     pendingStreamText = ''
     pendingStreamTime = undefined
-    if (sameAssistantText(text, lastAssistantText)) return
+    const key = normalizeAssistantText(text)
+    if (seenAssistantTexts.has(key)) return
 
+    seenAssistantTexts.add(key)
     normalized.push({ kind: 'message', role: 'assistant', text, stream: true })
     if (at !== undefined) normalizedTimes.push(at)
-    lastAssistantText = text
   }
 
   activities.forEach((activity, index) => {
@@ -310,11 +315,12 @@ function normalizeAssistantTimeline(
       }
 
       flushPendingStream()
-      if (sameAssistantText(activity.text, lastAssistantText)) return
+      const key = normalizeAssistantText(activity.text)
+      if (seenAssistantTexts.has(key)) return
 
+      seenAssistantTexts.add(key)
       normalized.push(activity)
       if (times[index] !== undefined) normalizedTimes.push(times[index])
-      lastAssistantText = activity.text
       return
     }
 
@@ -325,10 +331,6 @@ function normalizeAssistantTimeline(
 
   flushPendingStream()
   return { activities: normalized, times: normalizedTimes }
-}
-
-function sameAssistantText(a: string, b: string): boolean {
-  return normalizeAssistantText(a) === normalizeAssistantText(b)
 }
 
 function normalizeAssistantText(text: string): string {
@@ -360,6 +362,8 @@ function mapCompletionStatus(
       return 'running'
     case 'awaiting-approval':
       return 'awaiting-approval'
+    case 'awaiting-input':
+      return 'awaiting-input'
     case 'error':
       return 'error'
     case 'cancelled':

@@ -86,65 +86,56 @@ function AgentRunIndicator({ phrase, duration }: AgentRunIndicatorProps) {
       className="motion-fade-up-in relative flex items-center gap-3 self-stretch overflow-hidden rounded-card border border-hairline bg-card-raised px-3.5 py-3"
     >
       <AgentGlyph />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-baseline gap-2">
-          <span className="truncate text-[13px] font-medium text-primary">{phrase}</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex items-baseline gap-2 font-mono">
+          <span className="truncate text-[13px] font-medium tracking-tight text-accent-loader">
+            {phrase}
+            <span
+              aria-hidden="true"
+              className="ml-0.5 inline-block text-accent-loader/80"
+              style={{ animation: 'loader-caret 1.05s steps(1, end) infinite' }}
+            >
+              ▍
+            </span>
+          </span>
           <span aria-hidden="true" className="text-muted opacity-50">·</span>
-          <span className="font-mono text-[11px] tabular-nums text-muted">{duration}</span>
+          <span className="text-[11px] tabular-nums text-muted">{duration}</span>
         </div>
-        <ScanBar />
+        <ProgressBar />
       </div>
     </div>
   )
 }
 
 /**
- * Square SVG mark — three concentric arcs with orbiting dots. Reads as a
- * "harness" rather than a loading spinner: each ring is a different layer
- * (planning, tool use, response) softly pulsing.
+ * Claude Code-style mark — a six-pointed asterisk in monospace red that
+ * slowly rotates and pulses. Replaces the previous orbiting-dots glyph
+ * with a single, denser symbol that reads as a terminal cursor more than
+ * a spinner.
  */
 function AgentGlyph() {
   return (
-    <div
+    <span
       aria-hidden="true"
-      className="relative flex h-9 w-9 shrink-0 items-center justify-center"
+      className="flex h-9 w-9 shrink-0 items-center justify-center font-mono text-[26px] leading-none text-accent-loader"
+      style={{
+        animation: 'loader-asterisk 1.6s ease-in-out infinite',
+        textShadow: '0 0 10px rgba(239, 68, 68, 0.45)',
+      }}
     >
-      <span
-        className="absolute inset-0 rounded-full border border-accent-primary/30"
-        style={{ animation: 'loader-pulse 1.8s ease-in-out infinite' }}
-      />
-      <span
-        className="absolute inset-[5px] rounded-full border border-accent-primary/45"
-        style={{ animation: 'loader-pulse 1.8s ease-in-out infinite', animationDelay: '180ms' }}
-      />
-      <div
-        className="absolute inset-0"
-        style={{ animation: 'loader-orbit 2.4s linear infinite' }}
-      >
-        <span className="absolute left-1/2 top-0 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-accent-primary shadow-[0_0_6px_rgba(59,130,246,0.65)]" />
-      </div>
-      <div
-        className="absolute inset-[5px]"
-        style={{ animation: 'loader-orbit 3.2s linear infinite reverse' }}
-      >
-        <span className="absolute left-1/2 top-0 h-1 w-1 -translate-x-1/2 rounded-full bg-accent-add/80" />
-      </div>
-      <span
-        className="relative h-1.5 w-1.5 rounded-full bg-primary"
-        style={{ animation: 'loader-glyph 1.4s ease-in-out infinite' }}
-      />
-    </div>
+      ✻
+    </span>
   )
 }
 
-/** Track + travelling highlight — evokes a tool running on the local box. */
-function ScanBar() {
+/** Full-width track with a red fill that travels edge-to-edge each cycle. */
+function ProgressBar() {
   return (
     <div className="relative h-[3px] w-full overflow-hidden rounded-full bg-hairline">
       <span
         aria-hidden="true"
-        className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-accent-primary/80 to-transparent"
-        style={{ animation: 'loader-scan 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite' }}
+        className="absolute inset-0 rounded-full bg-gradient-to-r from-accent-loader/20 via-accent-loader to-accent-loader/40"
+        style={{ animation: 'loader-fill 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite' }}
       />
     </div>
   )

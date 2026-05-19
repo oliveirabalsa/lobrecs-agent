@@ -17,6 +17,7 @@ const STATUS_STYLES: Record<SessionStatus | 'idle', string> = {
   idle: 'border-zinc-700 bg-zinc-900 text-zinc-400',
   running: 'border-blue-500/40 bg-blue-500/10 text-blue-200',
   'awaiting-approval': 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+  'awaiting-input': 'border-blue-500/40 bg-blue-500/10 text-blue-200',
   done: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
   error: 'border-red-500/40 bg-red-500/10 text-red-200',
   cancelled: 'border-zinc-600 bg-zinc-800 text-zinc-300',
@@ -85,11 +86,16 @@ export function SessionHeader({
   const tier = tierFromModel(modelOverride || session?.model, routingDecision?.tier ?? project.modelTier)
   const cost = formatCost(session?.costUsd)
 
-  const canCancel = sessionId && (effectiveStatus === 'running' || effectiveStatus === 'awaiting-approval')
+  const canCancel =
+    sessionId &&
+    (effectiveStatus === 'running' ||
+      effectiveStatus === 'awaiting-approval' ||
+      effectiveStatus === 'awaiting-input')
   const canFork = sessionId && (effectiveStatus === 'done' || effectiveStatus === 'error')
 
   const statusLabel = useMemo(() => {
     if (effectiveStatus === 'awaiting-approval') return 'awaiting approval'
+    if (effectiveStatus === 'awaiting-input') return 'awaiting answer'
     return effectiveStatus
   }, [effectiveStatus])
 

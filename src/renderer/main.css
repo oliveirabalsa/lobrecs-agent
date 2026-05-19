@@ -30,6 +30,7 @@
   --color-accent-del: #f87171;
   --color-accent-warn: #f59e0b;
   --color-accent-primary: #3b82f6;
+  --color-accent-loader: #ef4444;
 
   --radius-bubble: 12px;
   --radius-card: 8px;
@@ -110,13 +111,13 @@ input {
 }
 
 @keyframes content-pop-in {
-  from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: translateY(2%) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes content-pop-out {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  to { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(2%) scale(0.97); }
 }
 
 @keyframes fade-in {
@@ -179,24 +180,22 @@ input {
   to { opacity: 0; max-height: 0; transform: translateY(-4px); }
 }
 
-/* Loader keyframes for the "agent run" indicator in WorkingState. */
-@keyframes loader-scan {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(110%); }
+/* Loader keyframes for the "agent run" indicator in WorkingState.
+ * Claude Code style: a slowly-rotating, pulsing asterisk glyph and a
+ * progress bar that fills edge-to-edge each cycle (no half-traversal). */
+@keyframes loader-asterisk {
+  0%, 100% { opacity: 0.55; transform: rotate(0deg) scale(0.92); }
+  50% { opacity: 1; transform: rotate(180deg) scale(1.06); }
 }
 
-@keyframes loader-orbit {
-  to { transform: rotate(360deg); }
+@keyframes loader-fill {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(0%); }
 }
 
-@keyframes loader-pulse {
-  0%, 100% { opacity: 0.35; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes loader-glyph {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+@keyframes loader-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
 }
 
 [class~="motion-fade-in"] {

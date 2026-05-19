@@ -24,7 +24,11 @@ interface DraftProject {
   modelTier: Project['modelTier']
 }
 
-const ACTIVE_STATUSES: Session['status'][] = ['running', 'awaiting-approval']
+const ACTIVE_STATUSES: Session['status'][] = [
+  'running',
+  'awaiting-approval',
+  'awaiting-input',
+]
 
 function folderName(path: string) {
   const normalized = path.replace(/\\/g, '/')

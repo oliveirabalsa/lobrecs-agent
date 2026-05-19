@@ -45,7 +45,9 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
       {
         title: 'Running',
         sessions: sessions.filter((session) =>
-          session.status === 'running' || session.status === 'awaiting-approval',
+          session.status === 'running' ||
+          session.status === 'awaiting-approval' ||
+          session.status === 'awaiting-input',
         ),
       },
       {
@@ -273,6 +275,8 @@ function statusColor(status: string): string {
       return 'text-blue-400'
     case 'awaiting-approval':
       return 'text-amber-400'
+    case 'awaiting-input':
+      return 'text-blue-400'
     case 'error':
       return 'text-red-400'
     case 'cancelled':

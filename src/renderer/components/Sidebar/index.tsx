@@ -7,7 +7,7 @@ import { ProjectsSection } from './ProjectsSection'
 import { useProjectTree, type Thread } from './useProjectTree'
 
 const logoUrl = new URL('../../assets/lobrecs-agent-logo.png', import.meta.url).href
-const RUNNING_THREAD_STATUSES = new Set(['running', 'awaiting-approval'])
+const RUNNING_THREAD_STATUSES = new Set(['running', 'awaiting-approval', 'awaiting-input'])
 
 interface SidebarProps {
   isMac: boolean

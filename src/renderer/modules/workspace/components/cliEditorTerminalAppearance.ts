@@ -1,7 +1,7 @@
 export const CLI_EDITOR_TERMINAL_THEME = {
   background: '#09090b',
   foreground: '#f4f4f5',
-  cursor: '#a78bfa',
+  cursor: '#fbbf24',
   cursorAccent: '#09090b',
   black: '#18181b',
   blue: '#60a5fa',

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   ApprovalRequest,
   DiffProposal,
+  ImageAttachment,
   Project,
   SessionStatus,
   SupportedAgentId,
@@ -24,6 +25,7 @@ interface RunWorkspaceProps {
   sessionId: string | null
   threadId?: string | null
   prompt: string
+  imageAttachments?: ImageAttachment[]
   status: SessionStatus | null
   startedAt?: number
   agentId?: Project['agentId']
@@ -61,6 +63,7 @@ export function RunWorkspace({
   sessionId,
   threadId,
   prompt,
+  imageAttachments,
   status,
   startedAt,
   agentId,
@@ -143,11 +146,15 @@ export function RunWorkspace({
   }, [activeUserQuestion, pendingUserQuestion])
 
   const pendingApprovals = approvalRequest ? 1 : 0
+  const pendingQuestions = pendingUserQuestion ? 1 : 0
   const effectiveStatus = status ?? (sessionId ? 'running' : null)
   const seedUserMessage = useMemo(() => {
     if (!prompt) return undefined
-    return startedAt === undefined ? { text: prompt } : { text: prompt, at: startedAt }
-  }, [prompt, startedAt])
+    if (startedAt === undefined) {
+      return { text: prompt, attachments: imageAttachments }
+    }
+    return { text: prompt, attachments: imageAttachments, at: startedAt }
+  }, [imageAttachments, prompt, startedAt])
 
   // Forward "Review" clicks from <EditedFilesCard> to the workspace shell so
   // it can open the right-side diff panel and focus the requested file. When
@@ -269,6 +276,7 @@ export function RunWorkspace({
             status={effectiveStatus}
             model={model}
             pendingApprovals={pendingApprovals}
+            pendingQuestions={pendingQuestions}
           />
           <PriorThreadMessages turns={priorTurns} />
           <MessageStream
@@ -337,7 +345,9 @@ function PriorThreadMessages({ turns }: { turns: ThreadTranscriptTurn[] }) {
     <div className="flex flex-col gap-4">
       {visibleTurns.map((turn) => (
         <section key={turn.sessionId} className="flex flex-col gap-3">
-          {turn.prompt.trim() ? <UserMessage text={turn.prompt} /> : null}
+          {turn.prompt.trim() ? (
+            <UserMessage text={turn.prompt} attachments={turn.imageAttachments} />
+          ) : null}
           {turn.assistantText?.trim() ? (
             <AssistantMessage text={turn.assistantText} showActions={false} />
           ) : null}
@@ -352,11 +362,13 @@ function RunSummary({
   status,
   model,
   pendingApprovals,
+  pendingQuestions,
 }: {
   prompt: string
   status: SessionStatus | null
   model?: string
   pendingApprovals: number
+  pendingQuestions: number
 }) {
   const [copied, setCopied] = useState(false)
   const copyPrompt = useCallback(() => {
@@ -405,6 +417,7 @@ function RunSummary({
           <span className={statusClass(status)}>{statusLabel(status)}</span>
           {model ? <span>{model}</span> : null}
           {pendingApprovals > 0 ? <span>{pendingApprovals} approval request</span> : null}
+          {pendingQuestions > 0 ? <span>{pendingQuestions} question waiting</span> : null}
         </div>
       </div>
     </div>
@@ -482,6 +495,7 @@ function EmptyRunState({ project }: { project: Project }) {
 function statusLabel(status: SessionStatus | null): string {
   if (!status) return 'idle'
   if (status === 'awaiting-approval') return 'awaiting review'
+  if (status === 'awaiting-input') return 'awaiting answer'
   return status
 }
 
@@ -491,6 +505,8 @@ function statusClass(status: SessionStatus | null): string {
       return 'rounded border border-accent-primary/40 bg-accent-primary/10 px-2 py-0.5 text-accent-primary'
     case 'awaiting-approval':
       return 'rounded border border-accent-warn/40 bg-accent-warn/10 px-2 py-0.5 text-accent-warn'
+    case 'awaiting-input':
+      return 'rounded border border-accent-primary/40 bg-accent-primary/10 px-2 py-0.5 text-accent-primary'
     case 'done':
       return 'rounded border border-accent-add/30 bg-accent-add/10 px-2 py-0.5 text-accent-add'
     case 'error':

@@ -123,6 +123,9 @@ const TERMINAL_STATUSES = new Set<SessionStatus>(['done', 'error', 'cancelled'])
 function inferStatusFromEvent(event: AgentEvent): SessionStatus | null {
   if (event.type === 'approval-request') return 'awaiting-approval'
   if (event.type === 'error') return 'error'
+  if (event.type === 'activity' && isUserQuestionActivity(event.payload)) {
+    return 'awaiting-input'
+  }
   if (event.type === 'session-complete') {
     const payload = event.payload as { status?: unknown } | null | undefined
     const status = payload?.status
@@ -131,7 +134,8 @@ function inferStatusFromEvent(event: AgentEvent): SessionStatus | null {
       status === 'error' ||
       status === 'cancelled' ||
       status === 'running' ||
-      status === 'awaiting-approval'
+      status === 'awaiting-approval' ||
+      status === 'awaiting-input'
     ) {
       return status
     }
@@ -141,6 +145,14 @@ function inferStatusFromEvent(event: AgentEvent): SessionStatus | null {
     return 'running'
   }
   return null
+}
+
+function isUserQuestionActivity(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { kind?: unknown }).kind === 'user-question'
+  )
 }
 
 export function useProjectTree(): ProjectTreeApi {

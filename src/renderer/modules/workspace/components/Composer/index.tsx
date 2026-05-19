@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type {
   AgentId,
+  ImageAttachment,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -29,6 +30,7 @@ export interface ComposerStartedSession {
   sessionId: string
   threadId: string
   prompt: string
+  imageAttachments?: ImageAttachment[]
   createdAt: number
   routingDecision: RoutingDecision | null
   agentId?: SupportedAgentId
@@ -226,6 +228,7 @@ export function Composer({
     setSubmitting(true)
     setError(null)
     const startedAt = Date.now()
+    const sentAttachments = attachments.map((image) => image.attachment)
 
     try {
       const result = await window.agentforge.agent.dispatch({
@@ -233,13 +236,14 @@ export function Composer({
         prompt: effectivePrompt,
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
-        imageAttachments: attachments.map((image) => image.attachment),
+        imageAttachments: sentAttachments,
         threadId: activeThreadId ?? undefined,
       })
       onSessionStarted({
         sessionId: result.sessionId,
         threadId: result.threadId,
         prompt: effectivePrompt,
+        imageAttachments: sentAttachments,
         routingDecision: manualOption ? null : routerPreview,
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
@@ -351,6 +355,7 @@ export function Composer({
   const running =
     Boolean(activeSessionId) &&
     (activeSessionStatus === 'running' || activeSessionStatus === 'awaiting-approval')
+  const awaitingInput = activeSessionStatus === 'awaiting-input'
 
   // Drop steer mode automatically when the session is no longer running, so a
   // stale toggle doesn't apply to the next idle composer state.
@@ -359,22 +364,26 @@ export function Composer({
   }, [running])
 
   const hasContent = draft.trim().length > 0 || attachments.length > 0
-  const queueAllowed = busy && Boolean(onEnqueue) && !steerMode
+  const queueAllowed = busy && !awaitingInput && Boolean(onEnqueue) && !steerMode
   const canSend =
     hasContent && !attaching && (!busy || queueAllowed || (steerMode && Boolean(onSteer)))
   const showRouterPreview = modelSelection.kind === 'auto' && draft.trim().length > 0
   const placeholder = steerMode
     ? 'Redirect the agent…'
-    : queueAllowed
-      ? 'Queue a follow-up message…'
-      : activeThreadId
-        ? 'Ask for follow-up changes'
-        : 'Describe the coding task…'
-  const submitLabel = steerMode
-    ? 'Steer agent'
-    : queueAllowed
-      ? 'Queue message'
-      : undefined
+    : awaitingInput
+      ? 'Answer the agent question above'
+      : queueAllowed
+        ? 'Queue a follow-up message…'
+        : activeThreadId
+          ? 'Ask for follow-up changes'
+          : 'Describe the coding task…'
+  const submitLabel = !hasContent
+    ? undefined
+    : steerMode
+      ? 'Steer agent'
+      : queueAllowed
+        ? 'Queue message'
+        : undefined
 
   const wrapperBorderClass = steerMode
     ? 'border-accent-warn/50 focus-within:border-accent-warn/70'

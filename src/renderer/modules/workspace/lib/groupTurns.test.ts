@@ -60,6 +60,32 @@ describe('groupTurns', () => {
     expect(result[0].startedAt).toBe(456)
   })
 
+  it('preserves seed user image attachments for the rendered turn', () => {
+    const result = groupTurns([], {
+      seedUserMessage: {
+        text: 'look at this',
+        attachments: [
+          {
+            filePath: '/tmp/mock.png',
+            name: 'mock.png',
+            mimeType: 'image/png',
+            size: 2_048,
+          },
+        ],
+      },
+      now: 1_000,
+    })
+
+    expect(result[0].userMessage?.attachments).toEqual([
+      {
+        filePath: '/tmp/mock.png',
+        name: 'mock.png',
+        mimeType: 'image/png',
+        size: 2_048,
+      },
+    ])
+  })
+
   it('groups activities up to a completion event and surfaces the final assistant message', () => {
     const activities: AgentActivity[] = [
       { kind: 'message', role: 'assistant', text: 'first chunk' },
@@ -245,6 +271,23 @@ describe('groupTurns', () => {
 
     expect(normalizeAssistantMessages(activities)).toEqual([
       { kind: 'message', role: 'assistant', text: 'Done.', stream: true },
+    ])
+  })
+
+  it('suppresses re-emitted assistant text that was already shown before an intermediate activity', () => {
+    // Reproduces the Codex item.completed duplication pattern:
+    // streaming chunks → flushed on tool-call → item.completed re-emits the full text.
+    // The fix uses a Set so the second emission is suppressed even though an
+    // intermediate activity reset "last seen".
+    const activities: AgentActivity[] = [
+      { kind: 'message', role: 'assistant', text: 'Full response.', stream: true },
+      { kind: 'tool-call', name: 'bash', status: 'done' },
+      { kind: 'message', role: 'assistant', text: 'Full response.' },
+    ]
+
+    expect(normalizeAssistantMessages(activities)).toEqual([
+      { kind: 'message', role: 'assistant', text: 'Full response.', stream: true },
+      { kind: 'tool-call', name: 'bash', status: 'done' },
     ])
   })
 

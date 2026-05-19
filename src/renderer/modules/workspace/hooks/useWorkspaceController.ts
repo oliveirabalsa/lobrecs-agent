@@ -15,6 +15,11 @@ import type { ActiveSessionMeta, StartedSessionSummary } from '../../sessions/ty
 export type MainView = 'workspace' | 'costs' | 'automations'
 
 const ACTIVE_THREAD_KEY_PREFIX = 'activeThread:'
+const BLOCKING_SESSION_STATUSES = new Set<SessionStatus>([
+  'running',
+  'awaiting-approval',
+  'awaiting-input',
+])
 
 function safeLocalStorage(): Storage | null {
   try {
@@ -143,7 +148,7 @@ export function useWorkspaceController() {
       void window.agentforge.agent.killAll()
       setActiveSession((current) => (current ? { ...current, status: 'cancelled' } : current))
       tabs.tabs.forEach((tab) => {
-        if (tab.status === 'running' || tab.status === 'awaiting-approval') {
+        if (BLOCKING_SESSION_STATUSES.has(tab.status)) {
           tabs.updateStatus(tab.sessionId, 'cancelled')
         }
       })
@@ -169,14 +174,17 @@ export function useWorkspaceController() {
 
   const isBusy = useMemo(() => {
     if (!activeSession) return false
-    return activeSession.status === 'running' || activeSession.status === 'awaiting-approval'
+    return BLOCKING_SESSION_STATUSES.has(activeSession.status)
   }, [activeSession])
 
   const busyReason = useMemo(() => {
     if (approvalRequest) return 'Respond to the pending approval before starting another task'
+    if (activeSession?.status === 'awaiting-input') {
+      return 'Answer the agent question before starting another task'
+    }
     if (isBusy) return 'Current session is still running'
     return undefined
-  }, [approvalRequest, isBusy])
+  }, [activeSession?.status, approvalRequest, isBusy])
 
   function handleSelectedProjectDeleted() {
     setSelectedProject(null)
@@ -223,6 +231,7 @@ export function useWorkspaceController() {
       id: summary.sessionId,
       threadId: summary.threadId,
       prompt: summary.prompt,
+      imageAttachments: summary.imageAttachments,
       status: 'running',
       routingDecision: summary.routingDecision,
       agentId: summary.agentId,
@@ -315,12 +324,14 @@ export function useWorkspaceController() {
         prompt,
         agentId: activeSession.agentId,
         modelOverride: activeSession.modelOverride,
+        imageAttachments: activeSession.imageAttachments,
         threadId: activeSession.threadId,
       })
       const summary: StartedSessionSummary = {
         sessionId: result.sessionId,
         threadId: result.threadId,
         prompt,
+        imageAttachments: activeSession.imageAttachments,
         routingDecision: null,
         agentId: toStartedSessionAgentId(activeSession.agentId),
         modelOverride: activeSession.modelOverride,
@@ -440,6 +451,7 @@ export function useWorkspaceController() {
       id: session.id,
       threadId: session.threadId,
       prompt: session.prompt,
+      imageAttachments: session.imageAttachments,
       status: session.status,
       routingDecision: null,
       agentId: session.agentId,
@@ -509,7 +521,7 @@ export function useWorkspaceController() {
 
   async function handleCloseTab(sessionId: string) {
     const tab = tabs.tabs.find((item) => item.sessionId === sessionId)
-    if (tab?.status === 'running' || tab?.status === 'awaiting-approval') {
+    if (tab && BLOCKING_SESSION_STATUSES.has(tab.status)) {
       await window.agentforge.agent.cancel(sessionId).catch(() => undefined)
       tabs.updateStatus(sessionId, 'cancelled')
     }

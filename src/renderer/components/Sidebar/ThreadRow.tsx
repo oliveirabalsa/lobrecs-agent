@@ -10,7 +10,7 @@ interface ThreadRowProps {
   onDelete?: (thread: Thread) => void
 }
 
-const RUNNING_STATUSES = new Set(['running', 'awaiting-approval'])
+const RUNNING_STATUSES = new Set(['running', 'awaiting-approval', 'awaiting-input'])
 
 export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps) {
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)

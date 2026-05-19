@@ -180,6 +180,13 @@ type ProcessWarningState = {
 }
 
 function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
+  if (event.type === 'activity' && isAgentActivity(event.payload)) {
+    if (event.payload.kind === 'user-question') {
+      options.onStatusChange?.('awaiting-input')
+    }
+    return
+  }
+
   if (event.type === 'approval-request') {
     options.onStatusChange?.('awaiting-approval')
     options.onApprovalRequest?.(normalizeApprovalPayload(event.payload))
