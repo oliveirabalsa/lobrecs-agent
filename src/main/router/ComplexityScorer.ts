@@ -1,4 +1,4 @@
-import type { ModelTier } from '../../shared/types'
+import type { ModelTier, RoutingSettings } from '../../shared/types'
 
 export interface ScoringResult {
   score: number
@@ -17,6 +17,9 @@ export interface ScoringSignal {
 export interface ScoringContext {
   repoPath?: string
   recentFailures?: Array<{ prompt: string; tier: ModelTier; failed: boolean }>
+  tierThresholds?: RoutingSettings['tierThresholds']
+  securityMinimumTier?: ModelTier
+  useRecentFailureEscalation?: boolean
 }
 
 const SIGNAL_WEIGHTS = {
@@ -112,7 +115,10 @@ export function scoreComplexity(prompt: string, context?: ScoringContext): Scori
     scoreNewCreationKeywords(normalizedPrompt),
     scoreCrossServiceKeywords(normalizedPrompt),
     scoreFileCountEstimate(normalizedPrompt),
-    scoreHistorySignal(normalizedPrompt, context?.recentFailures),
+    scoreHistorySignal(
+      normalizedPrompt,
+      context?.useRecentFailureEscalation === false ? undefined : context?.recentFailures,
+    ),
     scoreRiskReviewKeywords(normalizedPrompt),
   ]
 
@@ -122,7 +128,10 @@ export function scoreComplexity(prompt: string, context?: ScoringContext): Scori
   const riskReview = signals.find((signal) => signal.name === 'risk-review')
   const totalScore = riskReview?.matched ? Math.max(weightedScore, 70) : weightedScore
   const roundedScore = Math.round(totalScore)
-  const tier = scoreToTierResult(roundedScore)
+  const initialTier = scoreToTierResult(roundedScore, context?.tierThresholds)
+  const tier = riskReview?.matched
+    ? maxTier(initialTier, context?.securityMinimumTier ?? 'advanced')
+    : initialTier
 
   return {
     score: roundedScore,
@@ -247,17 +256,25 @@ function cosineSimilaritySimple(a: string, b: string): number {
   return intersectionSize / Math.sqrt(setA.size * setB.size)
 }
 
-function scoreToTierResult(score: number): ModelTier {
-  if (score <= TIER_THRESHOLDS.lightweightMax) {
+function scoreToTierResult(
+  score: number,
+  thresholds: ScoringContext['tierThresholds'] = TIER_THRESHOLDS,
+): ModelTier {
+  if (score <= thresholds.lightweightMax) {
     return 'lightweight'
   }
-  if (score <= TIER_THRESHOLDS.balancedMax) {
+  if (score <= thresholds.balancedMax) {
     return 'balanced'
   }
-  if (score <= TIER_THRESHOLDS.advancedMax) {
+  if (score <= thresholds.advancedMax) {
     return 'advanced'
   }
   return 'frontier'
+}
+
+function maxTier(current: ModelTier, minimum: ModelTier): ModelTier {
+  const tiers: ModelTier[] = ['lightweight', 'balanced', 'advanced', 'frontier']
+  return tiers.indexOf(current) >= tiers.indexOf(minimum) ? current : minimum
 }
 
 function buildReasoning(signals: ScoringSignal[], score: number, tier: ModelTier): string {

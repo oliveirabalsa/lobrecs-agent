@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { modelTierFromModel } from '../../../router'
-import { feedbackStore, projectsStore } from '../../../store'
+import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
@@ -11,20 +11,22 @@ import type {
   AgentDispatchParams,
   AgentId,
   AgentPlanDecisionPayload,
+  EnqueueParams,
   ImageAttachment,
+  QueuedMessage,
+  SteerParams,
 } from '../../../../shared/types'
-const MAX_IMAGE_ATTACHMENTS = 8
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024
-
 function isImageSupported(agentId: AgentId): boolean {
   return agentId === 'claude-code' || agentId === 'codex'
 }
 
 async function normalizeImageAttachments(
   images: ImageAttachment[] | undefined,
+  limits: { maxCount: number; maxSizeMb: number },
 ): Promise<ImageAttachment[]> {
   const normalized: ImageAttachment[] = []
   const seen = new Set<string>()
+  const maxBytes = limits.maxSizeMb * 1024 * 1024
 
   for (const image of images ?? []) {
     if (!image?.filePath || typeof image.filePath !== 'string') continue
@@ -35,7 +37,7 @@ async function normalizeImageAttachments(
 
     try {
       const stat = await fs.stat(filePath)
-      if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_IMAGE_BYTES) continue
+      if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) continue
 
       normalized.push({
         filePath,
@@ -48,7 +50,7 @@ async function normalizeImageAttachments(
     }
     seen.add(key)
 
-    if (normalized.length >= MAX_IMAGE_ATTACHMENTS) break
+    if (normalized.length >= limits.maxCount) break
   }
 
   return normalized
@@ -61,11 +63,15 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       _event,
       params: AgentDispatchParams & { imageAttachments?: ImageAttachment[]; agentId?: AgentId },
     ) => {
-      const imageAttachments = await normalizeImageAttachments(params.imageAttachments)
       const project = requireProject(params.projectId)
+      const settings = context.settingsService.getEffective(project.id).settings
+      const imageAttachments = await normalizeImageAttachments(
+        params.imageAttachments,
+        settings.agents.imageAttachments,
+      )
       const preferredAgentId = isSupportedAgentId(params.agentId)
         ? params.agentId
-        : project.agentId
+        : settings.agents.defaultAgentId
       const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
         prompt: failure.prompt,
         tier: modelTierFromModel(failure.model),
@@ -76,6 +82,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         preferredAgentId,
         requiresImageSupport: imageAttachments.length > 0,
         modelOverride: params.modelOverride,
+        projectId: project.id,
         recentFailures,
       })
 
@@ -92,6 +99,8 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         imageAttachments,
         context: projectsStore.getContext(project.id),
         threadId: params.threadId,
+        isolate: settings.execution.worktreeIsolation,
+        runtimeSettings: settings.agents.runtimes[decision.agentId],
       })
 
       return { sessionId, threadId }
@@ -115,4 +124,100 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       submitPlanDecision(payload)
     },
   )
+
+  ipcMain.handle(
+    'agent:enqueue',
+    async (_event, params: EnqueueParams): Promise<QueuedMessage> => {
+      const project = requireProject(params.projectId)
+      const settings = context.settingsService.getEffective(project.id).settings
+      const preferredAgentId = isSupportedAgentId(params.agentId)
+        ? params.agentId
+        : settings.agents.defaultAgentId
+      const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
+        prompt: failure.prompt,
+        tier: modelTierFromModel(failure.model),
+        failed: true,
+      }))
+      const decision = await context.modelRouter.route({
+        prompt: params.prompt,
+        preferredAgentId,
+        requiresImageSupport: false,
+        modelOverride: params.modelOverride,
+        projectId: project.id,
+        recentFailures,
+      })
+
+      if (
+        context.sessionManager.getQueue(params.threadId).length >=
+        settings.execution.maxQueuedMessagesPerThread
+      ) {
+        throw new Error('Thread message queue is full')
+      }
+
+      return context.sessionManager.enqueueMessage(
+        {
+          prompt: params.prompt,
+          agentId: decision.agentId,
+          model: decision.model,
+        },
+        params.threadId,
+      )
+    },
+  )
+
+  ipcMain.handle(
+    'agent:queue-status',
+    async (_event, threadId: string): Promise<QueuedMessage[]> => {
+      return context.sessionManager.getQueue(threadId)
+    },
+  )
+
+  ipcMain.handle(
+    'agent:dequeue-item',
+    async (_event, payload: { threadId: string; messageId: string }) => {
+      context.sessionManager.removeQueueItem(payload.threadId, payload.messageId)
+    },
+  )
+
+  ipcMain.handle('agent:clear-queue', async (_event, threadId: string) => {
+    context.sessionManager.clearQueue(threadId)
+  })
+
+  ipcMain.handle('agent:steer', async (_event, params: SteerParams) => {
+    const session = sessionsStore.get(params.sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${params.sessionId}`)
+    }
+
+    const project = requireProject(session.projectId)
+    const settings = context.settingsService.getEffective(project.id).settings
+    const preferredAgentId = isSupportedAgentId(params.agentId)
+      ? params.agentId
+      : session.agentId
+    const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
+      prompt: failure.prompt,
+      tier: modelTierFromModel(failure.model),
+      failed: true,
+    }))
+    const decision = await context.modelRouter.route({
+      prompt: params.prompt,
+      preferredAgentId,
+      requiresImageSupport: false,
+      modelOverride: params.modelOverride,
+      projectId: project.id,
+      recentFailures,
+    })
+
+    return context.sessionManager.steer({
+      sessionId: params.sessionId,
+      projectId: session.projectId,
+      prompt: params.prompt,
+      agentId: decision.agentId,
+      model: decision.model,
+      repoPath: project.repoPath,
+      context: projectsStore.getContext(project.id),
+      isolate: settings.execution.worktreeIsolation,
+      runtimeSettings: settings.agents.runtimes[decision.agentId],
+    })
+  })
 }

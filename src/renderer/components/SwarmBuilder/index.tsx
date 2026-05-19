@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentModelCatalog,
+  AppSettings,
   SupportedAgentId,
   SwarmAgentConfig,
   SwarmConfig,
@@ -29,6 +30,23 @@ type Strategy = SwarmConfig['strategy']
 
 const MAX_AGENTS = 8
 
+const ROLE_DEFAULT_PROMPTS: Record<string, string> = {
+  planner:
+    'Analyze the task deeply and produce a concrete implementation plan: which files to create or modify, what logic to add, and why. Your output feeds directly into the implementer.',
+  implementer:
+    'Follow the plan precisely. Write complete, production-ready code. Do not leave placeholders or skip steps.',
+  reviewer:
+    'Review the implementation for correctness, bugs, edge cases, and code quality. Be specific and actionable in your feedback.',
+}
+
+function defaultPromptForRole(
+  role: string,
+  rolePrompts: Record<string, string> = ROLE_DEFAULT_PROMPTS,
+): string | undefined {
+  const normalizedRole = role.trim().toLowerCase()
+  return rolePrompts[normalizedRole] ?? ROLE_DEFAULT_PROMPTS[normalizedRole]
+}
+
 const TEMPLATES: Array<{
   id: string
   label: string
@@ -54,12 +72,24 @@ const TEMPLATES: Array<{
   },
   {
     id: 'plan-implement-review',
-    label: 'Plan -> Implement -> Review',
+    label: 'Plan → Implement → Review',
     strategy: 'sequential',
     agents: [
-      { role: 'planner', agentId: 'claude-code' },
-      { role: 'implementer', agentId: 'codex' },
-      { role: 'reviewer', agentId: 'claude-code' },
+      {
+        role: 'planner',
+        agentId: 'claude-code',
+        promptSuffix: ROLE_DEFAULT_PROMPTS.planner,
+      },
+      {
+        role: 'implementer',
+        agentId: 'codex',
+        promptSuffix: ROLE_DEFAULT_PROMPTS.implementer,
+      },
+      {
+        role: 'reviewer',
+        agentId: 'claude-code',
+        promptSuffix: ROLE_DEFAULT_PROMPTS.reviewer,
+      },
     ],
   },
   {
@@ -92,6 +122,7 @@ export function SwarmBuilder({
     DEFAULT_SWARM_MODEL_CATALOGS,
   )
   const [modelCatalogsLoaded, setModelCatalogsLoaded] = useState(false)
+  const [swarmSettings, setSwarmSettings] = useState<AppSettings['swarms'] | null>(null)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const autoManageAgentsRef = useRef(true)
@@ -112,6 +143,26 @@ export function SwarmBuilder({
       autoManageAgentsRef.current = true
     }
   }, [initialPrompt, open])
+
+  useEffect(() => {
+    if (!open) return
+
+    let cancelled = false
+    window.agentforge.settings
+      .getEffective(projectId ?? undefined)
+      .then((effective) => {
+        if (cancelled) return
+        setSwarmSettings(effective.settings.swarms)
+        setStrategy(effective.settings.swarms.defaultStrategy)
+      })
+      .catch(() => {
+        if (!cancelled) setSwarmSettings(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, projectId])
 
   useEffect(() => {
     if (!open) return
@@ -144,10 +195,10 @@ export function SwarmBuilder({
 
     setAgents((current) =>
       autoManageAgentsRef.current
-        ? buildDefaultSwarmAgents(availableAgents)
+        ? buildSettingsDefaultSwarmAgents(swarmSettings?.defaultAgents, availableAgents)
         : normalizeSwarmAgents(current, availableAgents),
     )
-  }, [availableAgents, open])
+  }, [availableAgents, open, swarmSettings?.defaultAgents])
 
   useEffect(() => {
     if (!open) return
@@ -168,6 +219,8 @@ export function SwarmBuilder({
   })
 
   const costEstimate = useMemo(() => estimateCost(agents), [agents])
+  const templates = swarmSettings?.templates ?? TEMPLATES
+  const maxAgents = swarmSettings?.maxAgents ?? MAX_AGENTS
   const canLaunch = Boolean(
     projectId && prompt.trim() && agents.length > 0 && availableAgents.length > 0 && !launching,
   )
@@ -187,6 +240,7 @@ export function SwarmBuilder({
         prompt: prompt.trim(),
         strategy,
         agents,
+        maxIterations: swarmSettings?.maxReviewerIterations,
       })
       onSwarmStarted?.(result.swarmId, result)
       onClose()
@@ -244,7 +298,7 @@ export function SwarmBuilder({
             />
 
             <div className="flex flex-wrap gap-2">
-              {TEMPLATES.map((template) => (
+              {templates.map((template) => (
                 <button
                   key={template.id}
                   type="button"
@@ -272,7 +326,7 @@ export function SwarmBuilder({
                 <button
                   type="button"
                   className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={agents.length >= MAX_AGENTS || availableAgents.length === 0}
+                  disabled={agents.length >= maxAgents || availableAgents.length === 0}
                   onClick={() =>
                     setAgents((current) => {
                       autoManageAgentsRef.current = false
@@ -305,9 +359,20 @@ export function SwarmBuilder({
                     onChange={(nextAgent) =>
                       setAgents((current) => {
                         autoManageAgentsRef.current = false
-
+                        const prev = current[index]
+                        const roleChanged = nextAgent.role !== prev?.role
+                        const resolved =
+                          roleChanged && !nextAgent.promptSuffix
+                            ? {
+                                ...nextAgent,
+                                promptSuffix: defaultPromptForRole(
+                                  nextAgent.role,
+                                  swarmSettings?.rolePrompts,
+                                ),
+                              }
+                            : nextAgent
                         return current.map((item, itemIndex) =>
-                          itemIndex === index ? nextAgent : item,
+                          itemIndex === index ? resolved : item,
                         )
                       })
                     }
@@ -366,4 +431,17 @@ function estimateCost(agents: SwarmAgentConfig[]): string {
   const high = Math.max(low + 0.01, estimatedUnits * 0.02)
 
   return `~$${low.toFixed(2)} - $${high.toFixed(2)}`
+}
+
+function buildSettingsDefaultSwarmAgents(
+  configuredAgents: readonly SwarmAgentConfig[] | undefined,
+  availableAgents: readonly SupportedAgentId[],
+): SwarmAgentConfig[] {
+  if (!configuredAgents?.length) {
+    return buildDefaultSwarmAgents(availableAgents)
+  }
+
+  return normalizeSwarmAgents(configuredAgents, availableAgents, {
+    spreadDuplicates: true,
+  })
 }

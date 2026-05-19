@@ -117,26 +117,29 @@ function FileRow({
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="shrink-0 text-secondary transition-colors hover:text-primary"
           aria-expanded={expanded}
+          aria-label={expanded ? 'Collapse' : 'Expand'}
         >
           <span
-            className="shrink-0 text-secondary"
             aria-hidden="true"
             style={{
+              display: 'inline-block',
               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
               transition: 'transform 120ms ease-out',
             }}
           >
             {iconChevronRight}
           </span>
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-xs text-secondary"
-            dir="rtl"
-            title={filePath}
-          >
-            {filePath}
-          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => void window.agentforge.system.openInEditor(filePath)}
+          className="min-w-0 flex-1 truncate text-left font-mono text-xs text-secondary transition-colors hover:text-primary"
+          dir="rtl"
+          title={filePath}
+        >
+          {filePath}
         </button>
         <div className="shrink-0 font-mono text-xs">
           <span className="text-accent-add">+{additions}</span>

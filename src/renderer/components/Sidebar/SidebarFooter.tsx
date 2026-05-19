@@ -1,8 +1,9 @@
 interface SidebarFooterProps {
   onOpenSettings?: () => void
+  settingsActive?: boolean
 }
 
-export function SidebarFooter({ onOpenSettings }: SidebarFooterProps) {
+export function SidebarFooter({ onOpenSettings, settingsActive = false }: SidebarFooterProps) {
   if (!onOpenSettings) return <footer className="mt-auto" />
 
   return (
@@ -10,9 +11,17 @@ export function SidebarFooter({ onOpenSettings }: SidebarFooterProps) {
       <button
         type="button"
         onClick={onOpenSettings}
-        className="no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+        className={`no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left transition-colors ${
+          settingsActive
+            ? 'bg-white/10 text-primary'
+            : 'text-secondary hover:bg-white/5 hover:text-primary'
+        }`}
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted">
+        <span
+          className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+            settingsActive ? 'text-primary' : 'text-muted'
+          }`}
+        >
           <CogIcon />
         </span>
         <span className="flex-1 truncate text-[13px] leading-none">Settings</span>

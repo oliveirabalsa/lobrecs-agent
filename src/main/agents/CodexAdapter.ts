@@ -37,7 +37,11 @@ export class CodexAdapter implements AgentAdapter {
     setImmediate(() => {
       try {
         const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
-        const command = resolveCommand(CODEX_COMMAND_ENV, 'codex')
+        const command = resolveCommand(
+          CODEX_COMMAND_ENV,
+          'codex',
+          params.runtimeSettings?.command,
+        )
         const imageArgs = (params.imageAttachments ?? []).flatMap((image) => [
           '--image',
           image.filePath,
@@ -47,11 +51,12 @@ export class CodexAdapter implements AgentAdapter {
           '--model',
           params.model,
           ...imageArgs,
-          '--dangerously-bypass-approvals-and-sandbox',
+          ...dangerousArgs(params.runtimeSettings?.permissionMode),
           '--color',
           'never',
           '--json',
           '--skip-git-repo-check',
+          ...(params.runtimeSettings?.extraArgs ?? []),
           prompt,
         ]
 
@@ -126,6 +131,12 @@ export class CodexAdapter implements AgentAdapter {
       return fallbackModelsForAgent(this.id)
     }
   }
+}
+
+function dangerousArgs(permissionMode = 'dangerous'): string[] {
+  return permissionMode === 'dangerous'
+    ? ['--dangerously-bypass-approvals-and-sandbox']
+    : []
 }
 
 function parseCodexLine(line: string, sessionId: string): AgentEvent {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEven
 import type { ThreadSearchResult } from '../../shared/types'
 import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
+import { SettingsView, useSettings } from '../modules/settings'
 import { useWorkspaceController } from '../modules/workspace'
 import { useWorkspaceHistory } from '../modules/workspace/hooks/useWorkspaceHistory'
 import { WorkspaceView } from '../modules/workspace/views/WorkspaceView'
@@ -14,11 +15,14 @@ function clamp(value: number, min: number, max: number) {
 
 export function RendererApp() {
   const workspace = useWorkspaceController()
+  const { globalSettings } = useSettings()
   const history = useWorkspaceHistory()
   const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [sidebarWidthTouched, setSidebarWidthTouched] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [shellView, setShellView] = useState<'workspace' | 'settings'>('workspace')
 
   // Keep the mobile drawer mounted while opening, and during the close
   // animation so the `data-state="closed"` exit keyframes can play before
@@ -35,7 +39,10 @@ export function RendererApp() {
       const session = await window.agentforge.sessions
         .get(thread.lastSessionId)
         .catch(() => null)
-      if (session) workspace.handleOpenSession(session)
+      if (session) {
+        workspace.handleOpenSession(session)
+        setShellView('workspace')
+      }
     },
     [workspace],
   )
@@ -49,6 +56,7 @@ export function RendererApp() {
       function handlePointerMove(moveEvent: PointerEvent) {
         const delta = moveEvent.clientX - startX
         setSidebarWidth(clamp(startWidth + delta, 220, 360))
+        setSidebarWidthTouched(true)
       }
 
       function handlePointerUp() {
@@ -66,6 +74,13 @@ export function RendererApp() {
     [sidebarWidth],
   )
 
+  useEffect(() => {
+    if (sidebarWidthTouched) return
+    const width = globalSettings?.ui.sidebarDefaultWidth
+    if (!width) return
+    setSidebarWidth(clamp(width, 220, 420))
+  }, [globalSettings?.ui.sidebarDefaultWidth, sidebarWidthTouched])
+
   const handleSelectThread = useCallback(
     async (project: Parameters<typeof workspace.handleProjectSelect>[0], thread: Thread) => {
       const session = await window.agentforge.sessions.get(thread.lastSessionId).catch(() => null)
@@ -73,6 +88,7 @@ export function RendererApp() {
         workspace.handleOpenSession(session, project)
         history.push(thread.id)
         setMobileSidebarOpen(false)
+        setShellView('workspace')
       }
     },
     [history, workspace],
@@ -82,6 +98,7 @@ export function RendererApp() {
     (project: Parameters<typeof workspace.handleProjectSelect>[0]) => {
       workspace.handleProjectSelect(project)
       setMobileSidebarOpen(false)
+      setShellView('workspace')
     },
     [workspace],
   )
@@ -89,12 +106,14 @@ export function RendererApp() {
   const handleNewChat = useCallback(() => {
     workspace.handleNewTab()
     setMobileSidebarOpen(false)
+    setShellView('workspace')
   }, [workspace])
 
   const handleNewChatForProject = useCallback(
     (project: Parameters<typeof workspace.handleNewChatForProject>[0]) => {
       workspace.handleNewChatForProject(project)
       setMobileSidebarOpen(false)
+      setShellView('workspace')
     },
     [workspace],
   )
@@ -112,6 +131,7 @@ export function RendererApp() {
   const handleOpenAutomations = useCallback(() => {
     workspace.setMainView('automations')
     setMobileSidebarOpen(false)
+    setShellView('workspace')
   }, [workspace])
 
   const handleOpenSearchResult = useCallback(
@@ -124,6 +144,7 @@ export function RendererApp() {
 
       workspace.handleOpenSession(session, result.project)
       history.push(result.thread.id)
+      setShellView('workspace')
     },
     [history, workspace],
   )
@@ -161,6 +182,11 @@ export function RendererApp() {
     void openThreadById(target)
   }, [history, openThreadById])
 
+  const handleOpenSettings = useCallback(() => {
+    setShellView('settings')
+    setMobileSidebarOpen(false)
+  }, [])
+
   useEffect(() => {
     if (!mobileSidebarOpen) return
 
@@ -191,6 +217,8 @@ export function RendererApp() {
           onActiveThreadDeleted={workspace.handleNewTab}
           onSearch={handleOpenSearch}
           onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+          onOpenSettings={handleOpenSettings}
+          settingsActive={shellView === 'settings'}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
       </div>
@@ -234,13 +262,22 @@ export function RendererApp() {
               onActiveThreadDeleted={workspace.handleNewTab}
               onSearch={handleOpenSearch}
               onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+              onOpenSettings={handleOpenSettings}
+              settingsActive={shellView === 'settings'}
             />
           </div>
         </div>
       ) : null}
 
       <div className="flex min-w-0 flex-1 overflow-hidden">
-        <WorkspaceView
+        {shellView === 'settings' ? (
+          <SettingsView
+            isMac={isMac}
+            selectedProject={workspace.selectedProject}
+            onOpenSidebar={() => setMobileSidebarOpen(true)}
+          />
+        ) : (
+          <WorkspaceView
           isMac={isMac}
           selectedProject={workspace.selectedProject}
           activeSession={workspace.activeSession}
@@ -277,7 +314,13 @@ export function RendererApp() {
             history.push(result.threadId)
           }}
           onOpenSidebar={() => setMobileSidebarOpen(true)}
-        />
+          pendingQueue={workspace.pendingQueue}
+          onEnqueue={workspace.handleEnqueue}
+          onSteer={workspace.handleSteer}
+          onRemoveQueueItem={workspace.handleRemoveQueueItem}
+          onClearQueue={workspace.handleClearQueue}
+          />
+        )}
       </div>
       <SearchPalette
         open={searchOpen}

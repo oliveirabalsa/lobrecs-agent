@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDebouncedValue } from '../../../../hooks/useDebouncedValue'
+import { formatModelLabel } from './modelDisplay'
 import type {
   AgentModelCatalog,
   ApprovalMode,
@@ -8,6 +9,7 @@ import type {
   ModelOption,
   ModelSelection,
   RoutingDecision,
+  ThinkingLevel,
 } from './types'
 
 const APPROVAL_MODE_KEY = 'composer.approvalMode'
@@ -116,19 +118,31 @@ function readApprovalMode(): ApprovalMode {
   return 'manual'
 }
 
+function parseThinking(value: unknown): ThinkingLevel | undefined {
+  if (value === 'off' || value === 'low' || value === 'medium' || value === 'high') return value
+  return undefined
+}
+
 function readModelSelection(): ModelSelection {
   const ls = safeStorage()
   const raw = ls?.getItem(MODEL_SELECTION_KEY)
   if (!raw) return { kind: 'auto' }
   try {
-    const parsed = JSON.parse(raw) as { kind?: string; agentId?: string; modelId?: string }
+    const parsed = JSON.parse(raw) as {
+      kind?: string
+      agentId?: string
+      modelId?: string
+      thinking?: unknown
+    }
+    const thinking = parseThinking(parsed.thinking)
+    if (parsed.kind === 'auto') return thinking ? { kind: 'auto', thinking } : { kind: 'auto' }
     if (parsed.kind === 'manual' && parsed.agentId && parsed.modelId) {
       if (
         parsed.agentId === 'claude-code' ||
         parsed.agentId === 'codex' ||
         parsed.agentId === 'opencode'
       ) {
-        return { kind: 'manual', agentId: parsed.agentId, modelId: parsed.modelId }
+        return { kind: 'manual', agentId: parsed.agentId, modelId: parsed.modelId, thinking }
       }
     }
   } catch {
@@ -146,7 +160,7 @@ function writeApprovalMode(mode: ApprovalMode): void {
 function writeModelSelection(selection: ModelSelection): void {
   const ls = safeStorage()
   if (!ls) return
-  if (selection.kind === 'auto') {
+  if (selection.kind === 'auto' && !selection.thinking) {
     ls.removeItem(MODEL_SELECTION_KEY)
     return
   }
@@ -160,7 +174,7 @@ function catalogOptions(catalogs: AgentModelCatalog[]): ModelOption[] {
       agentId: catalog.agentId,
       agentName: catalog.name,
       modelId: model.id,
-      label: model.label,
+      label: formatModelLabel(catalog.agentId, model.label || model.id),
       tier: model.tier,
     })),
   )

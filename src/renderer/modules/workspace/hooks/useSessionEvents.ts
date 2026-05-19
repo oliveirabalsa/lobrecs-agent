@@ -102,6 +102,15 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     () => timedActivities.map(({ at }) => at),
     [timedActivities],
   )
+  const tokensIn = useMemo<number | null>(() => {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i]
+      if (event.type !== 'session-complete') continue
+      const value = tokensInFromPayload(event.payload)
+      if (value !== null) return value
+    }
+    return null
+  }, [events])
 
   const pendingPlanPrompt = useMemo<PlanPromptActivity | null>(() => {
     // Search from the end so the latest unresolved prompt wins.
@@ -148,6 +157,7 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     pendingUserQuestion,
     resolvePlanPrompt,
     resolveUserQuestion,
+    tokensIn,
   }
 }
 
@@ -318,4 +328,21 @@ function isAgentActivity(payload: unknown): payload is AgentActivity {
     'kind' in payload &&
     typeof (payload as { kind?: unknown }).kind === 'string'
   )
+}
+
+function tokensInFromPayload(payload: unknown): number | null {
+  if (!payload || typeof payload !== 'object') return null
+  const p = payload as Record<string, unknown>
+
+  if (p.usage && typeof p.usage === 'object') {
+    const u = p.usage as Record<string, unknown>
+    if (typeof u.input_tokens === 'number') return u.input_tokens
+    if (typeof u.inputTokens === 'number') return u.inputTokens
+  }
+
+  if (typeof p.input_tokens === 'number') return p.input_tokens
+  if (typeof p.tokensIn === 'number') return p.tokensIn
+  if (typeof p.tokens_in === 'number') return p.tokens_in
+
+  return null
 }

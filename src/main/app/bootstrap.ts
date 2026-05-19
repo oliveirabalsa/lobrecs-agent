@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { adapterRegistry } from '../agents'
 import { registerIpcHandlers } from '../ipc'
+import { cliEditorTerminalService } from '../modules/system/application/cliEditorTerminalService'
 import { processPool } from '../process/ProcessPool'
 import { sessionsStore, threadsStore } from '../store'
 import { getAppIconPath } from './appIcon'
@@ -34,6 +35,7 @@ export function bootstrapMainProcess(): void {
 
   app.on('will-quit', () => {
     processPool.killAll()
+    cliEditorTerminalService.stopAll()
     unregisterAppShortcuts()
   })
 

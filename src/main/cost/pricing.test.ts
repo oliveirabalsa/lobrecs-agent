@@ -21,6 +21,14 @@ describe('pricing', () => {
     expect(estimateCost('unknown-model', 1_000, 1_000)).toBe(0)
   })
 
+  it('uses settings pricing overrides before built-in pricing', () => {
+    const cost = estimateCost('gpt-5.3-codex', 1_000_000, 1_000_000, {
+      'gpt-5.3-codex': { inputPer1M: 1, outputPer1M: 2 },
+    })
+
+    expect(cost).toBe(3)
+  })
+
   it('normalizes invalid token counts to zero', () => {
     expect(estimateCost('minimax', -1, Number.NaN)).toBe(0)
   })

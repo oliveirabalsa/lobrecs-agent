@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
+  AgentId,
   ApprovalRequest,
   DiffProposal,
   Project,
+  QueuedMessage,
   Session,
   SessionStatus,
 } from '../../../../shared/types'
@@ -114,6 +116,7 @@ export function useWorkspaceController() {
   const [bannerError, setBannerError] = useState<string | null>(null)
   const [mainView, setMainView] = useState<MainView>('workspace')
   const [swarmOpen, setSwarmOpen] = useState(false)
+  const [pendingQueue, setPendingQueue] = useState<QueuedMessage[]>([])
 
   const activeSessionId = activeSession?.id ?? null
   const activeThreadId = activeSession?.threadId ?? null
@@ -344,11 +347,68 @@ export function useWorkspaceController() {
     }
   }
 
+  async function handleEnqueue(
+    prompt: string,
+    agentId?: AgentId,
+    modelOverride?: string,
+  ): Promise<void> {
+    if (!selectedProject || !activeThreadId) return
+
+    try {
+      await window.agentforge.agent.enqueue({
+        threadId: activeThreadId,
+        projectId: selectedProject.id,
+        prompt,
+        agentId,
+        modelOverride,
+      })
+      setBannerError(null)
+    } catch (error: unknown) {
+      setBannerError(error instanceof Error ? error.message : 'Failed to queue message')
+      throw error
+    }
+  }
+
+  async function handleSteer(prompt: string): Promise<void> {
+    if (!selectedProject || !activeSessionId) return
+
+    try {
+      const result = await window.agentforge.agent.steer({
+        sessionId: activeSessionId,
+        projectId: selectedProject.id,
+        prompt,
+      })
+      handleSessionStarted({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt,
+        routingDecision: null,
+        agentId: toStartedSessionAgentId(activeSession?.agentId),
+        modelOverride: activeSession?.modelOverride,
+        createdAt: Date.now(),
+      })
+    } catch (error: unknown) {
+      setBannerError(error instanceof Error ? error.message : 'Failed to steer agent')
+      throw error
+    }
+  }
+
+  async function handleRemoveQueueItem(messageId: string): Promise<void> {
+    if (!activeThreadId) return
+    await window.agentforge.agent.dequeueItem(activeThreadId, messageId).catch(() => undefined)
+  }
+
+  async function handleClearQueue(): Promise<void> {
+    if (!activeThreadId) return
+    await window.agentforge.agent.clearQueue(activeThreadId).catch(() => undefined)
+  }
+
   async function handleDeleteActiveThread() {
     const threadId = activeSession?.threadId
     if (!threadId) return
 
     try {
+      await window.agentforge.agent.clearQueue(threadId).catch(() => undefined)
       if (activeSessionId && isBusy) {
         await window.agentforge.agent.cancel(activeSessionId).catch(() => undefined)
       }
@@ -421,6 +481,31 @@ export function useWorkspaceController() {
 
     return unsubscribe
   }, [activeSessionId, activeThreadId, selectedProject?.id])
+
+  useEffect(() => {
+    if (!activeThreadId) {
+      setPendingQueue([])
+      return
+    }
+
+    let cancelled = false
+    void window.agentforge.agent
+      .getQueue(activeThreadId)
+      .then((queue) => {
+        if (!cancelled) setPendingQueue(queue)
+      })
+      .catch(() => undefined)
+
+    const unsubscribe = window.agentforge.agent.onQueueUpdated((event) => {
+      if (event.threadId !== activeThreadId) return
+      setPendingQueue(event.pending)
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [activeThreadId])
 
   async function handleCloseTab(sessionId: string) {
     const tab = tabs.tabs.find((item) => item.sessionId === sessionId)
@@ -515,6 +600,11 @@ export function useWorkspaceController() {
     handleRejectApproval,
     handleRerunActiveSession,
     handleCancelSession,
+    handleEnqueue,
+    handleSteer,
+    handleRemoveQueueItem,
+    handleClearQueue,
+    pendingQueue,
     handleDeleteActiveThread,
     handleForkSession,
     handleOpenSession,

@@ -11,7 +11,16 @@
   --color-bubble-user: #1f1f22;
   --color-card: #17171a;
   --color-card-raised: #1c1c20;
-  --color-hairline: rgba(255, 255, 255, 0.08);
+  --color-hairline: rgba(255, 255, 255, 0.06);
+  --color-hairline-strong: rgba(255, 255, 255, 0.10);
+
+  /* Subtle elevation — a 1px inner highlight at the top edge plus a
+   * very soft ambient shadow. Used by raised surfaces (user bubbles,
+   * raised cards, popovers) to read as "lifted" without losing flatness. */
+  --shadow-elevated:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+    0 1px 2px 0 rgba(0, 0, 0, 0.25),
+    0 8px 24px -12px rgba(0, 0, 0, 0.5);
 
   --color-text-primary: rgba(255, 255, 255, 0.92);
   --color-text-secondary: rgba(255, 255, 255, 0.58);
@@ -195,7 +204,14 @@ input {
 }
 
 [class~="motion-fade-up-in"] {
-  animation: fade-up-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fade-up-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Subtle ambient elevation for raised surfaces — pairs with the
+ * --shadow-elevated token defined in @theme. Apply alongside bg-card-raised
+ * or bg-bubble-user for the Codex-style "lifted" feel. */
+.shadow-elevated {
+  box-shadow: var(--shadow-elevated);
 }
 
 [class~="motion-slide-in-left"] {

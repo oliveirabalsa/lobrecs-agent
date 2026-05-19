@@ -1,6 +1,10 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildProcessEnvironment, buildExecutableSearchPath } from './environment'
+import {
+  buildProcessEnvironment,
+  buildExecutableSearchPath,
+  getUserShell,
+} from './environment'
 
 describe('process environment', () => {
   it('adds the current Node runtime directory to packaged child process PATH', () => {
@@ -16,5 +20,22 @@ describe('process environment', () => {
 
     expect(env.CUSTOM_ENV).toBe('1')
     expect(env.PATH?.split(path.delimiter)).toContain(path.dirname(process.execPath))
+  })
+
+  it('prefers the configured user shell when SHELL is present', () => {
+    expect(getUserShell({ SHELL: '/opt/homebrew/bin/zsh' })).toBe('/opt/homebrew/bin/zsh')
+  })
+
+  it('falls back to the platform default shell when SHELL is missing', () => {
+    const expectedShell =
+      process.platform === 'darwin'
+        ? '/bin/zsh'
+        : process.platform === 'linux'
+          ? '/bin/bash'
+          : process.platform === 'win32'
+            ? 'cmd.exe'
+            : '/bin/sh'
+
+    expect(getUserShell({})).toBe(expectedShell)
   })
 })

@@ -1,9 +1,14 @@
+import type { IpcRendererEvent } from 'electron'
 import type {
   AgentDispatchParams,
   AgentDispatchResult,
   AgentPlanDecisionPayload,
+  EnqueueParams,
+  QueuedMessage,
+  QueueStatusEvent,
+  SteerParams,
 } from '../../shared/contracts/agents'
-import type { IpcInvoker } from './ipc'
+import type { IpcInvoker, IpcSubscriber } from './ipc'
 
 export interface AgentApi {
   dispatch(params: AgentDispatchParams): Promise<AgentDispatchResult>
@@ -13,9 +18,24 @@ export interface AgentApi {
   killAll(): Promise<void>
   /** Resolves a pending `plan-prompt` round-trip from the main process. */
   planDecision(payload: AgentPlanDecisionPayload): Promise<void>
+  /** Adds a message to a thread's pending queue. Returns the queued entry. */
+  enqueue(params: EnqueueParams): Promise<QueuedMessage>
+  /** Returns the current queue snapshot for a thread. */
+  getQueue(threadId: string): Promise<QueuedMessage[]>
+  /** Removes a single queued message from a thread's queue. */
+  dequeueItem(threadId: string, messageId: string): Promise<void>
+  /** Clears every queued message for a thread. */
+  clearQueue(threadId: string): Promise<void>
+  /** Cancels the active session and immediately dispatches a new prompt on the same thread. */
+  steer(params: SteerParams): Promise<AgentDispatchResult>
+  /**
+   * Subscribe to `queue:updated` broadcasts. The handler fires whenever the
+   * pending queue for any thread changes. Returns an unsubscribe function.
+   */
+  onQueueUpdated(callback: (event: QueueStatusEvent) => void): () => void
 }
 
-export function createAgentApi(ipcRenderer: IpcInvoker): AgentApi {
+export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentApi {
   return {
     dispatch: (params) => ipcRenderer.invoke('agent:dispatch', params),
     approve: (sessionId) => ipcRenderer.invoke('agent:approve', sessionId),
@@ -23,5 +43,16 @@ export function createAgentApi(ipcRenderer: IpcInvoker): AgentApi {
     cancel: (sessionId) => ipcRenderer.invoke('agent:cancel', sessionId),
     killAll: () => ipcRenderer.invoke('agent:kill-all'),
     planDecision: (payload) => ipcRenderer.invoke('agent:plan-decision', payload),
+    enqueue: (params) => ipcRenderer.invoke('agent:enqueue', params),
+    getQueue: (threadId) => ipcRenderer.invoke('agent:queue-status', threadId),
+    dequeueItem: (threadId, messageId) =>
+      ipcRenderer.invoke('agent:dequeue-item', { threadId, messageId }),
+    clearQueue: (threadId) => ipcRenderer.invoke('agent:clear-queue', threadId),
+    steer: (params) => ipcRenderer.invoke('agent:steer', params),
+    onQueueUpdated: (callback) => {
+      const handler = (_event: IpcRendererEvent, payload: QueueStatusEvent) => callback(payload)
+      ipcRenderer.on('queue:updated', handler)
+      return () => ipcRenderer.removeListener('queue:updated', handler)
+    },
   }
 }

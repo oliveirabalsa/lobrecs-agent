@@ -14,7 +14,7 @@ export interface UserMessageProps {
  */
 export function UserMessage({ text, attachments }: UserMessageProps) {
   return (
-    <div className="ml-auto max-w-[85%] rounded-bubble bg-bubble-user px-4 py-3 text-sm leading-6 text-primary sm:max-w-[70%]">
+    <div className="shadow-elevated ml-auto max-w-[85%] rounded-bubble bg-bubble-user px-4 py-3 text-sm leading-6 text-primary sm:max-w-[70%]">
       {attachments && attachments.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((attachment) => (

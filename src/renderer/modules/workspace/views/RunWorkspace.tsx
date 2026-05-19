@@ -43,6 +43,8 @@ interface RunWorkspaceProps {
    * inside `<EditedFilesCard>` jump straight to the matching diff tab.
    */
   onReviewFile?: (filePath?: string) => void
+  /** Called with the context window percentage (0–100) after a session completes. */
+  onContextPercent?: (percent: number | null) => void
 }
 
 /**
@@ -73,6 +75,7 @@ export function RunWorkspace({
   onRejectApproval,
   onSessionStarted,
   onReviewFile,
+  onContextPercent,
 }: RunWorkspaceProps) {
   const {
     activities,
@@ -82,11 +85,21 @@ export function RunWorkspace({
     pendingUserQuestion,
     resolvePlanPrompt,
     resolveUserQuestion,
+    tokensIn,
   } = useSessionEvents(sessionId, {
     onApprovalRequest,
     onDiffProposals,
     onStatusChange,
   })
+
+  useEffect(() => {
+    if (!onContextPercent) return
+    if (tokensIn === null) {
+      onContextPercent(null)
+      return
+    }
+    onContextPercent(Math.min(100, Math.round((tokensIn / 200_000) * 100)))
+  }, [tokensIn, onContextPercent])
   const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
   const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)

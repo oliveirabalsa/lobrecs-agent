@@ -8,8 +8,12 @@ import type { ImageAttachment } from '../../shared/types'
 
 const execFileAsync = promisify(execFile)
 
-export function resolveCommand(envVarName: string, fallback: string): string {
-  return process.env[envVarName]?.trim() || resolveExecutable(fallback) || fallback
+export function resolveCommand(
+  envVarName: string,
+  fallback: string,
+  override?: string,
+): string {
+  return override?.trim() || process.env[envVarName]?.trim() || resolveExecutable(fallback) || fallback
 }
 
 export async function runCommandText(

@@ -13,6 +13,7 @@ import type {
   Project,
   RunMode,
   Spec,
+  SpecSettings,
   SpecRun,
   SpecRunComparison,
   SupportedAgentId,
@@ -66,6 +67,7 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   const [draft, setDraft] = useState<SpecDraft>(emptyDraft)
   const [capabilities, setCapabilities] = useState<AdapterCapability[]>([])
   const [recipes, setRecipes] = useState<VerificationRecipe[]>([])
+  const [specSettings, setSpecSettings] = useState<SpecSettings | null>(null)
   const [comparison, setComparison] = useState<SpecRunComparison | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -100,21 +102,23 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
       setComparison(null)
 
       try {
-        const [loadedSpecs, loadedCapabilities, loadedRecipes] = await Promise.all([
+        const [loadedSpecs, loadedCapabilities, loadedRecipes, effectiveSettings] = await Promise.all([
           window.agentforge.specs.list(project.id),
           window.agentforge.system.listCapabilities(),
           window.agentforge.system.listVerificationRecipes(project.id),
+          window.agentforge.settings.getEffective(project.id),
         ])
         if (cancelled) return
 
         setSpecs(loadedSpecs)
         setCapabilities(loadedCapabilities)
         setRecipes(loadedRecipes)
+        setSpecSettings(effectiveSettings.settings.specs)
         setSelectedSpecId((current) => current ?? loadedSpecs[0]?.id ?? null)
         if (loadedSpecs.length === 0) {
           setDraft({
             ...emptyDraft,
-            selectedAgents: [project.agentId === 'cursor' ? 'codex' : project.agentId],
+            selectedAgents: defaultSpecAgents(effectiveSettings.settings.specs, project),
           })
         }
       } catch (reason) {
@@ -238,7 +242,7 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
     setComparison(null)
     setDraft({
       ...emptyDraft,
-      selectedAgents: [project.agentId === 'cursor' ? 'codex' : project.agentId],
+      selectedAgents: defaultSpecAgents(specSettings, project),
     })
     setError(null)
     setNotice(null)
@@ -655,6 +659,17 @@ function linesFromText(text: string): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+}
+
+function defaultSpecAgents(
+  settings: SpecSettings | null,
+  project: Project,
+): SupportedAgentId[] {
+  if (settings?.defaultAgentIds.length) {
+    return settings.defaultAgentIds
+  }
+
+  return [project.agentId === 'cursor' ? 'codex' : project.agentId]
 }
 
 function setDraftField<K extends keyof SpecDraft>(

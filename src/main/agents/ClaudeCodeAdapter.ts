@@ -49,7 +49,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       events.emitBuffered(event)
     }
     const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
-    const command = resolveCommand(CLAUDE_COMMAND_ENV, 'claude')
+    const command = resolveCommand(
+      CLAUDE_COMMAND_ENV,
+      'claude',
+      params.runtimeSettings?.command,
+    )
     const model = normalizeClaudeModelId(params.model)
     const args = [
       '--print',
@@ -59,11 +63,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       'text',
       '--verbose',
       '--include-partial-messages',
-      '--permission-mode',
-      'bypassPermissions',
+      ...claudePermissionArgs(params.runtimeSettings?.permissionMode),
       '--model',
       model,
-      '--dangerously-skip-permissions',
+      ...dangerousArgs(params.runtimeSettings?.permissionMode),
+      ...(params.runtimeSettings?.extraArgs ?? []),
       prompt,
     ]
     let sawProcessOutput = false
@@ -158,6 +162,18 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       ...(await readClaudeHistoryModels()),
     ])
   }
+}
+
+function claudePermissionArgs(permissionMode = 'dangerous'): string[] {
+  if (permissionMode === 'dangerous' || permissionMode === 'bypass-permissions') {
+    return ['--permission-mode', 'bypassPermissions']
+  }
+
+  return []
+}
+
+function dangerousArgs(permissionMode = 'dangerous'): string[] {
+  return permissionMode === 'dangerous' ? ['--dangerously-skip-permissions'] : []
 }
 
 function parseClaudeLine(

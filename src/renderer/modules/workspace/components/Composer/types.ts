@@ -8,10 +8,13 @@ import type {
 
 export type ApprovalMode = 'full' | 'auto-safe' | 'manual'
 
+/** Reasoning/thinking depth requested for the selected model. */
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+
 /** `'auto'` = router picks; otherwise pinned to a specific agent + model. */
 export type ModelSelection =
-  | { kind: 'auto' }
-  | { kind: 'manual'; agentId: SupportedAgentId; modelId: string }
+  | { kind: 'auto'; thinking?: ThinkingLevel }
+  | { kind: 'manual'; agentId: SupportedAgentId; modelId: string; thinking?: ThinkingLevel }
 
 export interface AttachedImage {
   id: string

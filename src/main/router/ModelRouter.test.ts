@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_APP_SETTINGS } from '../modules/settings'
 import { ModelRouter, type AdapterRegistry } from './ModelRouter'
 
 function createRegistry(installed: Record<string, boolean>): AdapterRegistry {
@@ -169,5 +170,46 @@ describe('ModelRouter', () => {
     expect(decision.agentId).toBe('claude-code')
     expect(decision.tier).toBe('advanced')
     expect(decision.model).toBe('claude-opus-4-7')
+  })
+
+  it('uses settings-backed model maps and disabled agent routing', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({
+        codex: true,
+        'claude-code': true,
+        opencode: true,
+      }),
+      settingsProvider: () => ({
+        ...DEFAULT_APP_SETTINGS,
+        agents: {
+          ...DEFAULT_APP_SETTINGS.agents,
+          defaultAgentId: 'codex',
+          fallbackAgentId: 'opencode',
+          enabledAgentIds: ['codex', 'opencode'],
+          runtimes: {
+            ...DEFAULT_APP_SETTINGS.agents.runtimes,
+            'claude-code': {
+              ...DEFAULT_APP_SETTINGS.agents.runtimes['claude-code'],
+              enabled: false,
+            },
+          },
+          modelMap: {
+            ...DEFAULT_APP_SETTINGS.agents.modelMap,
+            codex: {
+              ...DEFAULT_APP_SETTINGS.agents.modelMap.codex,
+              lightweight: 'custom-codex-light',
+            },
+          },
+        },
+      }),
+    })
+
+    const decision = await router.route({
+      prompt: 'fix typo',
+      preferredAgentId: 'claude-code',
+    })
+
+    expect(decision.agentId).toBe('codex')
+    expect(decision.model).toBe('custom-codex-light')
   })
 })

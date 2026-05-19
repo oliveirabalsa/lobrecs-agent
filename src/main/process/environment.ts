@@ -33,6 +33,17 @@ export function buildProcessEnvironment(
   return env
 }
 
+export function getUserShell(env: NodeJS.ProcessEnv = process.env): string {
+  const configuredShell = env.SHELL?.trim()
+  if (configuredShell) return configuredShell
+
+  if (process.platform === 'darwin') return '/bin/zsh'
+  if (process.platform === 'linux') return '/bin/bash'
+  if (process.platform === 'win32') return env.ComSpec?.trim() || 'cmd.exe'
+
+  return '/bin/sh'
+}
+
 export function buildExecutableSearchPath(existingPath = ''): string {
   return uniquePaths([
     ...splitPath(existingPath),

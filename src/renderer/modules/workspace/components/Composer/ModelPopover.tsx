@@ -1,120 +1,226 @@
-import { useEffect, useRef } from 'react'
-import type { ModelGroup, ModelSelection, ModelTier } from './types'
+import { useEffect, useMemo, useState } from 'react'
+import { Modal } from '../../../../components/ui'
+import {
+  AGENT_SHORT,
+  THINKING_LABEL,
+  THINKING_LEVELS,
+  TIER_LABEL,
+  TIER_TONE,
+  supportsThinking,
+} from './modelDisplay'
+import type { ModelGroup, ModelOption, ModelSelection, ThinkingLevel } from './types'
 
-interface ModelPopoverProps {
+interface ModelPickerModalProps {
+  open: boolean
   groups: ModelGroup[]
   selection: ModelSelection
   onSelect: (selection: ModelSelection) => void
   onClose: () => void
 }
 
-const TIER_LABEL: Record<ModelTier, string> = {
-  lightweight: 'Lightweight',
-  balanced: 'Balanced',
-  advanced: 'Advanced',
-  frontier: 'Frontier',
-}
-
-const TIER_TONE: Record<ModelTier, string> = {
-  lightweight: 'bg-accent-add/10 text-accent-add border-accent-add/30',
-  balanced: 'bg-accent-primary/10 text-accent-primary border-accent-primary/30',
-  advanced: 'bg-accent-warn/10 text-accent-warn border-accent-warn/30',
-  frontier: 'bg-accent-del/10 text-accent-del border-accent-del/30',
-}
-
 /**
- * Popover surfacing every installed agent's models, grouped by agent, with
- * an "Auto routing" option at the top. Closes on outside-click + ESC.
+ * Two-pane model picker: provider tabs on the left, model cards on the right
+ * with a thinking-depth segmented control for tiers that support it.
+ *
+ * "Auto routing" is treated as its own provider in the left column.
  */
-export function ModelPopover({ groups, selection, onSelect, onClose }: ModelPopoverProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
+export function ModelPopover({
+  open,
+  groups,
+  selection,
+  onSelect,
+  onClose,
+}: ModelPickerModalProps) {
+  const tabs = useMemo(() => {
+    return [{ id: 'auto' as const, label: 'Auto' }, ...groups.map((g) => ({ id: g.agentId, label: AGENT_SHORT[g.agentId] ?? g.label }))]
+  }, [groups])
+
+  const initialTab = useMemo(() => {
+    if (selection.kind === 'manual') return selection.agentId
+    return 'auto' as const
+  }, [selection])
+
+  const [activeTab, setActiveTab] = useState<typeof tabs[number]['id']>(initialTab)
 
   useEffect(() => {
-    function onDocMouseDown(event: MouseEvent) {
-      if (!containerRef.current) return
-      if (!containerRef.current.contains(event.target as Node)) onClose()
+    if (open) setActiveTab(initialTab)
+  }, [open, initialTab])
+
+  const thinking: ThinkingLevel = selection.thinking ?? 'off'
+  const activeGroup = groups.find((g) => g.agentId === activeTab) ?? null
+
+  function pickAuto() {
+    onSelect({ kind: 'auto', thinking: thinking === 'off' ? undefined : thinking })
+    onClose()
+  }
+
+  function pickModel(option: ModelOption) {
+    const next: ModelSelection = supportsThinking(option.tier) && thinking !== 'off'
+      ? { kind: 'manual', agentId: option.agentId, modelId: option.modelId, thinking }
+      : { kind: 'manual', agentId: option.agentId, modelId: option.modelId }
+    onSelect(next)
+    onClose()
+  }
+
+  function setThinking(next: ThinkingLevel) {
+    if (selection.kind === 'manual') {
+      onSelect({
+        kind: 'manual',
+        agentId: selection.agentId,
+        modelId: selection.modelId,
+        thinking: next === 'off' ? undefined : next,
+      })
+    } else {
+      onSelect({ kind: 'auto', thinking: next === 'off' ? undefined : next })
     }
-    function onDocKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', onDocMouseDown)
-    document.addEventListener('keydown', onDocKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocMouseDown)
-      document.removeEventListener('keydown', onDocKey)
-    }
-  }, [onClose])
+  }
 
   const autoActive = selection.kind === 'auto'
+  const selectedOption =
+    selection.kind === 'manual'
+      ? groups
+          .find((g) => g.agentId === selection.agentId)
+          ?.options.find((o) => o.modelId === selection.modelId) ?? null
+      : null
+  const showThinking = autoActive ? true : selectedOption ? supportsThinking(selectedOption.tier) : false
 
   return (
-    <div
-      ref={containerRef}
-      role="listbox"
-      aria-label="Select model"
-      className="absolute bottom-9 right-0 z-50 max-h-[360px] w-72 overflow-y-auto rounded-card border border-hairline bg-card-raised py-1 shadow-xl shadow-black/40"
+    <Modal
+      open={open}
+      onOpenChange={(next) => (next ? null : onClose())}
+      title="Select model"
+      visualTitle={false}
+      description="Choose an agent, model, and thinking depth"
+      maxWidth={640}
     >
-      <button
-        type="button"
-        role="option"
-        aria-selected={autoActive}
-        onClick={() => onSelect({ kind: 'auto' })}
-        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${
-          autoActive
-            ? 'bg-white/5 text-primary'
-            : 'text-secondary hover:bg-white/5 hover:text-primary'
-        }`}
-      >
-        <span className="flex-1">
-          <span className="font-medium">Auto routing</span>
-          <span className="ml-1 text-muted">— router picks the best agent</span>
-        </span>
-        {autoActive ? <span className="text-accent-primary">●</span> : null}
-      </button>
-
-      {groups.map((group) => (
-        <div key={group.agentId} className="border-t border-hairline pt-1">
-          <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted">
-            {group.label}
-          </div>
-          {group.options.map((option) => {
-            const isActive =
-              selection.kind === 'manual' &&
-              selection.agentId === option.agentId &&
-              selection.modelId === option.modelId
+      <div className="flex min-h-[360px] gap-3">
+        <nav
+          aria-label="Provider"
+          className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-hairline pr-2"
+        >
+          {tabs.map((tab) => {
+            const active = tab.id === activeTab
+            const tabSelected =
+              tab.id === 'auto'
+                ? selection.kind === 'auto'
+                : selection.kind === 'manual' && selection.agentId === tab.id
             return (
               <button
-                key={option.key}
+                key={tab.id}
                 type="button"
-                role="option"
-                aria-selected={isActive}
-                onClick={() =>
-                  onSelect({
-                    kind: 'manual',
-                    agentId: option.agentId,
-                    modelId: option.modelId,
-                  })
-                }
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
-                  isActive
-                    ? 'bg-white/5 text-primary'
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center justify-between gap-1 rounded-card px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  active
+                    ? 'bg-white/10 text-primary'
                     : 'text-secondary hover:bg-white/5 hover:text-primary'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                <span
-                  className={`inline-flex h-4 items-center rounded-pill border px-1.5 text-[9px] font-medium ${
-                    TIER_TONE[option.tier]
-                  }`}
-                >
-                  {TIER_LABEL[option.tier]}
-                </span>
-                {isActive ? <span className="text-accent-primary">●</span> : null}
+                <span className="truncate">{tab.label}</span>
+                {tabSelected ? (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
+                ) : null}
               </button>
             )
           })}
+        </nav>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex-1 overflow-y-auto pr-1">
+            {activeTab === 'auto' ? (
+              <button
+                type="button"
+                onClick={pickAuto}
+                className={`flex w-full flex-col gap-1 rounded-card border px-3 py-3 text-left transition-colors ${
+                  autoActive
+                    ? 'border-accent-primary/40 bg-accent-primary/5'
+                    : 'border-hairline hover:border-white/15 hover:bg-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-primary">Auto routing</span>
+                  {autoActive ? (
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent-primary" />
+                  ) : null}
+                </div>
+                <span className="text-xs text-muted">
+                  Router scores complexity and picks the best agent + model per turn.
+                </span>
+              </button>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {activeGroup?.options.map((option) => {
+                  const isActive =
+                    selection.kind === 'manual' &&
+                    selection.agentId === option.agentId &&
+                    selection.modelId === option.modelId
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => pickModel(option)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-card border px-3 py-2 text-left transition-colors ${
+                        isActive
+                          ? 'border-accent-primary/40 bg-accent-primary/5'
+                          : 'border-transparent hover:border-white/10 hover:bg-white/5'
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm text-primary">
+                        {option.label}
+                      </span>
+                      <span
+                        className={`inline-flex h-5 items-center rounded-pill border px-2 text-[10px] font-medium ${
+                          TIER_TONE[option.tier]
+                        }`}
+                      >
+                        {TIER_LABEL[option.tier]}
+                      </span>
+                      {isActive ? (
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
+                      ) : null}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {showThinking ? (
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline pt-3">
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-primary">Thinking depth</span>
+                <span className="text-[11px] text-muted">
+                  Higher depth = slower, more deliberate replies.
+                </span>
+              </div>
+              <div
+                role="radiogroup"
+                aria-label="Thinking depth"
+                className="flex shrink-0 items-center gap-0.5 rounded-pill border border-hairline bg-card-raised p-0.5"
+              >
+                {THINKING_LEVELS.map((level) => {
+                  const active = thinking === level
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setThinking(level)}
+                      className={`rounded-pill px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                        active
+                          ? 'bg-accent-primary/20 text-accent-primary'
+                          : 'text-muted hover:text-primary'
+                      }`}
+                    >
+                      {THINKING_LABEL[level]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
-      ))}
-    </div>
+      </div>
+    </Modal>
   )
 }

@@ -196,6 +196,31 @@ describe('agent adapters', () => {
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 
+  it('applies runtime command and permission settings to Codex dispatch', async () => {
+    const adapter = new CodexAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'codex-runtime-session',
+      prompt: 'Review the diff',
+      repoPath: process.cwd(),
+      model: 'gpt-5.3-codex',
+      runtimeSettings: {
+        enabled: true,
+        command: codexMock,
+        permissionMode: 'ask-for-approval',
+        extraArgs: ['--reasoning-effort', 'low'],
+      },
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = payloadField(argvEvent, 'argv')
+
+    expect(argv).toEqual(expect.arrayContaining(['--reasoning-effort', 'low']))
+    expect(argv).not.toEqual(
+      expect.arrayContaining(['--dangerously-bypass-approvals-and-sandbox']),
+    )
+  })
+
   it('dispatches OpenCode with run model args', async () => {
     process.env.OPENCODE_COMMAND = opencodeMock
     const adapter = new OpenCodeAdapter()

@@ -1,8 +1,12 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
 import type {
   AgentEvent,
   AgentId,
+  AgentRuntimeSettings,
+  QueuedMessage,
+  QueueStatusEvent,
   ThreadTranscriptTurn,
   SessionStatus,
   Thread,
@@ -13,6 +17,11 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
 import { sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
+import {
+  buildLocalDiffProposals,
+  captureLocalChangeBaseline,
+  type LocalChangeBaseline,
+} from './localDiff'
 import { buildDiffProposals } from './worktreeDiff'
 import type { DiffProposal, ImageAttachment } from '../../shared/types'
 
@@ -36,6 +45,7 @@ export type AgentAdapter = {
     model: string
     context?: string | null
     imageAttachments?: ImageAttachment[]
+    runtimeSettings?: AgentRuntimeSettings
   }): Promise<AgentSession>
 }
 
@@ -47,6 +57,7 @@ export type DispatchSessionParams = {
   repoPath: string
   context?: string | null
   imageAttachments?: ImageAttachment[]
+  runtimeSettings?: AgentRuntimeSettings
   isolate?: boolean
   /** When provided, links the new session to an existing thread. */
   threadId?: string
@@ -64,6 +75,7 @@ export type AdapterResolver = (agentId: AgentId) => AgentAdapter | undefined
 type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   repoPath: string
   worktreePath: string | null
+  localBaseline: LocalChangeBaseline | null
 }
 
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
@@ -86,6 +98,7 @@ export class SessionManager {
   private readonly broadcastEvent: EventBroadcaster
   private readonly worktreeIsolation: boolean
   private readonly processWarningsBySession = new Map<string, Set<string>>()
+  private readonly pendingQueues = new Map<string, QueuedMessage[]>()
   private estimateCost: CostEstimator
 
   constructor(options: SessionManagerOptions = {}) {
@@ -140,6 +153,9 @@ export class SessionManager {
       const worktreePath = shouldIsolate
         ? await worktreeManager.create(session.id, params.repoPath)
         : null
+      const localBaseline = worktreePath
+        ? null
+        : await captureLocalChangeBaseline(params.repoPath)
 
       if (worktreePath) {
         this.emitSyntheticEvent(session.id, {
@@ -157,6 +173,7 @@ export class SessionManager {
         model: params.model,
         context,
         imageAttachments: params.imageAttachments,
+        runtimeSettings: params.runtimeSettings,
       })
 
       this.activeSessions.set(session.id, {
@@ -165,6 +182,7 @@ export class SessionManager {
         cancel: () => agentSession.cancel(),
         repoPath: params.repoPath,
         worktreePath,
+        localBaseline,
       })
 
       agentSession.events.on('event', (event: AgentEvent) => {
@@ -203,6 +221,17 @@ export class SessionManager {
 
     if (session && !terminalSessionStatuses.has(session.status)) {
       sessionsStore.updateStatus(sessionId, 'cancelled')
+
+      // Emit a synthetic completion so subscribers (sidebar spinner, tab
+      // status, workspace controller) see the transition. Once the store is
+      // marked cancelled, any real `session-complete` arriving later from the
+      // killed agent process is filtered out by `isTerminalSession`.
+      this.recordEvent({
+        type: 'session-complete',
+        sessionId,
+        payload: { status: 'cancelled' },
+        timestamp: Date.now(),
+      })
     }
 
     active?.cancel()
@@ -217,6 +246,89 @@ export class SessionManager {
 
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId)
+  }
+
+  enqueueMessage(
+    params: { prompt: string; agentId: AgentId; model: string },
+    threadId: string,
+  ): QueuedMessage {
+    const message: QueuedMessage = {
+      id: randomUUID(),
+      prompt: params.prompt,
+      agentId: params.agentId,
+      model: params.model,
+      createdAt: Date.now(),
+    }
+
+    const queue = this.pendingQueues.get(threadId) ?? []
+    const updated = [...queue, message]
+    this.pendingQueues.set(threadId, updated)
+    broadcastQueueUpdated(threadId, updated)
+    return message
+  }
+
+  getQueue(threadId: string): QueuedMessage[] {
+    return [...(this.pendingQueues.get(threadId) ?? [])]
+  }
+
+  removeQueueItem(threadId: string, messageId: string): void {
+    const queue = this.pendingQueues.get(threadId)
+    if (!queue) return
+
+    const updated = queue.filter((message) => message.id !== messageId)
+    if (updated.length === queue.length) return
+
+    if (updated.length === 0) {
+      this.pendingQueues.delete(threadId)
+    } else {
+      this.pendingQueues.set(threadId, updated)
+    }
+    broadcastQueueUpdated(threadId, updated)
+  }
+
+  clearQueue(threadId: string): void {
+    if (!this.pendingQueues.has(threadId)) return
+
+    this.pendingQueues.delete(threadId)
+    broadcastQueueUpdated(threadId, [])
+  }
+
+  async steer(params: {
+    sessionId: string
+    projectId: string
+    prompt: string
+    agentId: AgentId
+    model: string
+    repoPath: string
+    context?: string | null
+    imageAttachments?: ImageAttachment[]
+    isolate?: boolean
+    runtimeSettings?: AgentRuntimeSettings
+  }): Promise<DispatchSessionResult> {
+    const session = sessionsStore.get(params.sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${params.sessionId}`)
+    }
+    if (!session.threadId) {
+      throw new Error(`Session ${params.sessionId} has no thread to steer`)
+    }
+
+    if (this.activeSessions.has(params.sessionId)) {
+      this.cancel(params.sessionId)
+    }
+
+    return this.dispatch({
+      projectId: params.projectId,
+      prompt: params.prompt,
+      agentId: params.agentId,
+      model: params.model,
+      repoPath: params.repoPath,
+      context: params.context,
+      imageAttachments: params.imageAttachments,
+      isolate: params.isolate,
+      runtimeSettings: params.runtimeSettings,
+      threadId: session.threadId,
+    })
   }
 
   private resolveAdapter(agentId: AgentId): AgentAdapter | undefined {
@@ -259,12 +371,28 @@ export class SessionManager {
       const status = completionStatus(event)
       const completedEvent = withCompletionStatus(event, status)
       const active = this.activeSessions.get(event.sessionId)
+      const session = sessionsStore.get(event.sessionId)
 
       this.applyUsage(event)
       sessionsStore.updateStatus(event.sessionId, status)
-      void this.applyAndEmitWorktreeDiff(event.sessionId, active, completedEvent)
       this.activeSessions.delete(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
+
+      void this.emitCompletionDiffs(event.sessionId, active, completedEvent).then(() => {
+        if (status !== 'done') return
+        if (!active) return
+        if (!session?.threadId) {
+          console.warn(
+            `[session] skipping queued dispatch: session ${event.sessionId} missing thread on completion`,
+          )
+          return
+        }
+
+        void this.dispatchNextQueued(session.threadId, {
+          projectId: session.projectId,
+          repoPath: active.repoPath,
+        })
+      })
       return
     }
 
@@ -323,24 +451,47 @@ export class SessionManager {
     })
   }
 
-  private async applyAndEmitWorktreeDiff(
+  private async emitCompletionDiffs(
     sessionId: string,
     active: ActiveSession | undefined,
     finalEvent: AgentEvent,
   ): Promise<void> {
-    if (!active?.worktreePath) {
+    if (!active) {
+      this.recordEvent(finalEvent)
+      return
+    }
+
+    if (!active.worktreePath && !active.localBaseline) {
       this.recordEvent(finalEvent)
       return
     }
 
     try {
-      const proposals = await buildDiffProposals(active.worktreePath, active.repoPath)
+      const proposals = active.worktreePath
+        ? await buildDiffProposals(active.worktreePath, active.repoPath)
+        : active.localBaseline
+          ? await buildLocalDiffProposals(active.repoPath, active.localBaseline)
+          : []
       if (proposals.length > 0) {
-        const reviewedProposals = await this.applyDiffProposals(sessionId, proposals)
+        const reviewedProposals = active.worktreePath
+          ? await this.applyDiffProposals(sessionId, proposals)
+          : proposals
         this.handleAgentEvent({
           type: 'diff',
           sessionId,
           payload: reviewedProposals,
+          timestamp: Date.now(),
+        })
+      } else if (active.localBaseline) {
+        this.recordEvent({
+          type: 'activity',
+          sessionId,
+          payload: {
+            kind: 'step',
+            title: 'No code changes detected',
+            detail: 'Agent finished without modifying tracked files.',
+            status: 'done',
+          },
           timestamp: Date.now(),
         })
       }
@@ -438,6 +589,43 @@ export class SessionManager {
     sessionsStore.updateUsage(event.sessionId, usage.tokensIn, usage.tokensOut, costUsd)
   }
 
+  private async dispatchNextQueued(
+    threadId: string,
+    fallback: { projectId: string; repoPath: string },
+  ): Promise<void> {
+    const queue = this.pendingQueues.get(threadId)
+    if (!queue?.length) return
+
+    const [next, ...rest] = queue
+    if (rest.length === 0) {
+      this.pendingQueues.delete(threadId)
+    } else {
+      this.pendingQueues.set(threadId, rest)
+    }
+    broadcastQueueUpdated(threadId, rest)
+
+    try {
+      await this.dispatch({
+        projectId: fallback.projectId,
+        prompt: next.prompt,
+        agentId: next.agentId,
+        model: next.model,
+        repoPath: fallback.repoPath,
+        threadId,
+      })
+    } catch (error) {
+      // dispatch() invokes failSession() on most error paths, which already
+      // broadcasts an `error` event scoped to the real sessionId. The renderer
+      // also sees the queue shrink via the earlier broadcastQueueUpdated call,
+      // so we only need to surface unhandled cases (e.g. thread resolution
+      // failures that happen before a session is created) to the main log.
+      console.error(
+        `[session] queued dispatch failed for thread ${threadId}:`,
+        errorMessage(error),
+      )
+    }
+  }
+
   private failSession(sessionId: string, error: unknown): void {
     const event: AgentEvent = {
       type: 'error',
@@ -501,6 +689,25 @@ function broadcastToRenderer(event: AgentEvent): void {
     }
   } catch {
     // Unit tests and non-Electron contexts can provide an explicit broadcaster.
+  }
+}
+
+function broadcastQueueUpdated(threadId: string, pending: QueuedMessage[]): void {
+  try {
+    const electron = require('electron') as {
+      BrowserWindow?: {
+        getAllWindows(): Array<{
+          webContents: { send(channel: string, payload: QueueStatusEvent): void }
+        }>
+      }
+    }
+
+    const payload: QueueStatusEvent = { threadId, pending }
+    for (const win of electron.BrowserWindow?.getAllWindows() ?? []) {
+      win.webContents.send('queue:updated', payload)
+    }
+  } catch {
+    // Unit tests and non-Electron contexts: silently noop.
   }
 }
 

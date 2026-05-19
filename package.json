@@ -1,6 +1,6 @@
 {
   "name": "lobrecs-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Electron desktop harness for AI coding agents, model routing, and swarm orchestration.",
   "productName": "Lobrecs Agent",
   "type": "module",
@@ -15,6 +15,7 @@
     "build:mac": "npm run build && npm run rebuild:electron && electron-builder --mac --config.npmRebuild=false && npm run rebuild:node",
     "build:win": "npm run build && electron-builder --win",
     "build:linux": "npm run build && electron-builder --linux",
+    "build:mac:release": "npm run build && npm run rebuild:electron && npm run rebuild:node && electron-builder --mac --config.npmRebuild=false --publish always",
     "release": "npm run build && electron-builder --publish always"
   },
   "dependencies": {

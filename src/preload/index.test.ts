@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAgentForgeApi, type AgentForgeApi } from './api'
 import type { AgentEvent } from '../shared/contracts/sessions'
+import type { SettingsUpdateEvent } from '../shared/contracts/settings'
 import type { SwarmConfig } from '../shared/contracts/swarms'
 import type { ThreadDeletedEvent } from '../shared/contracts/threads'
 
@@ -52,6 +53,7 @@ describe('preload api shape', () => {
       'specs',
       'runs',
       'git',
+      'settings',
       'on',
       'onShortcut',
       'system',
@@ -313,6 +315,38 @@ describe('preload api shape', () => {
         expected: ['git:push', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.settings.getGlobal(),
+        expected: ['settings:get-global'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.settings.updateGlobal({ ui: { compactMode: true } }),
+        expected: ['settings:update-global', { ui: { compactMode: true } }],
+      },
+      {
+        call: (agentforge) => agentforge.settings.getEffective('project-1'),
+        expected: ['settings:get-effective', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.settings.getProjectOverrides('project-1'),
+        expected: ['settings:get-project-overrides', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.settings.updateProjectOverrides('project-1', {
+            swarms: { maxAgents: 4 },
+          }),
+        expected: [
+          'settings:update-project-overrides',
+          'project-1',
+          { swarms: { maxAgents: 4 } },
+        ],
+      },
+      {
+        call: (agentforge) => agentforge.settings.resetProjectOverrides('project-1'),
+        expected: ['settings:reset-project-overrides', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.system.openInEditor('/tmp/file.ts'),
         expected: ['system:open-editor', '/tmp/file.ts'],
       },
@@ -351,6 +385,60 @@ describe('preload api shape', () => {
             mimeType: 'image/png',
           },
         ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.startCliEditorTerminal({
+            sessionId: 'terminal-1',
+            editorId: 'vim',
+            repoPath: '/tmp/repo',
+            cols: 120,
+            rows: 40,
+          }),
+        expected: [
+          'system:start-cli-editor-terminal',
+          {
+            sessionId: 'terminal-1',
+            editorId: 'vim',
+            repoPath: '/tmp/repo',
+            cols: 120,
+            rows: 40,
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.writeCliEditorTerminal({
+            sessionId: 'terminal-1',
+            data: ':q\r',
+          }),
+        expected: [
+          'system:write-cli-editor-terminal',
+          {
+            sessionId: 'terminal-1',
+            data: ':q\r',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.resizeCliEditorTerminal({
+            sessionId: 'terminal-1',
+            cols: 100,
+            rows: 32,
+          }),
+        expected: [
+          'system:resize-cli-editor-terminal',
+          {
+            sessionId: 'terminal-1',
+            cols: 100,
+            rows: 32,
+          },
+        ],
+      },
+      {
+        call: (agentforge) => agentforge.system.stopCliEditorTerminal('terminal-1'),
+        expected: ['system:stop-cli-editor-terminal', 'terminal-1'],
       },
     ]
 
@@ -417,6 +505,57 @@ describe('preload api shape', () => {
     )
   })
 
+  it('keeps cli editor terminal subscription cleanup behavior', () => {
+    const ipcRenderer = createIpcRendererMock()
+    const api = createAgentForgeApi(
+      ipcRenderer as unknown as Parameters<typeof createAgentForgeApi>[0],
+    )
+    const dataEvent = {
+      sessionId: 'terminal-1',
+      data: 'ready',
+    }
+    const exitEvent = {
+      sessionId: 'terminal-1',
+      exitCode: 0,
+    }
+    const dataCallback = vi.fn()
+    const exitCallback = vi.fn()
+
+    const unsubscribeData = api.system.onCliEditorTerminalData(dataCallback)
+    const unsubscribeExit = api.system.onCliEditorTerminalExit(exitCallback)
+    ipcRenderer.emit('system:cli-editor-terminal:data', dataEvent)
+    ipcRenderer.emit('system:cli-editor-terminal:exit', exitEvent)
+
+    expect(dataCallback).toHaveBeenCalledWith(dataEvent)
+    expect(exitCallback).toHaveBeenCalledWith(exitEvent)
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      'system:cli-editor-terminal:data',
+      expect.any(Function),
+    )
+    expect(ipcRenderer.on).toHaveBeenCalledWith(
+      'system:cli-editor-terminal:exit',
+      expect.any(Function),
+    )
+
+    dataCallback.mockClear()
+    exitCallback.mockClear()
+    unsubscribeData()
+    unsubscribeExit()
+    ipcRenderer.emit('system:cli-editor-terminal:data', dataEvent)
+    ipcRenderer.emit('system:cli-editor-terminal:exit', exitEvent)
+
+    expect(dataCallback).not.toHaveBeenCalled()
+    expect(exitCallback).not.toHaveBeenCalled()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      'system:cli-editor-terminal:data',
+      expect.any(Function),
+    )
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      'system:cli-editor-terminal:exit',
+      expect.any(Function),
+    )
+  })
+
   it('keeps thread deletion subscription cleanup behavior', () => {
     const ipcRenderer = createIpcRendererMock()
     const api = createAgentForgeApi(
@@ -441,6 +580,36 @@ describe('preload api shape', () => {
     expect(callback).not.toHaveBeenCalled()
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       'thread:deleted',
+      expect.any(Function),
+    )
+  })
+
+  it('keeps settings subscription cleanup behavior', () => {
+    const ipcRenderer = createIpcRendererMock()
+    const api = createAgentForgeApi(
+      ipcRenderer as unknown as Parameters<typeof createAgentForgeApi>[0],
+    )
+    const event: SettingsUpdateEvent = {
+      scope: 'global',
+      settings: {} as SettingsUpdateEvent['settings'],
+      effective: {} as SettingsUpdateEvent['effective'],
+      updatedAt: 1,
+    }
+    const callback = vi.fn()
+
+    const unsubscribe = api.settings.onUpdated(callback)
+    ipcRenderer.emit('settings:updated', event)
+
+    expect(callback).toHaveBeenCalledWith(event)
+    expect(ipcRenderer.on).toHaveBeenCalledWith('settings:updated', expect.any(Function))
+
+    callback.mockClear()
+    unsubscribe()
+    ipcRenderer.emit('settings:updated', event)
+
+    expect(callback).not.toHaveBeenCalled()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      'settings:updated',
       expect.any(Function),
     )
   })

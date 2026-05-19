@@ -50,16 +50,21 @@ export class OpenCodeAdapter implements AgentAdapter {
       events.emitBuffered(event)
     }
     const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
-    const command = resolveCommand(OPENCODE_COMMAND_ENV, 'opencode')
+    const command = resolveCommand(
+      OPENCODE_COMMAND_ENV,
+      'opencode',
+      params.runtimeSettings?.command,
+    )
     const args = [
       'run',
       '--format',
       'json',
-      '--dangerously-skip-permissions',
+      ...dangerousArgs(params.runtimeSettings?.permissionMode),
       '--model',
       params.model,
       '--dir',
       params.repoPath,
+      ...(params.runtimeSettings?.extraArgs ?? []),
       prompt,
     ]
 
@@ -121,6 +126,10 @@ export class OpenCodeAdapter implements AgentAdapter {
       return fallbackModelsForAgent(this.id)
     }
   }
+}
+
+function dangerousArgs(permissionMode = 'dangerous'): string[] {
+  return permissionMode === 'dangerous' ? ['--dangerously-skip-permissions'] : []
 }
 
 function parseOpenCodeLine(

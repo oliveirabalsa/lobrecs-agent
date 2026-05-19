@@ -53,6 +53,7 @@ src/
       projects/
       routing/
       sessions/
+      settings/
       swarms/
       system/
       worktrees/
@@ -69,6 +70,7 @@ src/
       diffs.ts
       projects.ts
       sessions.ts
+      settings.ts
       swarms.ts
       system.ts
     index.ts
@@ -82,6 +84,7 @@ src/
       cost/
       projects/
       sessions/
+      settings/
       swarms/
       workspace/
     shared/
@@ -97,6 +100,7 @@ src/
       diffs.ts
       projects.ts
       sessions.ts
+      settings.ts
       swarms.ts
       system.ts
     types/
@@ -248,6 +252,22 @@ For sessions:
   `sessions:*` and `agent:*` session actions.
 - `renderer/modules/sessions` owns terminal output, active session state,
   approval banners, and session tabs.
+
+For settings:
+
+- `shared/contracts/settings.ts` owns the versioned settings DTOs, project
+  override payloads, update events, and serializable runtime configuration.
+- `main/modules/settings/domain` owns defaults, merge behavior, and validation
+  for clamped limits such as swarm size, reviewer iterations, image limits, and
+  routing thresholds.
+- `main/store/settings.ts` owns SQLite persistence for global settings and
+  project overrides; it never exposes raw rows to IPC or renderer code.
+- `main/modules/settings/application/SettingsService.ts` resolves global and
+  project-effective settings and broadcasts `settings:updated`.
+- `preload/api/settings.ts` exposes the narrow `window.agentforge.settings`
+  bridge.
+- `renderer/modules/settings` owns the full settings workspace and draft/save
+  workflow.
 
 ## Architecture Review Checklist
 

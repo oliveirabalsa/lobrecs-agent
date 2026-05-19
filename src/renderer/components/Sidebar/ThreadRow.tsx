@@ -1,3 +1,4 @@
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { Spinner } from '../ui'
 import { formatRelative } from '../../lib/relativeTime'
 import type { Thread } from './useProjectTree'
@@ -14,18 +15,32 @@ const RUNNING_STATUSES = new Set(['running', 'awaiting-approval'])
 export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps) {
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)
   const baseClasses =
-    'group flex h-8 w-full items-center gap-1 rounded-card pr-1 pl-3 text-left transition-colors'
+    'group flex h-8 w-full cursor-pointer items-center gap-1 rounded-card pr-1 pl-3 text-left transition-colors'
   const stateClasses = active
     ? 'bg-white/10 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary'
+  const inactiveButtonClass = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition hover:bg-accent-del/10 hover:text-accent-del'
+
+  function handleDeleteClick(event: MouseEvent<HTMLSpanElement>) {
+    event.stopPropagation()
+    onDelete?.(thread)
+  }
+
+  function handleDeleteKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+
+    event.preventDefault()
+    event.stopPropagation()
+    onDelete?.(thread)
+  }
 
   return (
-    <div
+    <button
+      type="button"
       className={`${baseClasses} ${stateClasses}`}
+      onClick={() => onSelect(thread)}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(thread)}
+      <div
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
         aria-current={active ? 'page' : undefined}
         title={thread.title}
@@ -42,22 +57,21 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
             {formatRelative(thread.updatedAt)}
           </span>
         )}
-      </button>
+      </div>
       {onDelete ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onDelete(thread)
-          }}
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={handleDeleteClick}
+          onKeyDown={handleDeleteKeyDown}
           aria-label={`Delete thread ${thread.title}`}
           title="Delete thread"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted opacity-0 transition hover:bg-accent-del/10 hover:text-accent-del group-hover:opacity-100 focus:opacity-100"
+          className={`${inactiveButtonClass} opacity-0 group-hover:opacity-100 focus:opacity-100`}
         >
           <TrashIcon />
-        </button>
+        </span>
       ) : null}
-    </div>
+    </button>
   )
 }
 

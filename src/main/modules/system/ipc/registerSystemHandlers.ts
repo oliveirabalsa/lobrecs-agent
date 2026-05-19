@@ -1,20 +1,32 @@
-import { app, dialog, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { listAgentModelCatalogs } from '../../agents/application/listAgentModelCatalogs'
 import { isSupportedAgentId } from '../../agents/domain/isSupportedAgentId'
+import {
+  CLI_EDITOR_TERMINAL_DATA_CHANNEL,
+  CLI_EDITOR_TERMINAL_EXIT_CHANNEL,
+  type CliEditorTerminalEmitter,
+} from '../application/cliEditorTerminal'
+import { cliEditorTerminalService } from '../application/cliEditorTerminalService'
+import { detectEditors } from '../application/detectEditors'
+import { launchEditor } from '../application/launchEditor'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import type {
   AdapterCapability,
   AgentId,
+  CliEditorTerminalResizeInput,
+  CliEditorTerminalSession,
+  CliEditorTerminalStartInput,
+  CliEditorTerminalWriteInput,
+  EditorInfo,
   ImageAttachment,
+  OpenInEditorInput,
   SaveImageAttachmentInput,
   SupportedAgentId,
-  VerificationRecipe,
 } from '../../../../shared/types'
 
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024
 const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -36,13 +48,67 @@ export function registerSystemHandlers(context: MainIpcContext): void {
   })
   ipcMain.handle('system:list-agent-models', async () => listAgentModelCatalogs(context))
   ipcMain.handle('system:list-capabilities', async () => listCapabilities(context))
-  ipcMain.handle('system:list-verification-recipes', async () => verificationRecipes)
+  ipcMain.handle('system:list-verification-recipes', async (_event, projectId?: string) =>
+    context.settingsService.getEffective(projectId).settings.verification.recipes,
+  )
   ipcMain.handle('system:save-image-attachment', async (_event, input: SaveImageAttachmentInput) =>
-    saveImageAttachment(input),
+    saveImageAttachment(
+      input,
+      context.settingsService.getGlobal().agents.imageAttachments.maxSizeMb,
+    ),
+  )
+  ipcMain.handle('system:list-editors', async (): Promise<EditorInfo[]> => {
+    const editors = await detectEditors()
+    return editors.map(({ id, name, kind }) => ({ id, name, kind }))
+  })
+  ipcMain.handle('system:open-in-editor', async (_event, input: OpenInEditorInput) => {
+    await launchEditor(input)
+  })
+  ipcMain.handle(
+    'system:start-cli-editor-terminal',
+    async (event, input: CliEditorTerminalStartInput): Promise<CliEditorTerminalSession> => {
+      return cliEditorTerminalService.start(input, createCliEditorTerminalEmitter(event.sender))
+    },
+  )
+  ipcMain.handle(
+    'system:write-cli-editor-terminal',
+    async (_event, input: CliEditorTerminalWriteInput): Promise<void> => {
+      cliEditorTerminalService.write(input)
+    },
+  )
+  ipcMain.handle(
+    'system:resize-cli-editor-terminal',
+    async (_event, input: CliEditorTerminalResizeInput): Promise<void> => {
+      cliEditorTerminalService.resize(input)
+    },
+  )
+  ipcMain.handle(
+    'system:stop-cli-editor-terminal',
+    async (_event, sessionId: string): Promise<void> => {
+      cliEditorTerminalService.stop(sessionId)
+    },
   )
 }
 
-async function saveImageAttachment(input: SaveImageAttachmentInput): Promise<ImageAttachment> {
+function createCliEditorTerminalEmitter(sender: WebContents): CliEditorTerminalEmitter {
+  return (channel, payload) => {
+    if (
+      channel !== CLI_EDITOR_TERMINAL_DATA_CHANNEL &&
+      channel !== CLI_EDITOR_TERMINAL_EXIT_CHANNEL
+    ) {
+      return
+    }
+
+    if (!sender.isDestroyed()) {
+      sender.send(channel, payload)
+    }
+  }
+}
+
+async function saveImageAttachment(
+  input: SaveImageAttachmentInput,
+  maxSizeMb: number,
+): Promise<ImageAttachment> {
   const parsed = parseImageDataUrl(input.dataUrl, input.mimeType)
   const extension = IMAGE_MIME_EXTENSIONS[parsed.mimeType]
 
@@ -50,7 +116,7 @@ async function saveImageAttachment(input: SaveImageAttachmentInput): Promise<Ima
     throw new Error('Unsupported image type')
   }
 
-  if (parsed.buffer.length === 0 || parsed.buffer.length > MAX_IMAGE_BYTES) {
+  if (parsed.buffer.length === 0 || parsed.buffer.length > maxSizeMb * 1024 * 1024) {
     throw new Error('Image attachment is too large')
   }
 
@@ -147,34 +213,3 @@ function capabilityFlags(
     supportsModelListing: true,
   }
 }
-
-const verificationRecipes: VerificationRecipe[] = [
-  {
-    id: 'build',
-    label: 'Build',
-    command: 'rtk npm run build',
-    scope: 'build',
-    description: 'Type-check and build production assets.',
-  },
-  {
-    id: 'test',
-    label: 'Tests',
-    command: 'rtk npm test',
-    scope: 'test',
-    description: 'Run the Vitest suite.',
-  },
-  {
-    id: 'lint',
-    label: 'Lint',
-    command: 'rtk npm run lint',
-    scope: 'lint',
-    description: 'Run project linting when a lint script exists.',
-  },
-  {
-    id: 'ui-check',
-    label: 'UI Check',
-    command: 'rtk npm run preview',
-    scope: 'ui',
-    description: 'Launch a preview build for manual or browser signoff.',
-  },
-]

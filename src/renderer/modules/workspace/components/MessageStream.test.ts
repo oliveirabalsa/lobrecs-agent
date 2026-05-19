@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { StreamItem } from '../lib/groupTurns'
-import { shouldPinMessageStream, splitFinalAssistant } from './MessageStream'
+import {
+  flattenCodeChangeFallbacks,
+  shouldPinMessageStream,
+  splitFinalAssistant,
+} from './MessageStream'
 
 describe('shouldPinMessageStream', () => {
   it('forces pinning while a run is active even if the user was not sticky', () => {
@@ -69,5 +73,64 @@ describe('splitFinalAssistant', () => {
     expect(result.finalAssistantText).toBe('summary')
     expect(result.renderable).toEqual([])
     expect(result.trailingCodeChanges).toHaveLength(1)
+  })
+})
+
+describe('flattenCodeChangeFallbacks', () => {
+  it('flattens grouped and standalone code changes with last path metadata winning', () => {
+    const items: StreamItem[] = [
+      {
+        kind: 'file-change',
+        filePath: 'src/a.ts',
+        changeType: 'modified',
+        additions: 2,
+        deletions: 1,
+        status: 'pending',
+      },
+      {
+        kind: 'edited-files-group',
+        id: 'turn-1-edits-1',
+        items: [
+          {
+            kind: 'file-change',
+            filePath: 'src/b.ts',
+            changeType: 'added',
+            additions: 8,
+            deletions: 0,
+            status: 'pending',
+          },
+          {
+            kind: 'file-change',
+            filePath: 'src/a.ts',
+            changeType: 'deleted',
+            additions: 0,
+            deletions: 12,
+            status: 'pending',
+          },
+        ],
+      },
+      {
+        kind: 'diff-summary',
+        filesChanged: 2,
+        additions: 8,
+        deletions: 12,
+        summary: '2 files changed',
+      },
+    ]
+
+    expect(flattenCodeChangeFallbacks(items)).toEqual([
+      {
+        filePath: 'src/a.ts',
+        changeType: 'deleted',
+        additions: 0,
+        deletions: 12,
+      },
+      {
+        filePath: 'src/b.ts',
+        changeType: 'added',
+        additions: 8,
+        deletions: 0,
+      },
+    ])
   })
 })

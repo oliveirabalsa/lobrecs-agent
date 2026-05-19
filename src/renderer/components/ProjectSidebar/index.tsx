@@ -3,7 +3,7 @@ import type { Project, Session } from '../../../shared/types'
 import { NewProjectModal } from './NewProjectModal'
 import { ProjectItem } from './ProjectItem'
 
-const logoUrl = new URL('../../assets/lobrecs-agent-logo.svg', import.meta.url).href
+const logoUrl = new URL('../../assets/lobrecs-agent-logo.png', import.meta.url).href
 
 interface Props {
   selectedProjectId: string | null

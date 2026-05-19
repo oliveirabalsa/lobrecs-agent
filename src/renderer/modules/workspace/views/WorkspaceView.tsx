@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type {
+  AgentId,
   ApprovalRequest,
   DiffProposal,
+  EditorInfo,
   Project,
+  QueuedMessage,
   SessionStatus,
 } from '../../../../shared/types'
 import { DiffViewer } from '../../../components/DiffViewer'
@@ -15,8 +18,16 @@ import {
   type StartedSessionSummary,
 } from '../../sessions'
 import { SwarmBuilder } from '../../swarms'
+import { useSettings } from '../../settings'
+import {
+  BottomTerminalPanel,
+  createTerminalTab,
+  type TerminalTab,
+} from '../components/BottomTerminalPanel'
+import { resolveBottomTerminalOpenAction } from '../components/bottomTerminalPanelState'
 import { Composer } from '../components/Composer'
 import { ProjectContextDialog } from '../components/ProjectContextDialog'
+import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import type { MainView } from '../hooks/useWorkspaceController'
@@ -66,12 +77,19 @@ interface WorkspaceViewProps {
     }>
   }) => void
   onOpenSidebar?: () => void
+  /** Pending queued messages for the active thread. */
+  pendingQueue: QueuedMessage[]
+  onEnqueue: (
+    prompt: string,
+    agentId?: AgentId,
+    modelOverride?: string,
+  ) => void | Promise<void>
+  onSteer: (prompt: string) => void | Promise<void>
+  onRemoveQueueItem: (messageId: string) => void | Promise<void>
+  onClearQueue: () => void | Promise<void>
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
-
-const RIGHT_PANEL_OPEN_KEY = 'workspace.rightPanelOpen'
-const RIGHT_PANEL_MODE_KEY = 'workspace.rightPanelMode'
 
 function safeStorage(): Storage | null {
   try {
@@ -82,15 +100,27 @@ function safeStorage(): Storage | null {
   }
 }
 
-function readPanelOpen(): boolean {
-  const ls = safeStorage()
-  if (!ls) return false
-  return ls.getItem(RIGHT_PANEL_OPEN_KEY) === '1'
+function rightPanelOpenKey(threadId: string | null): string {
+  return threadId ? `workspace.rightPanelOpen.${threadId}` : 'workspace.rightPanelOpen'
 }
 
-function readPanelMode(): RightPanelMode {
+function rightPanelModeKey(threadId: string | null): string {
+  return threadId ? `workspace.rightPanelMode.${threadId}` : 'workspace.rightPanelMode'
+}
+
+function readPanelOpen(threadId: string | null, fallback = false): boolean {
   const ls = safeStorage()
-  const value = ls?.getItem(RIGHT_PANEL_MODE_KEY)
+  if (!ls) return fallback
+  const key = rightPanelOpenKey(threadId)
+  if (ls.getItem(key) === null) return fallback
+  return ls.getItem(key) === '1'
+}
+
+function readPanelMode(threadId: string | null, fallback: RightPanelMode = 'diff'): RightPanelMode {
+  const ls = safeStorage()
+  const key = rightPanelModeKey(threadId)
+  const value = ls?.getItem(key)
+  if (value === null || value === undefined) return fallback
   return value === 'terminal' ? 'terminal' : 'diff'
 }
 
@@ -123,14 +153,39 @@ export function WorkspaceView({
   onProjectUpdated,
   onSwarmStarted,
   onOpenSidebar,
+  pendingQueue,
+  onEnqueue,
+  onSteer,
+  onRemoveQueueItem,
+  onClearQueue,
 }: WorkspaceViewProps) {
-  const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() => readPanelOpen())
-  const [rightPanelMounted, setRightPanelMounted] = useState<boolean>(() => readPanelOpen())
-  const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() => readPanelMode())
+  const { globalSettings } = useSettings()
+  const activeThreadId = activeSession?.threadId ?? null
+  const activeThreadIdRef = useRef(activeThreadId)
+  activeThreadIdRef.current = activeThreadId
+
+  const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() =>
+    readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false),
+  )
+  const [rightPanelMounted, setRightPanelMounted] = useState<boolean>(() =>
+    readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false),
+  )
+  const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() =>
+    readPanelMode(activeThreadId, globalSettings?.ui.rightPanelDefaultMode ?? 'diff'),
+  )
   const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
+  const [contextPercent, setContextPercent] = useState<number | null>(null)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
+  const [bottomPanelOpen, setBottomPanelOpen] = useState(false)
+  const [bottomPanelFullscreen, setBottomPanelFullscreen] = useState(false)
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(
+    () => globalSettings?.ui.terminalDefaultHeight ?? 260,
+  )
+  const terminalCountRef = useRef(0)
+  const bottomPanelAddTabRef = useRef<((tab: TerminalTab) => void) | null>(null)
+  const [bottomPanelInitialTab, setBottomPanelInitialTab] = useState<TerminalTab | null>(null)
 
   // Keep the right panel mounted while opening, and during the close animation
   // so `data-state="closed"` exit keyframes can play before unmount.
@@ -138,18 +193,53 @@ export function WorkspaceView({
     if (rightPanelOpen) setRightPanelMounted(true)
   }, [rightPanelOpen])
 
-  // Persist panel state.
+  // Restore per-thread panel state when switching threads.
+  useEffect(() => {
+    const open = readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false)
+    setRightPanelOpenState(open)
+    setRightPanelMounted(open)
+    setRightPanelModeState(
+      readPanelMode(activeThreadId, globalSettings?.ui.rightPanelDefaultMode ?? 'diff'),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeThreadId])
+
+  useEffect(() => {
+    const ls = safeStorage()
+    if (ls?.getItem(rightPanelOpenKey(activeThreadIdRef.current)) !== null) return
+    const defaultOpen = globalSettings?.ui.rightPanelDefaultOpen
+    if (defaultOpen === undefined) return
+    setRightPanelOpenState(defaultOpen)
+    setRightPanelMounted(defaultOpen)
+  }, [globalSettings?.ui.rightPanelDefaultOpen])
+
+  useEffect(() => {
+    const ls = safeStorage()
+    if (ls?.getItem(rightPanelModeKey(activeThreadIdRef.current)) !== null) return
+    const defaultMode = globalSettings?.ui.rightPanelDefaultMode
+    if (!defaultMode) return
+    setRightPanelModeState(defaultMode)
+  }, [globalSettings?.ui.rightPanelDefaultMode])
+
+  useEffect(() => {
+    const defaultHeight = globalSettings?.ui.terminalDefaultHeight
+    if (!defaultHeight || bottomPanelOpen) return
+    setBottomPanelHeight(defaultHeight)
+  }, [bottomPanelOpen, globalSettings?.ui.terminalDefaultHeight])
+
+  // Persist panel state per thread.
   useEffect(() => {
     const ls = safeStorage()
     if (!ls) return
-    if (rightPanelOpen) ls.setItem(RIGHT_PANEL_OPEN_KEY, '1')
-    else ls.removeItem(RIGHT_PANEL_OPEN_KEY)
+    const key = rightPanelOpenKey(activeThreadIdRef.current)
+    if (rightPanelOpen) ls.setItem(key, '1')
+    else ls.removeItem(key)
   }, [rightPanelOpen])
 
   useEffect(() => {
     const ls = safeStorage()
     if (!ls) return
-    ls.setItem(RIGHT_PANEL_MODE_KEY, rightPanelMode)
+    ls.setItem(rightPanelModeKey(activeThreadIdRef.current), rightPanelMode)
   }, [rightPanelMode])
 
   // If diff disappears while diff is selected, fall back to terminal.
@@ -158,16 +248,6 @@ export function WorkspaceView({
       setRightPanelModeState('terminal')
     }
   }, [diffProposals.length, rightPanelMode, rightPanelOpen])
-
-  // Auto-open the right panel the first time diffs land in a session.
-  useEffect(() => {
-    if (diffProposals.length > 0 && !rightPanelOpen) {
-      setRightPanelOpenState(true)
-      setRightPanelModeState('diff')
-    }
-    // Only react to diff appearance, not panel state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffProposals.length > 0])
 
   const handleToggleRightPanel = useCallback(
     (mode: RightPanelMode) => {
@@ -190,6 +270,51 @@ export function WorkspaceView({
     setRightPanelModeState('diff')
     setFocusFilePath(filePath ?? null)
   }, [])
+
+  useEffect(() => {
+    setBottomPanelOpen(false)
+    setBottomPanelFullscreen(false)
+    setBottomPanelInitialTab(null)
+    terminalCountRef.current = 0
+  }, [selectedProject?.repoPath])
+
+  useEffect(() => {
+    setContextPercent(null)
+  }, [activeSessionId])
+
+  const handleOpenCliEditor = useCallback(
+    (editor: EditorInfo) => {
+      if (!selectedProject?.repoPath) return
+
+      const action = resolveBottomTerminalOpenAction({
+        hasPanel: Boolean(bottomPanelInitialTab),
+        panelOpen: bottomPanelOpen,
+        canAddTab: Boolean(bottomPanelAddTabRef.current),
+      })
+
+      if (action === 'show-existing-panel') {
+        setBottomPanelOpen(true)
+        return
+      }
+
+      terminalCountRef.current += 1
+      const tab = createTerminalTab(
+        editor.id,
+        editor.name,
+        selectedProject.repoPath,
+        terminalCountRef.current,
+      )
+
+      if (action === 'add-tab') {
+        bottomPanelAddTabRef.current?.(tab)
+        return
+      }
+
+      setBottomPanelInitialTab(tab)
+      setBottomPanelOpen(true)
+    },
+    [selectedProject?.repoPath, bottomPanelInitialTab, bottomPanelOpen],
+  )
 
   const titleForTopBar = activeSession?.prompt?.trim()
     ? activeSession.prompt.trim().slice(0, 80)
@@ -215,6 +340,8 @@ export function WorkspaceView({
               onDelete={activeSession?.threadId ? onDeleteThread : undefined}
               reserveTrafficLightInset={isMac}
               onOpenSidebar={onOpenSidebar}
+              repoPath={selectedProject?.repoPath}
+              onOpenCliEditor={handleOpenCliEditor}
             />
 
             <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-canvas px-3 py-1.5">
@@ -249,7 +376,8 @@ export function WorkspaceView({
             ) : null}
 
             <div className="relative flex min-h-0 flex-1 overflow-hidden">
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {mainView === 'workspace' ? (
                   <>
                     {activeSessionId ? (
@@ -295,12 +423,25 @@ export function WorkspaceView({
                           onRejectApproval={onRejectApproval}
                           onSessionStarted={onSessionStarted}
                           onReviewFile={openDiffPanel}
+                          onContextPercent={setContextPercent}
                         />
                       ) : (
                         <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
                           <WorkspaceEmpty projectName={selectedProject.name} />
                         </div>
                       )}
+
+                      {activeSession?.threadId ? (
+                        <div className="shrink-0 px-3 sm:px-4">
+                          <div className="mx-auto w-full max-w-[820px]">
+                            <QueueBanner
+                              messages={pendingQueue}
+                              onRemove={onRemoveQueueItem}
+                              onClearAll={onClearQueue}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div className="shrink-0 border-t border-hairline px-3 sm:px-4">
                         <div className="mx-auto w-full max-w-[820px]">
@@ -314,10 +455,44 @@ export function WorkspaceView({
                             prefillPrompt={prefillPrompt}
                             onCancelSession={onCancelSession}
                             onSessionStarted={onSessionStarted}
+                            contextPercent={contextPercent}
                             hasProjectContext={Boolean(selectedProject.context?.trim())}
                             onContextClick={() => setContextDialogOpen(true)}
+                            onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
+                            onSteer={busy && activeSessionId ? onSteer : undefined}
                           />
                         </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center justify-center gap-1 border-t border-hairline/50 px-3 py-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (bottomPanelOpen && bottomPanelInitialTab) {
+                              setBottomPanelOpen(false)
+                            } else {
+                              handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
+                            }
+                          }}
+                          className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
+                            bottomPanelOpen
+                              ? 'bg-white/10 text-secondary'
+                              : 'text-muted hover:bg-white/5 hover:text-secondary'
+                          }`}
+                          title="Toggle terminal"
+                        >
+                          <QuickTerminalIcon />
+                          <span>Terminal</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
+                          className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
+                          title="Open Vim"
+                        >
+                          <QuickVimIcon />
+                          <span>Vim</span>
+                        </button>
                       </div>
                     </div>
                   </>
@@ -326,6 +501,42 @@ export function WorkspaceView({
                 ) : (
                   <AutomationManager project={selectedProject} />
                 )}
+
+                </div>
+
+                {bottomPanelInitialTab ? (
+                  <BottomTerminalPanel
+                    key={bottomPanelInitialTab.id}
+                    initialTab={bottomPanelInitialTab}
+                    visible={bottomPanelOpen}
+                    fullscreen={bottomPanelFullscreen}
+                    height={bottomPanelHeight}
+                    onHeightChange={setBottomPanelHeight}
+                    onFullscreenChange={setBottomPanelFullscreen}
+                    onClosePanel={() => {
+                      setBottomPanelOpen(false)
+                      setBottomPanelFullscreen(false)
+                    }}
+                    onEmpty={() => {
+                      setBottomPanelFullscreen(false)
+                      setBottomPanelOpen(false)
+                      setBottomPanelInitialTab(null)
+                      terminalCountRef.current = 0
+                    }}
+                    onNewTerminal={() => {
+                      if (!selectedProject?.repoPath) return
+                      terminalCountRef.current += 1
+                      const tab = createTerminalTab(
+                        'shell',
+                        'Terminal',
+                        selectedProject.repoPath,
+                        terminalCountRef.current,
+                      )
+                      bottomPanelAddTabRef.current?.(tab)
+                    }}
+                    addTabRef={bottomPanelAddTabRef}
+                  />
+                ) : null}
               </div>
 
               {mainView === 'workspace' && rightPanelMounted ? (
@@ -541,3 +752,21 @@ const iconMinimize = (
     <path d="M13.5 10 10 13.5" strokeLinecap="round" />
   </svg>
 )
+
+function QuickTerminalIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  )
+}
+
+function QuickVimIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2L22 12L12 22L2 12Z" />
+      <path d="M9 10L12 14.5L15 10" />
+    </svg>
+  )
+}

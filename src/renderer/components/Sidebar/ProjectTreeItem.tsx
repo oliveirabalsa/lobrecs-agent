@@ -62,22 +62,33 @@ export function ProjectTreeItem({
     if (onContextMenu) onContextMenu(event, project)
   }
 
-  const rowBase =
-    'group flex h-8 w-full items-center gap-1.5 rounded-card pl-1.5 pr-2 transition-colors'
-  const rowState = selected
-    ? 'bg-white/8 text-primary'
-    : 'text-secondary hover:bg-white/5 hover:text-primary'
-
   const allThreads = threads ?? []
   const overLimit = allThreads.length > COLLAPSED_THREAD_LIMIT
   const visibleThreads = overLimit && !showAll
     ? allThreads.slice(0, COLLAPSED_THREAD_LIMIT)
     : allThreads
   const hiddenCount = overLimit && !showAll ? allThreads.length - COLLAPSED_THREAD_LIMIT : 0
+  const rowBase =
+    'group flex h-8 w-full items-center gap-1.5 rounded-card pl-1.5 pr-2 transition-colors cursor-pointer'
+  const rowState = selected
+    ? 'bg-white/8 text-primary'
+    : 'text-secondary hover:bg-white/5 hover:text-primary'
 
   return (
     <div className="flex flex-col">
-      <div className={`${rowBase} ${rowState}`} onContextMenu={handleContextMenu}>
+      <div
+        className={`${rowBase} ${rowState}`}
+        onContextMenu={handleContextMenu}
+        onClick={handleRowClick}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            handleRowClick()
+          }
+        }}
+      >
         <button
           type="button"
           onClick={handleChevronClick}
@@ -86,9 +97,7 @@ export function ProjectTreeItem({
         >
           <ChevronIcon open={expanded} />
         </button>
-        <button
-          type="button"
-          onClick={handleRowClick}
+        <div
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={project.repoPath}
         >
@@ -96,7 +105,7 @@ export function ProjectTreeItem({
           <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
             {project.name}
           </span>
-        </button>
+        </div>
         {onNewChat ? (
           <button
             type="button"
@@ -152,7 +161,7 @@ export function ProjectTreeItem({
                 <button
                   type="button"
                   onClick={() => setShowAll((value) => !value)}
-                  className="mt-0.5 self-start rounded px-2 py-1 text-[11px] text-muted hover:text-primary"
+                  className="mt-0.5 self-start rounded px-2 py-1 text-[10px] text-muted hover:text-primary cursor-pointer"
                 >
                   {showAll ? 'Show less' : `Show more (${hiddenCount})`}
                 </button>

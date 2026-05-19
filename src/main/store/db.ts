@@ -179,6 +179,24 @@ const migrations: Migration[] = [
       UPDATE spec_runs SET mode = 'local' WHERE mode <> 'local';
     `,
   },
+  {
+    version: 5,
+    up: `
+      CREATE TABLE IF NOT EXISTS app_settings (
+        id         TEXT PRIMARY KEY CHECK(id = 'global'),
+        value      TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS project_settings (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        value      TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {

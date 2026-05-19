@@ -6,7 +6,8 @@ import {
   renderStreamItem,
   type RendererContext,
 } from '../lib/activityRenderers'
-import { CompletionFooter } from './artifacts'
+import { CompletionFooter, EditedFilesCard } from './artifacts'
+import type { EditedFilesCardProps } from './artifacts'
 import { AssistantMessage } from './AssistantMessage'
 import { UserMessage } from './UserMessage'
 import { WorkingState } from './WorkingState'
@@ -33,6 +34,8 @@ interface AutoPinState {
   running: boolean
   sticky: boolean
 }
+
+type CodeChangeFallback = NonNullable<EditedFilesCardProps['fallbackFiles']>[number]
 
 export function shouldPinMessageStream({
   loading,
@@ -62,6 +65,37 @@ function pinToBottom(element: HTMLElement): () => void {
 
   cleanup = () => window.cancelAnimationFrame(firstFrame)
   return () => cleanup()
+}
+
+export function flattenCodeChangeFallbacks(
+  items: readonly StreamItem[],
+): CodeChangeFallback[] {
+  const files = new Map<string, CodeChangeFallback>()
+
+  for (const item of items) {
+    if (item.kind === 'file-change') {
+      files.set(item.filePath, {
+        filePath: item.filePath,
+        additions: item.additions,
+        deletions: item.deletions,
+        changeType: item.changeType,
+      })
+      continue
+    }
+
+    if (item.kind === 'edited-files-group') {
+      for (const change of item.items) {
+        files.set(change.filePath, {
+          filePath: change.filePath,
+          additions: change.additions,
+          deletions: change.deletions,
+          changeType: change.changeType,
+        })
+      }
+    }
+  }
+
+  return [...files.values()]
 }
 
 /**
@@ -295,13 +329,12 @@ function TurnBlock({
         <AssistantMessage text={finalAssistantText} showActions={isLast && !running} />
       ) : null}
 
-      {trailingCodeChanges.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          {trailingCodeChanges.map((item, idx) =>
-            renderStreamItem(item, `${turn.id}-code-${idx}`, ctx),
-          )}
-        </div>
-      ) : null}
+      <TrailingEditedFilesCard
+        turn={turn}
+        isLast={isLast}
+        ctx={ctx}
+        trailingCodeChanges={trailingCodeChanges}
+      />
 
       {hasCompletionMetrics ? (
         <CompletionFooter
@@ -313,6 +346,51 @@ function TurnBlock({
       ) : null}
     </section>
   )
+}
+
+function TrailingEditedFilesCard({
+  turn,
+  isLast,
+  ctx,
+  trailingCodeChanges,
+}: {
+  turn: Turn
+  isLast: boolean
+  ctx: RendererContext
+  trailingCodeChanges: StreamItem[]
+}) {
+  const liveProposals = ctx.diffProposals ?? []
+  const fallbackFiles = flattenCodeChangeFallbacks(trailingCodeChanges)
+
+  if (fallbackFiles.length > 0) {
+    const fallbackPaths = new Set(fallbackFiles.map((file) => file.filePath))
+    const proposals = liveProposals.filter((proposal) =>
+      fallbackPaths.has(proposal.filePath),
+    )
+    const hasProposalForEveryFallback = fallbackFiles.every((file) =>
+      proposals.some((proposal) => proposal.filePath === file.filePath),
+    )
+    const visibleProposals = hasProposalForEveryFallback ? proposals : []
+
+    return (
+      <EditedFilesCard
+        proposals={visibleProposals}
+        fallbackFiles={fallbackFiles}
+        onReview={visibleProposals.length > 0 ? ctx.onReviewFile : undefined}
+      />
+    )
+  }
+
+  if (isLast && turn.completion !== undefined && liveProposals.length > 0) {
+    return (
+      <EditedFilesCard
+        proposals={liveProposals}
+        onReview={ctx.onReviewFile}
+      />
+    )
+  }
+
+  return null
 }
 
 interface FinalAssistantSplit {

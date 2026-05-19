@@ -10,6 +10,7 @@ import { registerProjectHandlers } from '../modules/projects/ipc/registerProject
 import { registerRoutingHandlers } from '../modules/routing/ipc/registerRoutingHandlers'
 import { registerRunHandlers } from '../modules/runs/ipc/registerRunHandlers'
 import { registerSessionHandlers } from '../modules/sessions/ipc/registerSessionHandlers'
+import { registerSettingsHandlers, settingsService } from '../modules/settings'
 import type { MainIpcContext } from '../modules/shared/ipcContext'
 import { registerSpecHandlers } from '../modules/specs/ipc/registerSpecHandlers'
 import { registerSwarmHandlers } from '../modules/swarms/ipc/registerSwarmHandlers'
@@ -20,7 +21,10 @@ import { sessionManager } from '../session'
 import { projectsStore, threadsStore } from '../store'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
 
-const modelRouter = new ModelRouter({ adapterRegistry })
+const modelRouter = new ModelRouter({
+  adapterRegistry,
+  settingsProvider: (projectId) => settingsService.getEffective(projectId).settings,
+})
 
 export function registerIpcHandlers(): void {
   const context = createMainIpcContext()
@@ -40,6 +44,7 @@ export function registerIpcHandlers(): void {
   registerSpecHandlers()
   registerRunHandlers(context)
   registerGitHandlers()
+  registerSettingsHandlers(context)
   registerSystemHandlers(context)
 }
 
@@ -48,6 +53,7 @@ function createMainIpcContext(): MainIpcContext {
     adapters: adapterRegistry,
     modelRouter,
     sessionManager,
+    settingsService,
     swarmOrchestrator,
     worktreeManager,
   }
@@ -57,7 +63,9 @@ function configureSessionManager(context: MainIpcContext): void {
   for (const adapter of context.adapters.values()) {
     context.sessionManager.registerAdapter(adapter)
   }
-  context.sessionManager.setCostEstimator(estimateCost)
+  context.sessionManager.setCostEstimator((model, tokensIn, tokensOut) =>
+    estimateCost(model, tokensIn, tokensOut, context.settingsService.getGlobal().costs.pricing),
+  )
 }
 
 function configureSwarmOrchestrator(context: MainIpcContext): void {
@@ -66,6 +74,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
     createThread: (input) => threadsStore.create(input),
     routeModel: (input) => context.modelRouter.route(input),
     dispatchSession: async (input) => {
+      const settings = context.settingsService.getEffective(input.projectId).settings
       const { sessionId, threadId } = await context.sessionManager.dispatch({
         projectId: input.projectId,
         threadId: input.threadId,
@@ -74,12 +83,14 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         model: input.model,
         repoPath: input.repoPath,
         context: projectsStore.getContext(input.projectId),
-        isolate: false,
+        isolate: settings.execution.worktreeIsolation,
+        runtimeSettings: settings.agents.runtimes[input.agentId],
       })
 
       return { sessionId, threadId, status: 'running' }
     },
     cancelSession: (sessionId) => context.sessionManager.cancel(sessionId),
     worktrees: context.worktreeManager,
+    getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
   })
 }

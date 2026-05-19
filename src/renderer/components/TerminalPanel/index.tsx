@@ -70,7 +70,7 @@ export function TerminalPanel({
         magenta: '#c084fc',
         white: '#f4f4f5',
       },
-      fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+      fontFamily: 'JetBrainsMono Nerd Font, JetBrains Mono NF, JetBrains Mono, MesloLGS NF, Hack Nerd Font, FiraCode Nerd Font, Menlo, Monaco, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.45,
       cursorBlink: false,

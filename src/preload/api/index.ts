@@ -8,6 +8,7 @@ import { createGitApi, type GitApi } from './git'
 import { createProjectsApi, type ProjectsApi } from './projects'
 import { createRouterApi, type RouterApi } from './routing'
 import { createRunsApi, type RunsApi } from './runs'
+import { createSettingsApi, type SettingsApi } from './settings'
 import { createSessionsApi, type SessionsApi } from './sessions'
 import { createSpecsApi, type SpecsApi } from './specs'
 import { createSwarmApi, type SwarmApi } from './swarms'
@@ -27,6 +28,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   specs: SpecsApi
   runs: RunsApi
   git: GitApi
+  settings: SettingsApi
   system: SystemApi
 }
 
@@ -46,6 +48,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     specs: createSpecsApi(ipcRenderer),
     runs: createRunsApi(ipcRenderer),
     git: createGitApi(ipcRenderer),
+    settings: createSettingsApi(ipcRenderer),
     on: events.on,
     onShortcut: events.onShortcut,
     system: createSystemApi(ipcRenderer),

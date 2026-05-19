@@ -3,16 +3,22 @@ import type {
   Project,
   RoutingDecision,
   SessionStatus,
+  AppSettings,
   SupportedAgentId,
   SwarmAgentConfig,
   SwarmConfig,
   SwarmResult,
 } from '../../shared/types'
 import { worktreeManager, type WorktreeManager } from '../git/WorktreeManager'
+import { DEFAULT_APP_SETTINGS, settingsService } from '../modules/settings'
 import { modelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore, sessionsStore, threadsStore } from '../store'
 import type { PlanPromptOutcome } from './planPrompt'
+import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
+
+const DEFAULT_REVIEW_LOOP_MAX_ITERATIONS = 3
+const REVIEW_LOOP_HARD_CAP = 10
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -37,6 +43,7 @@ export interface SwarmDispatchResult {
 }
 
 export interface SwarmRouteInput {
+  projectId: string
   prompt: string
   preferredAgentId: SupportedAgentId
   modelOverride?: string
@@ -71,6 +78,7 @@ export interface SwarmOrchestratorDependencies {
   waitForSessionCompletion?: (sessionId: string) => MaybePromise<SwarmCompletionResult>
   cancelSession?: (sessionId: string) => MaybePromise<void>
   worktrees?: Pick<WorktreeManager, 'remove'>
+  getSettings?: (projectId: string) => MaybePromise<AppSettings>
   /**
    * Optional plan-prompt round-trip for flows that explicitly need an extra
    * confirmation. Manual Swarm Builder launches already confirm intent in the
@@ -103,11 +111,12 @@ export class SwarmOrchestrator {
   }
 
   async spawn(config: SwarmConfig): Promise<SwarmResult> {
-    validateConfig(config)
-
     const dependencies = this.requireDependencies()
     const project = await dependencies.getProject(config.projectId)
     if (!project) throw new Error(`Project not found: ${config.projectId}`)
+    const settings = await dependencies.getSettings(config.projectId)
+
+    validateConfig(config, settings)
 
     await this.confirmPlanOrThrow(config)
 
@@ -132,7 +141,13 @@ export class SwarmOrchestrator {
     if (config.strategy === 'parallel') {
       result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId, threadId)
     } else if (config.strategy === 'sequential') {
-      result.sessions = await this.spawnSequential(config, project.repoPath, result.swarmId, threadId)
+      result.sessions = await this.spawnSequential(
+        config,
+        project.repoPath,
+        result.swarmId,
+        threadId,
+        settings,
+      )
     } else {
       result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId, threadId)
     }
@@ -234,6 +249,7 @@ export class SwarmOrchestrator {
     repoPath: string,
     swarmId: string,
     threadId: string,
+    settings: AppSettings,
   ): Promise<SpawnedSession[]> {
     const [firstAgent, ...remainingAgents] = config.agents
     if (!firstAgent) return []
@@ -253,8 +269,13 @@ export class SwarmOrchestrator {
       projectId: config.projectId,
       repoPath,
       basePrompt: config.prompt,
+      maxIterations: clampReviewLoopIterations(
+        config.maxIterations,
+        settings.swarms.maxReviewerIterations,
+      ),
       remainingAgents,
       previousSession: firstSession,
+      previousAgentConfig: firstAgent,
     }).catch(() => {
       const swarm = this.swarms.get(swarmId)
       const lastSession = swarm?.sessions.at(-1)
@@ -275,17 +296,80 @@ export class SwarmOrchestrator {
     return this.spawnParallel(config, repoPath, swarmId, threadId)
   }
 
+  private async runReviewCycle(input: {
+    swarmId: string
+    threadId: string
+    projectId: string
+    repoPath: string
+    basePrompt: string
+    implementerConfig: SwarmAgentConfig
+    reviewerConfig: SwarmAgentConfig
+    maxIterations: number
+    implementerOutput: string
+  }): Promise<void> {
+    let implementerOutput = input.implementerOutput
+
+    for (let iteration = 1; iteration <= input.maxIterations; iteration += 1) {
+      if (!this.swarms.has(input.swarmId)) return
+
+      const reviewer = await this.spawnAgent({
+        agentConfig: input.reviewerConfig,
+        basePrompt: input.basePrompt,
+        projectId: input.projectId,
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        previousOutput: implementerOutput,
+        contextLabel: 'Implementation to review',
+        extraInstruction: VERDICT_INSTRUCTION,
+      })
+
+      this.swarms.get(input.swarmId)?.sessions.push(reviewer)
+
+      const reviewerCompletion = await this.waitForCompletion(reviewer)
+      reviewer.status = reviewerCompletion.status
+      if (reviewerCompletion.status !== 'done') return
+      if (!this.swarms.has(input.swarmId)) return
+
+      const parsed = parseReviewerVerdict(reviewerCompletion.output)
+      if (parsed.verdict === 'approved') return
+      if (iteration === input.maxIterations) return
+
+      const implementer = await this.spawnAgent({
+        agentConfig: input.implementerConfig,
+        basePrompt: input.basePrompt,
+        projectId: input.projectId,
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        previousOutput: parsed.feedback ?? reviewerCompletion.output ?? '',
+        contextLabel: 'Reviewer feedback to address',
+      })
+
+      this.swarms.get(input.swarmId)?.sessions.push(implementer)
+
+      const implementerCompletion = await this.waitForCompletion(implementer)
+      implementer.status = implementerCompletion.status
+      if (implementerCompletion.status !== 'done') return
+
+      implementerOutput = implementerCompletion.output ?? implementerOutput
+    }
+  }
+
   private async continueSequentialSwarm(input: {
     swarmId: string
     threadId: string
     projectId: string
     repoPath: string
     basePrompt: string
+    maxIterations: number
     remainingAgents: SwarmAgentConfig[]
     previousSession: SpawnedSession
+    previousAgentConfig: SwarmAgentConfig
   }): Promise<void> {
     let previousSession = input.previousSession
     let previousOutput = previousSession.output ?? ''
+    let previousAgentConfig = input.previousAgentConfig
 
     for (const agentConfig of input.remainingAgents) {
       if (!this.swarms.has(input.swarmId)) return
@@ -295,6 +379,21 @@ export class SwarmOrchestrator {
       if (completion.output?.trim()) previousOutput = completion.output
       if (completion.status !== 'done') return
       if (!this.swarms.has(input.swarmId)) return
+
+      if (isReviewerRole(agentConfig.role)) {
+        await this.runReviewCycle({
+          swarmId: input.swarmId,
+          threadId: input.threadId,
+          projectId: input.projectId,
+          repoPath: input.repoPath,
+          basePrompt: input.basePrompt,
+          implementerConfig: previousAgentConfig,
+          reviewerConfig: agentConfig,
+          maxIterations: input.maxIterations,
+          implementerOutput: previousOutput,
+        })
+        return
+      }
 
       const nextSession = await this.spawnAgent({
         agentConfig,
@@ -308,6 +407,7 @@ export class SwarmOrchestrator {
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
       previousSession = nextSession
+      previousAgentConfig = agentConfig
       previousOutput = nextSession.output ?? previousOutput
     }
 
@@ -323,6 +423,8 @@ export class SwarmOrchestrator {
     swarmId: string
     threadId: string
     previousOutput?: string
+    contextLabel?: string
+    extraInstruction?: string
     imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
@@ -331,9 +433,11 @@ export class SwarmOrchestrator {
       input.basePrompt,
       input.agentConfig,
       input.previousOutput,
+      { contextLabel: input.contextLabel, extraInstruction: input.extraInstruction },
     )
 
     const decision = await dependencies.routeModel({
+      projectId: input.projectId,
       prompt,
       preferredAgentId: input.agentConfig.agentId,
       modelOverride: input.agentConfig.modelOverride,
@@ -396,12 +500,13 @@ export class SwarmOrchestrator {
         this.dependencies.waitForSessionCompletion ?? (() => ({ status: 'running' })),
       cancelSession: this.dependencies.cancelSession ?? (() => undefined),
       worktrees: this.dependencies.worktrees ?? worktreeManager,
+      getSettings: this.dependencies.getSettings ?? (() => DEFAULT_APP_SETTINGS),
       confirmPlan: this.dependencies.confirmPlan,
     }
   }
 }
 
-function validateConfig(config: SwarmConfig): void {
+function validateConfig(config: SwarmConfig, settings: AppSettings): void {
   if (!config.projectId.trim()) throw new Error('Swarm projectId is required')
   if (config.threadId !== undefined && !config.threadId.trim()) {
     throw new Error('Swarm threadId must be a non-empty string when provided')
@@ -411,7 +516,9 @@ function validateConfig(config: SwarmConfig): void {
     throw new Error(`Unsupported swarm strategy: ${config.strategy}`)
   }
   if (config.agents.length === 0) throw new Error('At least one swarm agent is required')
-  if (config.agents.length > 8) throw new Error('Swarm agent limit is 8')
+  if (config.agents.length > settings.swarms.maxAgents) {
+    throw new Error(`Swarm agent limit is ${settings.swarms.maxAgents}`)
+  }
 
   for (const [index, agent] of config.agents.entries()) {
     if (!agent.role.trim()) throw new Error(`Agent ${index + 1} role is required`)
@@ -425,22 +532,45 @@ function buildSwarmThreadTitle(config: SwarmConfig): string {
   return title.slice(0, 200)
 }
 
+function isReviewerRole(role: string): boolean {
+  return /\breview/i.test(role)
+}
+
 function buildAgentPrompt(
   basePrompt: string,
   agentConfig: SwarmAgentConfig,
   previousOutput?: string,
+  options?: { contextLabel?: string; extraInstruction?: string },
 ): string {
   const lines = [`[Role: ${agentConfig.role}]`, basePrompt.trim()]
 
   if (previousOutput?.trim()) {
-    lines.push('', 'Context from previous step:', previousOutput.trim())
+    const label = options?.contextLabel ?? 'Context from previous step'
+    lines.push('', `${label}:`, previousOutput.trim())
   }
 
   if (agentConfig.promptSuffix?.trim()) {
     lines.push('', agentConfig.promptSuffix.trim())
   }
 
+  if (options?.extraInstruction?.trim()) {
+    lines.push('', options.extraInstruction.trim())
+  }
+
   return lines.join('\n')
+}
+
+function clampReviewLoopIterations(
+  value: number | undefined,
+  defaultMaxIterations = DEFAULT_REVIEW_LOOP_MAX_ITERATIONS,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return defaultMaxIterations
+  }
+  const rounded = Math.floor(value)
+  if (rounded < 1) return 1
+  if (rounded > REVIEW_LOOP_HARD_CAP) return REVIEW_LOOP_HARD_CAP
+  return rounded
 }
 
 function normalizeCompletionStatus(status: SessionStatus | string): SessionStatus {
@@ -553,6 +683,7 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
     createThread: (input) => threadsStore.create(input),
     routeModel: (input) => modelRouter.route(input),
     dispatchSession: async (input) => {
+      const settings = settingsService.getEffective(input.projectId).settings
       const { sessionId, threadId } = await sessionManager.dispatch({
         projectId: input.projectId,
         threadId: input.threadId,
@@ -561,7 +692,8 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
         model: input.model,
         repoPath: input.repoPath,
         context: projectsStore.getContext(input.projectId),
-        isolate: false,
+        isolate: settings.execution.worktreeIsolation,
+        runtimeSettings: settings.agents.runtimes[input.agentId],
       })
 
       return { sessionId, threadId, status: 'running' }
@@ -569,6 +701,7 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
     waitForSessionCompletion: waitForStoredSessionCompletion,
     cancelSession: (sessionId) => sessionManager.cancel(sessionId),
     worktrees: worktreeManager,
+    getSettings: (projectId) => settingsService.getEffective(projectId).settings,
   }
 }
 

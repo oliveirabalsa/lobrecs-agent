@@ -38,6 +38,17 @@ describe('MarkdownContent', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
   })
 
+  it('keeps local absolute links clickable', () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownContent, {
+        text: '[DMG](/tmp/lobrecs-agent-0.1.1-mac-arm64.dmg)',
+      }),
+    )
+
+    expect(html).toContain('href="file:///tmp/lobrecs-agent-0.1.1-mac-arm64.dmg"')
+    expect(html).toContain('>DMG<')
+  })
+
   it('renders quotes and apostrophes from source text, not raw html entities', () => {
     const html = renderToStaticMarkup(
       createElement(MarkdownContent, {

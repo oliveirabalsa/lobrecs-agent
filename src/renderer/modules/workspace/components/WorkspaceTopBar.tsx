@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import type { EditorInfo } from '../../../../shared/types'
 import { Pill } from '../../../components/ui'
+import { OpenInEditorMenu } from './OpenInEditorMenu'
 
 export type RightPanelMode = 'diff' | 'terminal'
 
@@ -17,6 +19,9 @@ interface WorkspaceTopBarProps {
   onFork?: () => void
   reserveTrafficLightInset?: boolean
   onOpenSidebar?: () => void
+  /** Absolute repo path for the active project — enables the "Open in" menu. */
+  repoPath?: string
+  onOpenCliEditor?: (editor: EditorInfo) => void
 }
 
 /**
@@ -39,6 +44,8 @@ export function WorkspaceTopBar({
   onFork,
   reserveTrafficLightInset = false,
   onOpenSidebar,
+  repoPath,
+  onOpenCliEditor,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -194,6 +201,13 @@ export function WorkspaceTopBar({
         >
           {model ? model : 'auto'}
         </Pill>
+
+        {repoPath ? (
+          <OpenInEditorMenu
+            repoPath={repoPath}
+            onOpenCliEditor={onOpenCliEditor}
+          />
+        ) : null}
 
         <IconButton
           aria-label={diffActive ? 'Hide diff panel' : 'Show diff panel'}

@@ -51,6 +51,41 @@ export interface ImageAttachment {
   size?: number
 }
 
+// ── Enqueue ──────────────────────────────────────────────
+/** A message waiting in the per-thread dispatch queue. */
+export interface QueuedMessage {
+  id: string
+  prompt: string
+  agentId: AgentId
+  model: string
+  createdAt: number
+}
+
+/** Renderer→main: add a message to the thread queue. */
+export interface EnqueueParams {
+  threadId: string
+  projectId: string
+  prompt: string
+  agentId?: AgentId
+  modelOverride?: string
+}
+
+/** Broadcast payload when the queue for a thread changes. */
+export interface QueueStatusEvent {
+  threadId: string
+  pending: QueuedMessage[]
+}
+
+// ── Steer ─────────────────────────────────────────────────
+/** Renderer→main: cancel the running session and redirect with a new prompt. */
+export interface SteerParams {
+  sessionId: string
+  projectId: string
+  prompt: string
+  agentId?: AgentId
+  modelOverride?: string
+}
+
 export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
 
 export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {

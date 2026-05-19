@@ -12,6 +12,8 @@ refactor.
   for TypeScript, Electron, React, persistence, IPC, and tests.
 - [Clean review](best-practices/clean-review.md) defines how to review changes
   with a focus on bugs, regressions, security, and missing verification.
+- [Settings](features/settings.md) documents configurable app behavior and the
+  values that are intentionally excluded from persistence.
 
 ## Agent Skills
 

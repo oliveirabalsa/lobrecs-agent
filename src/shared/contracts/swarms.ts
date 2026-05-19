@@ -18,6 +18,12 @@ export interface SwarmConfig {
   prompt: string
   strategy: 'parallel' | 'sequential' | 'fan-out'
   agents: SwarmAgentConfig[]
+  /**
+   * Max reviewer cycles when a sequential step has a "reviewer" role. Hard
+   * cap prevents infinite loops when the reviewer is never satisfied.
+   * Defaults to 3 when omitted.
+   */
+  maxIterations?: number
 }
 
 export interface SwarmResult {

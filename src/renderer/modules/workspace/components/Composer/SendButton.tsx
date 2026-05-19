@@ -6,6 +6,12 @@ interface SendButtonProps {
   /** True when the composer has content to submit. Ignored while running. */
   canSend: boolean
   loading?: boolean
+  /**
+   * When provided, the button submits with this aria-label instead of acting
+   * as a stop control — even while a session is running. Used by queue/steer
+   * modes that want to submit while busy.
+   */
+  submitLabel?: string
   onSend: () => void
   onStop?: () => void
 }
@@ -14,10 +20,19 @@ interface SendButtonProps {
  * Large circular send/stop button. Swaps icon based on the session state:
  * — Idle: paper-plane (submit draft)
  * — Running: square (cancel session)
+ * — Submit-mode (queue/steer): paper-plane with overridden aria-label
  */
-export function SendButton({ running, canSend, loading, onSend, onStop }: SendButtonProps) {
-  const disabled = running ? !onStop : !canSend
-  const label = running ? 'Stop running session' : 'Send message'
+export function SendButton({
+  running,
+  canSend,
+  loading,
+  submitLabel,
+  onSend,
+  onStop,
+}: SendButtonProps) {
+  const inSubmitMode = Boolean(submitLabel) || !running
+  const disabled = inSubmitMode ? !canSend : !onStop
+  const label = inSubmitMode ? submitLabel ?? 'Send message' : 'Stop running session'
   return (
     <Button
       variant="circle"
@@ -25,8 +40,8 @@ export function SendButton({ running, canSend, loading, onSend, onStop }: SendBu
       aria-label={label}
       disabled={disabled}
       loading={loading}
-      leadingIcon={running ? <StopIcon /> : <SendIcon />}
-      onClick={running ? onStop : onSend}
+      leadingIcon={inSubmitMode ? <SendIcon /> : <StopIcon />}
+      onClick={inSubmitMode ? onSend : onStop}
     />
   )
 }

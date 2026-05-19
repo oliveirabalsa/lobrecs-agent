@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import type {
+  AgentId,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -20,6 +21,7 @@ import { ModelChip } from './ModelChip'
 import { SendButton } from './SendButton'
 import { StatusFooter } from './StatusFooter'
 import { useComposerState } from './useComposerState'
+import { AGENT_SHORT, formatModelLabel } from './modelDisplay'
 import type { AttachedImage } from './types'
 
 /** Mirrors the `StartedSessionSummary` shape consumed by the workspace controller. */
@@ -56,6 +58,21 @@ export interface ComposerProps {
   hasProjectContext?: boolean
   onContextClick?: () => void
   onSessionStarted: (session: ComposerStartedSession) => void
+  /**
+   * When provided, submitting while `busy` queues the message instead of
+   * blocking. The handler resolves once main has accepted the queued message.
+   */
+  onEnqueue?: (
+    prompt: string,
+    agentId?: AgentId,
+    modelOverride?: string,
+  ) => void | Promise<void>
+  /**
+   * When provided, the composer shows a Steer toggle while a session is
+   * running. Activating it and submitting cancels the active session and
+   * redirects the agent with the new prompt on the same thread.
+   */
+  onSteer?: (prompt: string) => void | Promise<void>
 }
 
 const MIN_TEXTAREA_HEIGHT = 56
@@ -107,6 +124,8 @@ export function Composer({
   hasProjectContext = false,
   onContextClick,
   onSessionStarted,
+  onEnqueue,
+  onSteer,
 }: ComposerProps) {
   const state = useComposerState({ projectId: project.id, prefillPrompt })
   const {
@@ -128,7 +147,9 @@ export function Composer({
   } = state
 
   const [submitting, setSubmitting] = useState(false)
+  const [steerMode, setSteerMode] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const attachingRef = useRef(false)
 
   useEffect(() => {
     autosizeTextarea(textareaRef.current)
@@ -139,11 +160,68 @@ export function Composer({
     window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
   }, [prefillPrompt])
 
+  // Focus the composer on mount and whenever the active thread changes, so a
+  // freshly-opened chat is immediately typeable.
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || textarea.disabled) return
+    textarea.focus()
+  }, [activeThreadId])
+
+  // Pasting an image flips `attaching` → textarea becomes `disabled`, which
+  // blurs it. Re-focus once the attach finishes and the element is editable
+  // again.
+  useEffect(() => {
+    if (attachingRef.current && !attaching) {
+      const textarea = textareaRef.current
+      if (textarea && !textarea.disabled) textarea.focus()
+    }
+    attachingRef.current = attaching
+  }, [attaching])
+
   const submit = useCallback(async () => {
     const trimmed = draft.trim()
     const effectivePrompt =
       trimmed || (attachments.length > 0 ? 'Use the attached image as context.' : '')
-    if (!effectivePrompt || submitting || busy || attaching) return
+    if (!effectivePrompt || submitting || attaching) return
+
+    if (steerMode && onSteer) {
+      setSubmitting(true)
+      setError(null)
+      try {
+        await onSteer(effectivePrompt)
+        setDraft('')
+        clearAttachments()
+        setSteerMode(false)
+        window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
+      } catch (steerError: unknown) {
+        setError(
+          steerError instanceof Error ? steerError.message : 'Failed to steer agent',
+        )
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
+
+    if (busy) {
+      if (!onEnqueue) return
+      setSubmitting(true)
+      setError(null)
+      try {
+        await onEnqueue(effectivePrompt, manualOption?.agentId, manualOption?.modelId)
+        setDraft('')
+        clearAttachments()
+        window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
+      } catch (enqueueError: unknown) {
+        setError(
+          enqueueError instanceof Error ? enqueueError.message : 'Failed to queue message',
+        )
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
 
     setSubmitting(true)
     setError(null)
@@ -185,11 +263,14 @@ export function Composer({
     clearAttachments,
     draft,
     manualOption,
+    onEnqueue,
     onSessionStarted,
+    onSteer,
     project.id,
     routerPreview,
     setDraft,
     setError,
+    steerMode,
     submitting,
   ])
 
@@ -270,13 +351,38 @@ export function Composer({
   const running =
     Boolean(activeSessionId) &&
     (activeSessionStatus === 'running' || activeSessionStatus === 'awaiting-approval')
-  const canSend = (draft.trim().length > 0 || attachments.length > 0) && !attaching && !busy
+
+  // Drop steer mode automatically when the session is no longer running, so a
+  // stale toggle doesn't apply to the next idle composer state.
+  useEffect(() => {
+    if (!running) setSteerMode(false)
+  }, [running])
+
+  const hasContent = draft.trim().length > 0 || attachments.length > 0
+  const queueAllowed = busy && Boolean(onEnqueue) && !steerMode
+  const canSend =
+    hasContent && !attaching && (!busy || queueAllowed || (steerMode && Boolean(onSteer)))
   const showRouterPreview = modelSelection.kind === 'auto' && draft.trim().length > 0
-  const placeholder = activeThreadId ? 'Ask for follow-up changes' : 'Describe the coding task…'
+  const placeholder = steerMode
+    ? 'Redirect the agent…'
+    : queueAllowed
+      ? 'Queue a follow-up message…'
+      : activeThreadId
+        ? 'Ask for follow-up changes'
+        : 'Describe the coding task…'
+  const submitLabel = steerMode
+    ? 'Steer agent'
+    : queueAllowed
+      ? 'Queue message'
+      : undefined
+
+  const wrapperBorderClass = steerMode
+    ? 'border-accent-warn/50 focus-within:border-accent-warn/70'
+    : 'border-hairline focus-within:border-white/15'
 
   return (
     <form onSubmit={handleSubmit} className="w-full pb-1 pt-2">
-      <div className="rounded-bubble border border-hairline bg-card focus-within:border-white/15">
+      <div className={`rounded-bubble border bg-card ${wrapperBorderClass}`}>
         <AttachmentStrip
           attachments={attachments}
           attaching={attaching}
@@ -300,7 +406,8 @@ export function Composer({
           <div className="px-3 pb-1 text-xs text-muted" aria-live="polite">
             {routerPreview ? (
               <>
-                → {routerPreview.agentId} · {routerPreview.model} · score{' '}
+                → {AGENT_SHORT[routerPreview.agentId] ?? routerPreview.agentId} ·{' '}
+                {formatModelLabel(routerPreview.agentId, routerPreview.model)} · score{' '}
                 {routerPreview.score.toFixed(2)} · {routerPreview.reasoning}
               </>
             ) : (
@@ -316,7 +423,23 @@ export function Composer({
               disabled={submitting}
               onFilesSelected={(files) => void attachImageFiles(files)}
             />
-            {busyReason ? (
+            {running && onSteer ? (
+              <button
+                type="button"
+                onClick={() => setSteerMode((current) => !current)}
+                aria-pressed={steerMode}
+                title={steerMode ? 'Cancel steer mode' : 'Steer agent (redirect mid-run)'}
+                className={`flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
+                  steerMode
+                    ? 'bg-accent-warn/20 text-accent-warn'
+                    : 'text-muted hover:bg-white/5 hover:text-secondary'
+                }`}
+              >
+                <span aria-hidden="true">↻</span>
+                {steerMode ? 'Steering' : 'Steer'}
+              </button>
+            ) : null}
+            {busyReason && !steerMode && !queueAllowed ? (
               <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
             ) : null}
           </div>
@@ -338,6 +461,7 @@ export function Composer({
               running={running}
               canSend={canSend}
               loading={submitting}
+              submitLabel={submitLabel}
               onSend={() => void submit()}
               onStop={activeSessionId ? () => void handleStop() : undefined}
             />

@@ -287,7 +287,7 @@ function renderLink(token: Tokens.Link, key: string): ReactNode {
   return (
     <a
       key={key}
-      href={token.href}
+      href={normalizeHref(token.href)}
       title={token.title ?? undefined}
       target="_blank"
       rel="noreferrer"
@@ -302,11 +302,11 @@ function renderImageFallback(token: Tokens.Image, key: string): ReactNode {
   const label = token.text.trim() || token.href
 
   return (
-    <span key={key} className="text-secondary">
+      <span key={key} className="text-secondary">
       image:{' '}
       {isSafeHref(token.href) ? (
         <a
-          href={token.href}
+          href={normalizeHref(token.href)}
           title={token.title ?? undefined}
           target="_blank"
           rel="noreferrer"
@@ -325,12 +325,34 @@ function isSafeHref(href: string): boolean {
   const trimmed = href.trim()
   if (trimmed.startsWith('#')) return true
 
+  if (trimmed.startsWith('/')) return true
+  if (/^[a-zA-Z]:\\/.test(trimmed)) return true
+  if (trimmed.startsWith('file://')) return true
+
   try {
     const parsed = new URL(trimmed)
-    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol)
+    return ['http:', 'https:', 'mailto:', 'file:'].includes(parsed.protocol)
   } catch {
     return false
   }
+}
+
+function normalizeHref(href: string): string {
+  const trimmed = href.trim()
+
+  if (trimmed.startsWith('file://')) {
+    return trimmed
+  }
+
+  if (trimmed.startsWith('/')) {
+    return `file://${trimmed}`
+  }
+
+  if (/^[a-zA-Z]:\\/.test(trimmed)) {
+    return `file:///${trimmed.replace(/\\/g, '/')}`
+  }
+
+  return trimmed
 }
 
 function tableCellClass(align: Tokens.TableCell['align'], header: boolean): string {

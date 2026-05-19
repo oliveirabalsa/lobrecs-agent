@@ -6,7 +6,7 @@ import { SidebarTopZone } from './SidebarTopZone'
 import { ProjectsSection } from './ProjectsSection'
 import { useProjectTree, type Thread } from './useProjectTree'
 
-const logoUrl = new URL('../../assets/lobrecs-agent-logo.svg', import.meta.url).href
+const logoUrl = new URL('../../assets/lobrecs-agent-logo.png', import.meta.url).href
 const RUNNING_THREAD_STATUSES = new Set(['running', 'awaiting-approval'])
 
 interface SidebarProps {
@@ -27,6 +27,7 @@ interface SidebarProps {
   onPlugins?: () => void
   onAutomations?: () => void
   onOpenSettings?: () => void
+  settingsActive?: boolean
   /**
    * Optional slot overrides — if provided, these replace the corresponding
    * section. Use sparingly; defaults cover the Codex-shaped sidebar.
@@ -69,6 +70,7 @@ export function Sidebar({
   onPlugins,
   onAutomations,
   onOpenSettings,
+  settingsActive,
   slots,
 }: SidebarProps) {
   const tree = useProjectTree()
@@ -201,7 +203,13 @@ export function Sidebar({
       />
     )
 
-  const footerSlot = slots?.footer ?? <SidebarFooter onOpenSettings={onOpenSettings} />
+  const footerSlot =
+    slots?.footer ?? (
+      <SidebarFooter
+        onOpenSettings={onOpenSettings}
+        settingsActive={settingsActive}
+      />
+    )
 
   return (
     <aside className="flex h-full w-full min-w-0 shrink-0 flex-col bg-sidebar font-ui">

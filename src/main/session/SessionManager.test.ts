@@ -267,12 +267,13 @@ describe('SessionManager', () => {
     expect(adapter.dispatchedParams).toBeNull()
   })
 
-  it('cancels active sessions and marks them cancelled', async () => {
+  it('cancels active sessions and broadcasts a synthetic completion', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
       adapters: [adapter],
-      broadcast: () => undefined,
+      broadcast: (event) => broadcasts.push(event),
       worktreeIsolation: false,
     })
     const { sessionId } = await manager.dispatch({
@@ -288,6 +289,12 @@ describe('SessionManager', () => {
     expect(adapter.cancel).toHaveBeenCalledTimes(1)
     expect(sessionsStore.get(sessionId)?.status).toBe('cancelled')
     expect(manager.isActive(sessionId)).toBe(false)
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0]).toMatchObject({
+      type: 'session-complete',
+      sessionId,
+      payload: { status: 'cancelled' },
+    })
   })
 
   it('ignores late completion after cancellation', async () => {
@@ -316,8 +323,19 @@ describe('SessionManager', () => {
     })
 
     expect(sessionsStore.get(sessionId)?.status).toBe('cancelled')
-    expect(sessionsStore.listEvents(sessionId).map((event) => event.type)).toEqual([])
-    expect(broadcasts).toEqual([])
+    // Only the synthetic cancel event is recorded; the late real completion
+    // is dropped because the session is already in a terminal state.
+    const recorded = sessionsStore.listEvents(sessionId)
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]).toMatchObject({
+      type: 'session-complete',
+      payload: { status: 'cancelled' },
+    })
+    expect(broadcasts).toHaveLength(1)
+    expect(broadcasts[0]).toMatchObject({
+      type: 'session-complete',
+      payload: { status: 'cancelled' },
+    })
   })
 
   it('marks sessions as error when no adapter is registered', async () => {
@@ -370,6 +388,122 @@ describe('SessionManager', () => {
     expect(sessionsStore.listEvents(sessionId).at(-1)?.payload).toMatchObject({
       status: 'error',
     })
+  })
+
+  it('emits review-only diff events for non-isolated local edits after completion', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    await fs.writeFile(path.join(repoPath, 'untouched.ts'), 'already dirty\n', 'utf-8')
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated locally\n', 'utf-8')
+    await fs.writeFile(path.join(repoPath, 'created.ts'), 'created locally\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    const broadcastTypes = broadcasts.map((event) => event.type)
+    expect(broadcastTypes.indexOf('diff')).toBeGreaterThanOrEqual(0)
+    expect(broadcastTypes.indexOf('diff')).toBeLessThan(
+      broadcastTypes.indexOf('session-complete'),
+    )
+
+    const diffEvent = broadcasts.find((event) => event.type === 'diff')
+    const proposals = Array.isArray(diffEvent?.payload) ? diffEvent.payload : []
+    expect(proposals.map((proposal) => path.basename(proposal.filePath)).sort()).toEqual([
+      'created.ts',
+      'existing.ts',
+    ])
+    expect(proposals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: path.join(repoPath, 'created.ts'),
+          originalContent: '',
+          proposedContent: 'created locally\n',
+          changeType: 'added',
+          status: 'applied',
+        }),
+        expect.objectContaining({
+          filePath: path.join(repoPath, 'existing.ts'),
+          originalContent: 'original\n',
+          proposedContent: 'updated locally\n',
+          changeType: 'modified',
+          status: 'applied',
+        }),
+      ]),
+    )
+    expect(
+      sessionsStore.listEvents(sessionId).some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'file-change',
+      ),
+    ).toBe(true)
+  })
+
+  it('records a diagnostic activity when local completion produces no diff proposals', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'inspect without edits',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    expect(broadcasts.map((event) => event.type)).not.toContain('diff')
+    expect(
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { title?: string }).title === 'No code changes detected',
+      ),
+    ).toBe(true)
+
+    const storedTypes = sessionsStore.listEvents(sessionId).map((event) => event.type)
+    expect(storedTypes.indexOf('activity')).toBeLessThan(
+      storedTypes.indexOf('session-complete'),
+    )
   })
 
   it('auto-applies worktree diffs before emitting review-only diff events', async () => {

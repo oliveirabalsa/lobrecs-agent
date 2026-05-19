@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { SettingsProvider } from '../modules/settings'
 import { TabsProvider } from '../modules/sessions'
 
 interface AppProvidersProps {
@@ -6,5 +7,9 @@ interface AppProvidersProps {
 }
 
 export function AppProviders({ children }: AppProvidersProps) {
-  return <TabsProvider>{children}</TabsProvider>
+  return (
+    <SettingsProvider>
+      <TabsProvider>{children}</TabsProvider>
+    </SettingsProvider>
+  )
 }
