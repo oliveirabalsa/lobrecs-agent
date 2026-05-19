@@ -14,6 +14,7 @@ import { createSpecsApi, type SpecsApi } from './specs'
 import { createSwarmApi, type SwarmApi } from './swarms'
 import { createSystemApi, type SystemApi } from './system'
 import { createThreadsApi, type ThreadsApi } from './threads'
+import { createUpdatesApi, type UpdatesApi } from './updates'
 
 export interface AgentForgeApi extends AgentForgeEventsApi {
   projects: ProjectsApi
@@ -30,6 +31,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   git: GitApi
   settings: SettingsApi
   system: SystemApi
+  updates: UpdatesApi
 }
 
 export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
@@ -49,6 +51,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     runs: createRunsApi(ipcRenderer),
     git: createGitApi(ipcRenderer),
     settings: createSettingsApi(ipcRenderer),
+    updates: createUpdatesApi(ipcRenderer),
     on: events.on,
     onShortcut: events.onShortcut,
     system: createSystemApi(ipcRenderer),

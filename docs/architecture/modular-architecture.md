@@ -56,6 +56,7 @@ src/
       settings/
       swarms/
       system/
+      updates/
       worktrees/
     shared/
       db/
@@ -73,6 +74,7 @@ src/
       settings.ts
       swarms.ts
       system.ts
+      updates.ts
     index.ts
   renderer/
     app/
@@ -86,6 +88,7 @@ src/
       sessions/
       settings/
       swarms/
+      updates/
       workspace/
     shared/
       components/
@@ -103,6 +106,7 @@ src/
       settings.ts
       swarms.ts
       system.ts
+      updates.ts
     types/
     utils/
 ```

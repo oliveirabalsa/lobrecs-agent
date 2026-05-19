@@ -1,6 +1,6 @@
 {
   "name": "lobrecs-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Electron desktop harness for AI coding agents, model routing, and swarm orchestration.",
   "productName": "Lobrecs Agent",
   "type": "module",
@@ -12,11 +12,12 @@
     "test": "vitest --passWithNoTests",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3 -w node-pty",
     "rebuild:node": "npm rebuild better-sqlite3 node-pty",
-    "build:mac": "npm run build && npm run rebuild:electron && electron-builder --mac --config.npmRebuild=false && npm run rebuild:node",
+    "build:mac": "node scripts/build-mac.mjs",
     "build:win": "npm run build && electron-builder --win",
     "build:linux": "npm run build && electron-builder --linux",
-    "build:mac:release": "npm run build && npm run rebuild:electron && npm run rebuild:node && electron-builder --mac --config.npmRebuild=false --publish always",
-    "release": "npm run build && electron-builder --publish always"
+    "build:mac:release": "node scripts/build-mac.mjs --publish",
+    "release:mac": "npm run build:mac:release",
+    "release": "npm run release:mac"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

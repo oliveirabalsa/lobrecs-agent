@@ -3,6 +3,7 @@ import type { ThreadSearchResult } from '../../shared/types'
 import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
 import { SettingsView, useSettings } from '../modules/settings'
+import { AppUpdateBanner } from '../modules/updates'
 import { useWorkspaceController } from '../modules/workspace'
 import { useWorkspaceHistory } from '../modules/workspace/hooks/useWorkspaceHistory'
 import { WorkspaceView } from '../modules/workspace/views/WorkspaceView'
@@ -327,6 +328,7 @@ export function RendererApp() {
         onOpenChange={setSearchOpen}
         onOpenResult={(result) => void handleOpenSearchResult(result)}
       />
+      <AppUpdateBanner />
     </div>
   )
 }

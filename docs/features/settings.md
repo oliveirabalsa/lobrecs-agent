@@ -14,6 +14,7 @@ The app stores:
 - swarm strategy, templates, max agents, and reviewer iterations
 - spec defaults and verification recipes
 - cost pricing overrides and workspace UI/editor defaults
+- whether packaged builds should check for app updates on launch
 
 Project overrides are saved separately from global settings and are merged over
 global defaults when a project-specific action runs.

@@ -24,6 +24,7 @@ import {
   type TerminalTab,
 } from '../components/BottomTerminalPanel'
 import { resolveBottomTerminalOpenAction } from '../components/bottomTerminalPanelState'
+import { CommitAndPushDialog } from '../components/CommitAndPushDialog'
 import { Composer } from '../components/Composer'
 import { ProjectContextDialog } from '../components/ProjectContextDialog'
 import { QueueBanner } from '../components/QueueBanner'
@@ -174,6 +175,7 @@ export function WorkspaceView({
   )
   const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false)
   const [contextPercent, setContextPercent] = useState<number | null>(null)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
@@ -446,34 +448,45 @@ export function WorkspaceView({
                         </div>
                       </div>
 
-                      <div className="shrink-0 flex items-center justify-center gap-1 border-t border-hairline/50 px-3 py-1">
+                      <div className="shrink-0 flex items-center justify-between border-t border-hairline/50 px-3 py-1">
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (bottomPanelOpen && bottomPanelInitialTab) {
+                                setBottomPanelOpen(false)
+                              } else {
+                                handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
+                              }
+                            }}
+                            className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
+                              bottomPanelOpen
+                                ? 'bg-white/10 text-secondary'
+                                : 'text-muted hover:bg-white/5 hover:text-secondary'
+                            }`}
+                            title="Toggle terminal"
+                          >
+                            <QuickTerminalIcon />
+                            <span>Terminal</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
+                            className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
+                            title="Open Vim"
+                          >
+                            <QuickVimIcon />
+                            <span>Vim</span>
+                          </button>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (bottomPanelOpen && bottomPanelInitialTab) {
-                              setBottomPanelOpen(false)
-                            } else {
-                              handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
-                            }
-                          }}
-                          className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
-                            bottomPanelOpen
-                              ? 'bg-white/10 text-secondary'
-                              : 'text-muted hover:bg-white/5 hover:text-secondary'
-                          }`}
-                          title="Toggle terminal"
-                        >
-                          <QuickTerminalIcon />
-                          <span>Terminal</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
+                          onClick={() => setCommitDialogOpen(true)}
                           className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
-                          title="Open Vim"
+                          title="Commit and push all changes"
                         >
-                          <QuickVimIcon />
-                          <span>Vim</span>
+                          <QuickCommitIcon />
+                          <span>Commit & Push</span>
                         </button>
                       </div>
                     </div>
@@ -610,6 +623,11 @@ export function WorkspaceView({
               open={contextDialogOpen}
               onOpenChange={setContextDialogOpen}
               onSaved={(project) => onProjectUpdated?.(project)}
+            />
+            <CommitAndPushDialog
+              project={selectedProject}
+              open={commitDialogOpen}
+              onOpenChange={setCommitDialogOpen}
             />
           </>
         ) : (
@@ -749,6 +767,17 @@ function QuickVimIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 2L22 12L12 22L2 12Z" />
       <path d="M9 10L12 14.5L15 10" />
+    </svg>
+  )
+}
+
+function QuickCommitIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <line x1="3" y1="12" x2="9" y2="12" />
+      <line x1="15" y1="12" x2="21" y2="12" />
+      <path d="M17 6l4 6-4 6" />
     </svg>
   )
 }

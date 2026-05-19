@@ -16,6 +16,7 @@ import { registerSpecHandlers } from '../modules/specs/ipc/registerSpecHandlers'
 import { registerSwarmHandlers } from '../modules/swarms/ipc/registerSwarmHandlers'
 import { registerSystemHandlers } from '../modules/system/ipc/registerSystemHandlers'
 import { registerThreadHandlers } from '../modules/threads/ipc/registerThreadHandlers'
+import { registerUpdateHandlers } from '../modules/updates'
 import { ModelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore, threadsStore } from '../store'
@@ -46,6 +47,7 @@ export function registerIpcHandlers(): void {
   registerGitHandlers()
   registerSettingsHandlers(context)
   registerSystemHandlers(context)
+  registerUpdateHandlers()
 }
 
 function createMainIpcContext(): MainIpcContext {

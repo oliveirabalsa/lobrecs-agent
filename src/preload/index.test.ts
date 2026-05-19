@@ -4,6 +4,7 @@ import type { AgentEvent } from '../shared/contracts/sessions'
 import type { SettingsUpdateEvent } from '../shared/contracts/settings'
 import type { SwarmConfig } from '../shared/contracts/swarms'
 import type { ThreadDeletedEvent } from '../shared/contracts/threads'
+import type { AppUpdateState } from '../shared/contracts/updates'
 
 type IpcListener = (event: unknown, payload?: unknown) => void
 
@@ -54,6 +55,7 @@ describe('preload api shape', () => {
       'runs',
       'git',
       'settings',
+      'updates',
       'on',
       'onShortcut',
       'system',
@@ -347,6 +349,22 @@ describe('preload api shape', () => {
         expected: ['settings:reset-project-overrides', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.updates.getState(),
+        expected: ['updates:get-state'],
+      },
+      {
+        call: (agentforge) => agentforge.updates.check(),
+        expected: ['updates:check'],
+      },
+      {
+        call: (agentforge) => agentforge.updates.download(),
+        expected: ['updates:download'],
+      },
+      {
+        call: (agentforge) => agentforge.updates.installAndRestart(),
+        expected: ['updates:install-and-restart'],
+      },
+      {
         call: (agentforge) => agentforge.system.openInEditor('/tmp/file.ts'),
         expected: ['system:open-editor', '/tmp/file.ts'],
       },
@@ -610,6 +628,38 @@ describe('preload api shape', () => {
     expect(callback).not.toHaveBeenCalled()
     expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
       'settings:updated',
+      expect.any(Function),
+    )
+  })
+
+  it('keeps update status subscription cleanup behavior', () => {
+    const ipcRenderer = createIpcRendererMock()
+    const api = createAgentForgeApi(
+      ipcRenderer as unknown as Parameters<typeof createAgentForgeApi>[0],
+    )
+    const event: AppUpdateState = {
+      currentVersion: '0.1.1',
+      phase: 'available',
+      canCheck: true,
+      canDownload: true,
+      canInstall: false,
+      update: { version: '0.1.2' },
+    }
+    const callback = vi.fn()
+
+    const unsubscribe = api.updates.onStatus(callback)
+    ipcRenderer.emit('updates:status', event)
+
+    expect(callback).toHaveBeenCalledWith(event)
+    expect(ipcRenderer.on).toHaveBeenCalledWith('updates:status', expect.any(Function))
+
+    callback.mockClear()
+    unsubscribe()
+    ipcRenderer.emit('updates:status', event)
+
+    expect(callback).not.toHaveBeenCalled()
+    expect(ipcRenderer.removeListener).toHaveBeenCalledWith(
+      'updates:status',
       expect.any(Function),
     )
   })

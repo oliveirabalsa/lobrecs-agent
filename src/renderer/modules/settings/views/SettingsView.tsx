@@ -17,6 +17,7 @@ import {
   Toggle,
 } from '../components/SettingsControls'
 import { useSettingsDraft } from '../hooks/useSettingsDraft'
+import { AppUpdatePanel } from '../../updates'
 
 interface SettingsViewProps {
   isMac?: boolean
@@ -200,6 +201,9 @@ export function SettingsView({
                   }
                 />
               </FieldRow>
+              <div className="md:col-span-2">
+                <AppUpdatePanel />
+              </div>
             </SettingsSection>
 
             <SettingsSection id="agents" title="Agents & Models">
