@@ -20,16 +20,22 @@ provided.
 
 ## Releasing A New macOS Build
 
-1. Run `rtk gh auth status` and confirm the GitHub CLI session is logged in.
-2. Bump `package.json` to a higher semver version.
-3. If `oliveirabalsa/lobrecs-agent-releases` was created recently, seed it with
-   an initial commit such as `README.md`. GitHub rejects releases for empty
-   repositories.
-4. Run `rtk npm run release:mac`.
-5. Electron Builder creates the DMG, ZIP, and update metadata in
-   `dist-electron/`, then publishes them to the configured GitHub release.
-6. Users on an older installed version can check, download, and restart from
-   inside the app.
+Run `npm run release` (or `npm run release:minor`/`npm run release:major` for minor/major bumps).
+
+The release script automates the entire process:
+
+1. **Validates** git state (clean working directory, on `main` branch, up to date with origin)
+2. **Validates** GitHub authentication (`GH_TOKEN`, `GITHUB_TOKEN`, or `gh cli`)
+3. **Bumps** the version in `package.json` and `electron-builder.yml` (defaults to patch)
+4. **Commits and tags** the version bump (`git commit` + `git tag v0.1.X`)
+5. **Pushes** commits and tags to GitHub
+6. **Builds and publishes** the DMG, ZIP, and metadata to `oliveirabalsa/lobrecs-agent-releases`
+
+Users on older installed versions can check, download, and restart from inside the app.
+
+### Setup (first time only)
+
+If `oliveirabalsa/lobrecs-agent-releases` was created recently, seed it with an initial commit such as `README.md`. GitHub rejects releases for empty repositories.
 
 macOS auto-updates require a signed app. Unsigned local builds can still create
 DMGs, but automatic update installation may fail during platform validation.
