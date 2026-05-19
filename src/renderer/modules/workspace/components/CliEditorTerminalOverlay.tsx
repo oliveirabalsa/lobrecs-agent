@@ -11,10 +11,11 @@ import {
   CLI_EDITOR_TERMINAL_THEME,
 } from './cliEditorTerminalAppearance'
 import {
-  cursorStyleForState,
+  applyCliEditorCursorState,
+  createCliEditorCursorTracker,
   DEFAULT_CLI_EDITOR_CURSOR_STATE,
-  readCliEditorCursorStateChunk,
   type CliEditorCursorState,
+  writeTerminalWithCursorState,
 } from './cliEditorCursorState'
 
 interface CliEditorTerminalOverlayProps {
@@ -33,7 +34,6 @@ export function CliEditorTerminalOverlay({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const sessionIdRef = useRef(createTerminalSessionId())
   const exitedRef = useRef(false)
-  const cursorEscapeTailRef = useRef('')
   const [session, setSession] = useState<CliEditorTerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exitEvent, setExitEvent] = useState<CliEditorTerminalExitEvent | null>(null)
@@ -47,6 +47,7 @@ export function CliEditorTerminalOverlay({
 
     let disposed = false
     const sessionId = sessionIdRef.current
+    const cursorTracker = createCliEditorCursorTracker()
     const term = new Terminal({
       ...CLI_EDITOR_TERMINAL_OPTIONS,
       theme: { ...CLI_EDITOR_TERMINAL_THEME },
@@ -81,27 +82,15 @@ export function CliEditorTerminalOverlay({
       void window.agentforge.system.writeCliEditorTerminal({ sessionId, data })
     })
 
-    const applyCursorState = (nextState: CliEditorCursorState) => {
-      const nextOptions = cursorStyleForState(nextState)
-      term.options.cursorStyle = nextOptions.cursorStyle
-      term.options.cursorBlink = nextOptions.cursorBlink
-    }
-
-    applyCursorState(DEFAULT_CLI_EDITOR_CURSOR_STATE)
+    applyCliEditorCursorState(term, cursorTracker.state)
 
     const offData = window.agentforge.system.onCliEditorTerminalData((event) => {
       if (event.sessionId !== sessionId) return
-      const parsed = readCliEditorCursorStateChunk(cursorEscapeTailRef.current, event.data)
-      cursorEscapeTailRef.current = parsed.remainder
-      if (parsed.state) {
-        applyCursorState(parsed.state)
+      writeTerminalWithCursorState(term, cursorTracker, event.data, (nextState) => {
         setCursorState((current) =>
-          current.mode === parsed.state?.mode && current.shape === parsed.state?.shape
-            ? current
-            : parsed.state!,
+          current.mode === nextState.mode && current.shape === nextState.shape ? current : nextState,
         )
-      }
-      term.write(event.data)
+      })
     })
     const offExit = window.agentforge.system.onCliEditorTerminalExit((event) => {
       if (event.sessionId !== sessionId) return

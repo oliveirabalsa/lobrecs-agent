@@ -10,6 +10,11 @@ import {
   CLI_EDITOR_TERMINAL_OPTIONS,
   CLI_EDITOR_TERMINAL_THEME,
 } from './cliEditorTerminalAppearance'
+import {
+  applyCliEditorCursorState,
+  createCliEditorCursorTracker,
+  writeTerminalWithCursorState,
+} from './cliEditorCursorState'
 
 export interface TerminalTab {
   id: string
@@ -293,6 +298,7 @@ function TerminalInstance({
   const exitedRef = useRef(false)
   const visibleRef = useRef(visible)
   const panelVisibleRef = useRef(panelVisible)
+  const terminalRef = useRef<Terminal | null>(null)
   const fitAndResizeRef = useRef<(() => void) | null>(null)
   const [session, setSession] = useState<CliEditorTerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -303,6 +309,7 @@ function TerminalInstance({
     panelVisibleRef.current = panelVisible
     if (!visible || !panelVisible) return
     fitAndResizeRef.current?.()
+    window.requestAnimationFrame(() => terminalRef.current?.focus())
   }, [panelFullscreen, panelVisible, visible])
 
   useEffect(() => {
@@ -311,15 +318,18 @@ function TerminalInstance({
 
     let disposed = false
     const sessionId = tab.id
+    const cursorTracker = createCliEditorCursorTracker()
 
     const term = new Terminal({
       ...CLI_EDITOR_TERMINAL_OPTIONS,
       theme: { ...CLI_EDITOR_TERMINAL_THEME },
     })
+    terminalRef.current = term
 
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
     term.open(container)
+    applyCliEditorCursorState(term, cursorTracker.state)
     try {
       fitAddon.fit()
     } catch {
@@ -352,7 +362,7 @@ function TerminalInstance({
 
     const offData = window.agentforge.system.onCliEditorTerminalData((event) => {
       if (event.sessionId !== sessionId) return
-      term.write(event.data)
+      writeTerminalWithCursorState(term, cursorTracker, event.data)
     })
 
     const offExit = window.agentforge.system.onCliEditorTerminalExit((event) => {
@@ -364,6 +374,10 @@ function TerminalInstance({
 
     const resizeObserver = new ResizeObserver(fitAndResize)
     resizeObserver.observe(container)
+    const handlePointerFocus = () => {
+      window.requestAnimationFrame(() => term.focus())
+    }
+    container.addEventListener('mousedown', handlePointerFocus)
     fitAndResize()
 
     term.write(`Starting ${tab.editorName} in ${tab.repoPath}\r\n`)
@@ -395,7 +409,11 @@ function TerminalInstance({
       dataDisposable.dispose()
       offData()
       offExit()
+      container.removeEventListener('mousedown', handlePointerFocus)
       term.dispose()
+      if (terminalRef.current === term) {
+        terminalRef.current = null
+      }
       fitAndResizeRef.current = null
       if (!exitedRef.current) {
         void window.agentforge.system.stopCliEditorTerminal(sessionId)

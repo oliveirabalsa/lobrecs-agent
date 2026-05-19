@@ -1,3 +1,5 @@
+import type { ITerminalOptions } from 'xterm'
+
 export type CliEditorCursorShape = 'block' | 'underline' | 'bar'
 export type CliEditorCursorMode = 'normal' | 'replace' | 'insert'
 
@@ -5,6 +7,23 @@ export interface CliEditorCursorState {
   mode: CliEditorCursorMode
   shape: CliEditorCursorShape
   label: string
+  blink?: boolean
+}
+
+export interface CliEditorCursorTracker {
+  remainder: string
+  state: CliEditorCursorState
+}
+
+export interface CliEditorCursorTerminal {
+  write: (data: string, callback?: () => void) => void
+  refresh?: (start: number, end: number) => void
+  options: Pick<ITerminalOptions, 'cursorBlink' | 'cursorStyle'>
+  buffer: {
+    active: {
+      cursorY: number
+    }
+  }
 }
 
 const CURSOR_ESCAPE_PATTERN = /\u001b\[(\d*) q/g
@@ -14,6 +33,15 @@ export const DEFAULT_CLI_EDITOR_CURSOR_STATE: CliEditorCursorState = {
   mode: 'normal',
   shape: 'block',
   label: 'Normal',
+}
+
+export function createCliEditorCursorTracker(
+  initialState: CliEditorCursorState = DEFAULT_CLI_EDITOR_CURSOR_STATE,
+): CliEditorCursorTracker {
+  return {
+    remainder: '',
+    state: initialState,
+  }
 }
 
 export function readCliEditorCursorStateChunk(
@@ -43,23 +71,67 @@ export function cursorStyleForState(
   state: CliEditorCursorState,
 ): {
   cursorStyle: CliEditorCursorShape
-  cursorBlink: true
+  cursorBlink: boolean
 } {
-  // xterm.js v5 only repaints the cursor on its blink timer — a steady block
-  // gets painted over by vim's screen redraws and disappears. Keep blink on so
-  // the normal-mode block stays visible.
   return {
     cursorStyle: state.shape,
-    cursorBlink: true,
+    cursorBlink: state.blink ?? true,
   }
+}
+
+export function applyCliEditorCursorState(
+  term: CliEditorCursorTerminal,
+  state: CliEditorCursorState,
+): void {
+  const nextOptions = cursorStyleForState(state)
+  term.options.cursorStyle = nextOptions.cursorStyle
+  term.options.cursorBlink = nextOptions.cursorBlink
+
+  const cursorY = term.buffer.active.cursorY
+  if (Number.isFinite(cursorY)) {
+    term.refresh?.(cursorY, cursorY)
+  }
+}
+
+export function writeTerminalWithCursorState(
+  term: CliEditorCursorTerminal,
+  tracker: CliEditorCursorTracker,
+  chunk: string,
+  onStateChange?: (state: CliEditorCursorState) => void,
+): void {
+  const parsed = readCliEditorCursorStateChunk(tracker.remainder, chunk)
+  const previousState = tracker.state
+  const nextState = parsed.state ?? previousState
+
+  tracker.remainder = parsed.remainder
+  tracker.state = nextState
+
+  if (parsed.state && !sameCursorState(previousState, parsed.state)) {
+    onStateChange?.(parsed.state)
+  }
+
+  term.write(chunk, () => {
+    if (!parsed.state) return
+    applyCliEditorCursorState(term, nextState)
+  })
 }
 
 function cursorStateFromParam(param: number): CliEditorCursorState | null {
   switch (param) {
     case 0:
     case 1:
+      return {
+        mode: 'normal',
+        shape: 'block',
+        label: 'Normal',
+      }
     case 2:
-      return DEFAULT_CLI_EDITOR_CURSOR_STATE
+      return {
+        mode: 'normal',
+        shape: 'block',
+        label: 'Normal',
+        blink: false,
+      }
     case 3:
     case 4:
       return {
@@ -77,4 +149,8 @@ function cursorStateFromParam(param: number): CliEditorCursorState | null {
     default:
       return null
   }
+}
+
+function sameCursorState(left: CliEditorCursorState, right: CliEditorCursorState): boolean {
+  return left.mode === right.mode && left.shape === right.shape
 }
