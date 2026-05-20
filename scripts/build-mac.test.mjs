@@ -22,6 +22,15 @@ describe('createMacBuilderArgs', () => {
       '--config.mac.notarize=true',
     ])
   })
+
+  it('can publish without signing/notarization when explicitly allowed', () => {
+    expect(createMacBuilderArgs(true, { allowUnsignedPublish: true })).toEqual([
+      '--mac',
+      '--config.npmRebuild=false',
+      '--publish',
+      'always',
+    ])
+  })
 })
 
 describe('resolvePublishToken', () => {

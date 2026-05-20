@@ -145,7 +145,8 @@ function updateVersion(newVersion) {
   log(`✓ Version updated to ${newVersion}`)
 }
 
-function createRelease(newVersion) {
+function createRelease(newVersion, options = {}) {
+  const { localPublish = false } = options
   log(`Creating release v${newVersion}...`)
 
   // Commit version bump
@@ -164,7 +165,7 @@ function createRelease(newVersion) {
 
   // Build and publish
   log('Building and publishing...')
-  exec('npm', ['run', 'build:mac:release'])
+  exec('npm', ['run', localPublish ? 'build:mac:local' : 'build:mac:release'])
   log('✓ Build and publish complete')
 }
 
@@ -191,12 +192,14 @@ Options:
   minor         Bump minor version (e.g., 0.1.2 → 0.2.0)
   major         Bump major version (e.g., 0.1.2 → 1.0.0)
   X.Y.Z         Release as explicit version (e.g., 0.2.0)
+  --local       Bypass macOS signing/notarization checks for local release testing
 
 Examples:
   npm run release           # Default patch bump
   npm run release:minor     # Bump minor version
   npm run release:major     # Bump major version
   npm run release 0.2.0     # Release as v0.2.0
+  npm run release -- --local # Local publish without notarization/cert validation
 
 The release script will:
   1. Validate git state (clean, on main, up to date)
@@ -205,8 +208,50 @@ The release script will:
   4. Update version in package.json and electron-builder.yml
   5. Commit and tag the version bump
   6. Push commits and tags to GitHub
-  7. Build, notarize, and publish to oliveirabalsa/lobrecs-agent-releases
+  7. Build, (optionally notarize), and publish to oliveirabalsa/lobrecs-agent-releases
 `)
+}
+
+function parseReleaseArgs(argv = []) {
+  const positionalArgs = []
+  let localPublish = false
+
+  for (const arg of argv) {
+    if (arg === '--local') {
+      localPublish = true
+      continue
+    }
+
+    positionalArgs.push(arg)
+  }
+
+  if (positionalArgs.length > 1) {
+    error(
+      `Invalid argument '${positionalArgs[1]}'. Use 'patch', 'minor', 'major', or a version like '0.2.0'.\nRun 'npm run release -- --help' for more information.`,
+    )
+  }
+
+  let bumpType = 'patch'
+  let version = null
+
+  if (positionalArgs.length > 0) {
+    const arg = positionalArgs[0]
+    if (bumpTypes.includes(arg)) {
+      bumpType = arg
+    } else if (versionRegex.test(arg)) {
+      version = arg
+    } else {
+      error(
+        `Invalid argument '${arg}'. Use 'patch', 'minor', 'major', or a version like '0.2.0'.\nRun 'npm run release -- --help' for more information.`,
+      )
+    }
+  }
+
+  return {
+    bumpType,
+    version,
+    localPublish,
+  }
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -218,26 +263,15 @@ export async function main(argv = process.argv.slice(2)) {
 
     log('Starting release process...')
 
-    // Parse arguments
-    let bumpType = 'patch'
-    let version = null
-
-    if (argv.length > 0) {
-      const arg = argv[0]
-      if (bumpTypes.includes(arg)) {
-        bumpType = arg
-      } else if (versionRegex.test(arg)) {
-        version = arg
-      } else {
-        error(
-          `Invalid argument '${arg}'. Use 'patch', 'minor', 'major', or a version like '0.2.0'.\nRun 'npm run release -- --help' for more information.`,
-        )
-      }
-    }
+    const { bumpType, version, localPublish } = parseReleaseArgs(
+      argv.filter((arg) => arg !== '--help' && arg !== '-h'),
+    )
 
     validateGitState()
     validateGhToken()
-    validateMacReleaseEnvironment()
+    if (!localPublish) {
+      validateMacReleaseEnvironment()
+    }
 
     const currentVersion = readVersion()
     log(`Current version: ${currentVersion}`)
@@ -246,7 +280,7 @@ export async function main(argv = process.argv.slice(2)) {
     log(`New version: ${newVersion}`)
 
     updateVersion(newVersion)
-    createRelease(newVersion)
+    createRelease(newVersion, { localPublish })
     verifyRelease(newVersion)
 
     log('\n🎉 Release complete!')

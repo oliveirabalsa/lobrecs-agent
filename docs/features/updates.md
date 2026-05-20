@@ -32,6 +32,10 @@ The release script automates the entire process:
 6. **Pushes** commits and tags to GitHub
 7. **Builds, notarizes, and publishes** the DMG, ZIP, and metadata to `oliveirabalsa/lobrecs-agent-releases`
 
+For testing or local publishing workflows, use `npm run release -- --local` (or
+`npm run release:local`) to skip macOS signing/notarization checks while still
+publishing to GitHub releases from your machine.
+
 Users on older installed versions can check, download, and restart from inside the app.
 
 ### Setup (first time only)

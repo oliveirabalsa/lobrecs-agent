@@ -5,6 +5,8 @@ const DEFAULT_BUILDER_ARGS = ['--mac', '--config.npmRebuild=false']
 const PUBLISH_BUILDER_ARGS = [
   '--publish',
   'always',
+]
+const SIGNED_AND_NOTARIZED_PUBLISH_ARGS = [
   '--config.mac.forceCodeSigning=true',
   '--config.mac.notarize=true',
 ]
@@ -17,12 +19,15 @@ const CODE_SIGNING_HELP =
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const publish = argv.includes('--publish')
-  const builderArgs = createMacBuilderArgs(publish)
+  const allowUnsignedPublish = argv.includes('--allow-unsigned')
+  const builderArgs = createMacBuilderArgs(publish, {
+    allowUnsignedPublish,
+  })
 
   let exitCode = 0
 
   try {
-    if (publish) {
+    if (publish && !allowUnsignedPublish) {
       validateMacPublishEnvironment(env)
     }
 
@@ -46,9 +51,15 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   return exitCode
 }
 
-export function createMacBuilderArgs(publish = false) {
+export function createMacBuilderArgs(publish = false, options = {}) {
+  const { allowUnsignedPublish = false } = options
+
   return publish
-    ? [...DEFAULT_BUILDER_ARGS, ...PUBLISH_BUILDER_ARGS]
+    ? [
+      ...DEFAULT_BUILDER_ARGS,
+      ...PUBLISH_BUILDER_ARGS,
+      ...(allowUnsignedPublish ? [] : SIGNED_AND_NOTARIZED_PUBLISH_ARGS),
+    ]
     : [...DEFAULT_BUILDER_ARGS]
 }
 
