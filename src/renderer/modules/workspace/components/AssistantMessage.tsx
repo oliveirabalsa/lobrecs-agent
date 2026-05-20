@@ -1,5 +1,7 @@
 import { useCallback, type ReactNode } from 'react'
+import { parseSwarmPlan } from '../lib/swarmMessage'
 import { MarkdownContent } from './MarkdownContent'
+import { SwarmPlanCard } from './SwarmPlanCard'
 
 export interface AssistantMessageProps {
   text: string
@@ -37,9 +39,13 @@ export function AssistantMessage({
     }
   }, [onCopy, text])
 
+  // The managed-swarm manager agent emits its plan as a JSON object — render
+  // it as a formatted card instead of an unreadable blob.
+  const swarmPlan = parseSwarmPlan(text)
+
   return (
     <div className="flex flex-col gap-2">
-      <MarkdownContent text={text} />
+      {swarmPlan ? <SwarmPlanCard plan={swarmPlan} /> : <MarkdownContent text={text} />}
       {showActions ? (
         <div className="flex items-center gap-1">
           <ActionButton label="Copy" onClick={handleCopy}>

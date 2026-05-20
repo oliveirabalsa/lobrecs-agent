@@ -1,5 +1,7 @@
 import type { ImageAttachment } from '../../../../shared/types'
+import { parseSwarmRolePrompt } from '../lib/swarmMessage'
 import { MarkdownContent } from './MarkdownContent'
+import { SwarmRoleMessage } from './SwarmRoleMessage'
 
 export interface UserMessageProps {
   text: string
@@ -11,8 +13,23 @@ export interface UserMessageProps {
  *
  * User prompts use the same safe markdown renderer as assistant messages, but
  * in compact mode so headings and code blocks fit inside the bubble.
+ *
+ * Auto-dispatched swarm worker prompts arrive with a `[Role: ...]` header —
+ * those render through `SwarmRoleMessage` instead so the machine-generated
+ * handoff reads as a labelled card rather than raw plumbing text.
  */
 export function UserMessage({ text, attachments }: UserMessageProps) {
+  const swarmRole = parseSwarmRolePrompt(text)
+  if (swarmRole) {
+    return (
+      <SwarmRoleMessage
+        role={swarmRole.role}
+        body={swarmRole.body}
+        attachments={attachments}
+      />
+    )
+  }
+
   return (
     <div className="shadow-elevated ml-auto max-w-[85%] rounded-bubble bg-bubble-user px-4 py-3 text-sm leading-6 text-primary sm:max-w-[70%]">
       {attachments && attachments.length > 0 ? (
