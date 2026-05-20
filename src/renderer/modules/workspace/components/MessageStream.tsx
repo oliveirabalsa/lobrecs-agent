@@ -315,7 +315,10 @@ function TurnBlock({
               className="motion-fade-up-in"
               style={{ animationDelay: `${Math.min(idx, 8) * 16}ms` }}
             >
-              {renderStreamItem(item, `${turn.id}-${idx}`, ctx)}
+              {renderStreamItem(item, `${turn.id}-${idx}`, {
+                ...ctx,
+                running: streamItemReceivesRunningState(renderable, idx, running),
+              })}
             </div>
           ))}
         </div>
@@ -396,6 +399,35 @@ function TrailingEditedFilesCard({
   }
 
   return null
+}
+
+export function streamItemReceivesRunningState(
+  items: readonly StreamItem[],
+  index: number,
+  running: boolean,
+): boolean {
+  if (!running) return false
+  if (!canRepresentLiveWork(items[index])) return false
+
+  for (let i = index + 1; i < items.length; i += 1) {
+    if (isProgressBoundary(items[i])) return false
+  }
+
+  return true
+}
+
+function canRepresentLiveWork(item: StreamItem | undefined): boolean {
+  return (
+    item?.kind === 'ran-commands-group' ||
+    item?.kind === 'command' ||
+    item?.kind === 'tool-call'
+  )
+}
+
+function isProgressBoundary(item: StreamItem): boolean {
+  if (item.kind === 'completion') return false
+  if (item.kind === 'diff-summary') return false
+  return true
 }
 
 interface FinalAssistantSplit {

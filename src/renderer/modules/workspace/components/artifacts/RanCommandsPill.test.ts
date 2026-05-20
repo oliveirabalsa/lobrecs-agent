@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RanCommandItem } from './RanCommandsPill'
 import { deriveRanCommandRows, deriveRanCommandsState } from './RanCommandsPill'
+import { deriveCommandsGroupDisplayState } from './CommandsGroup'
 
 describe('deriveRanCommandsState', () => {
   it('does not keep a resolved tool lifecycle spinning while the session is still running', () => {
@@ -78,5 +79,22 @@ describe('deriveRanCommandRows', () => {
       'shell rtk npm test',
       'shell rtk npm run build',
     ])
+  })
+})
+
+describe('deriveCommandsGroupDisplayState', () => {
+  it('uses resolved tool lifecycles for the tools label instead of raw event count', () => {
+    const items: RanCommandItem[] = [
+      { kind: 'tool-call', name: 'shell', input: 'rtk npm test', status: 'running' },
+      { kind: 'tool-call', name: 'shell', input: 'rtk npm test', status: 'done' },
+      { kind: 'tool-result', name: 'shell', output: 'ok', status: 'done' },
+    ]
+
+    expect(deriveCommandsGroupDisplayState('other', items, true)).toMatchObject({
+      count: 1,
+      hasRunning: false,
+      hasErrors: false,
+      label: 'Tools (1)',
+    })
   })
 })

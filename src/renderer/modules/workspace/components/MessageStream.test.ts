@@ -4,6 +4,7 @@ import {
   flattenCodeChangeFallbacks,
   shouldPinMessageStream,
   splitFinalAssistant,
+  streamItemReceivesRunningState,
 } from './MessageStream'
 
 describe('shouldPinMessageStream', () => {
@@ -82,6 +83,48 @@ describe('splitFinalAssistant', () => {
     expect(result.finalAssistantText).toBe('summary')
     expect(result.renderable).toEqual([])
     expect(result.trailingCodeChanges).toHaveLength(1)
+  })
+})
+
+describe('streamItemReceivesRunningState', () => {
+  it('does not keep an earlier tools group active after later output arrives', () => {
+    const items: StreamItem[] = [
+      {
+        kind: 'ran-commands-group',
+        id: 'turn-0-ran-1',
+        type: 'other',
+        items: [
+          { kind: 'tool-call', name: 'shell', status: 'running' },
+        ],
+      },
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'I found the next thing to inspect.',
+      },
+    ]
+
+    expect(streamItemReceivesRunningState(items, 0, true)).toBe(false)
+  })
+
+  it('keeps only the trailing tools group eligible for live loading', () => {
+    const items: StreamItem[] = [
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Checking tools.',
+      },
+      {
+        kind: 'ran-commands-group',
+        id: 'turn-0-ran-1',
+        type: 'other',
+        items: [
+          { kind: 'tool-call', name: 'shell', status: 'running' },
+        ],
+      },
+    ]
+
+    expect(streamItemReceivesRunningState(items, 1, true)).toBe(true)
   })
 })
 

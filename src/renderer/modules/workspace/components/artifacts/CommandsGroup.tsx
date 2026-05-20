@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { Spinner } from '../../../../components/ui'
 import { CommandCard } from './CommandCard'
-import type { RanCommandItem } from './RanCommandsPill'
 import {
-  classifyCommand,
+  deriveRanCommandsState,
+  type RanCommandItem,
+} from './RanCommandsPill'
+import {
   getCommandTypeGroup,
   type CommandType,
 } from '../../lib/commandClassifier'
@@ -14,20 +16,44 @@ export interface CommandsGroupProps {
   running?: boolean
 }
 
+export interface CommandsGroupDisplayState {
+  count: number
+  hasErrors: boolean
+  hasRunning: boolean
+  label: string
+}
+
+export function deriveCommandsGroupDisplayState(
+  type: CommandType,
+  items: RanCommandItem[],
+  running = false,
+): CommandsGroupDisplayState {
+  const groupLabel = getCommandTypeGroup(type)
+  const state = deriveRanCommandsState(items, running)
+  const label = state.active
+    ? `${groupLabel} (${state.count}…)`
+    : `${groupLabel} (${state.count})`
+
+  return {
+    count: state.count,
+    hasErrors: state.failed,
+    hasRunning: state.active,
+    label,
+  }
+}
+
 export function CommandsGroup({
   type,
   items,
   running = false,
 }: CommandsGroupProps) {
   const [collapsed, setCollapsed] = useState(true)
-  const count = items.length
+  const { count, hasErrors, hasRunning, label } = deriveCommandsGroupDisplayState(
+    type,
+    items,
+    running,
+  )
   const groupLabel = getCommandTypeGroup(type)
-  const hasErrors = items.some((item) => item.status === 'error')
-  const hasRunning = running && items.some((item) => item.status !== 'done' && item.status !== 'error')
-
-  const label = hasRunning
-    ? `${groupLabel} (${count}…)`
-    : `${groupLabel} (${count})`
 
   return (
     <div className="flex w-full flex-col gap-2 self-start">
@@ -52,7 +78,7 @@ export function CommandsGroup({
             <CommandCard
               key={`${type}-${idx}`}
               item={item}
-              running={running}
+              running={hasRunning}
             />
           ))}
         </div>

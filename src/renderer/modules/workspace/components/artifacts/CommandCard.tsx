@@ -82,7 +82,7 @@ function getDotClass(
   running: boolean,
 ): string {
   if (status === 'error') return 'bg-accent-del'
-  if (status === 'running' || (running && status === 'pending'))
+  if (running && (status === 'running' || status === 'pending'))
     return 'bg-accent-primary'
   if (status === 'pending') return 'bg-text-muted'
   return 'bg-accent-add'
@@ -93,7 +93,7 @@ function getStatusText(
   running: boolean,
 ): string | undefined {
   if (status === 'error') return 'Error'
-  if (status === 'running') return 'Running…'
+  if (status === 'running' && running) return 'Running…'
   if (status === 'pending' && running) return 'Pending…'
   return undefined
 }
