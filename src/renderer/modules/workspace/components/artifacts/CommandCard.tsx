@@ -5,6 +5,7 @@ import {
   classifyCommand,
   type CommandMeta,
 } from '../../lib/commandClassifier'
+import { formatCommandDisplay } from '../../lib/commandFormatters'
 
 export interface CommandCardProps {
   item: RanCommandItem
@@ -16,7 +17,7 @@ export function CommandCard({ item, meta, running = false }: CommandCardProps) {
   const [expanded, setExpanded] = useState(meta?.showOutputByDefault ?? false)
   const classMeta = meta || classifyCommand(item)
 
-  const title = getCommandTitle(item)
+  const display = formatCommandDisplay(item)
   const status = item.status
   const output = item.kind === 'tool-result' ? item.output : undefined
 
@@ -36,19 +37,22 @@ export function CommandCard({ item, meta, running = false }: CommandCardProps) {
             ? 'bg-card border-hairline'
             : 'border-hairline bg-card-raised hover:bg-card'
         }`}
-        title={title}
+        title={display.title}
       >
         <span className="shrink-0 text-secondary" aria-hidden="true">
           {getIcon(classMeta.icon)}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-secondary text-left">
-          {title}
+          {display.title}
+          {display.details ? (
+            <span className="ml-1 text-muted">{display.details}</span>
+          ) : null}
         </span>
         <span
           className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${dotClass}`}
           aria-hidden="true"
         />
-        {running && status !== 'done' && status !== 'error' ? (
+        {running && status !== 'done' && status !== 'error' && !showOutput ? (
           <Spinner size={12} />
         ) : null}
       </button>
@@ -56,7 +60,7 @@ export function CommandCard({ item, meta, running = false }: CommandCardProps) {
       {hasContent ? (
         <div className="rounded-card border border-hairline bg-card px-3 py-2 text-xs text-secondary">
           {expanded && !showOutput ? (
-            <div className="font-mono text-[11px] text-muted">{title}</div>
+            <div className="font-mono text-[11px] text-muted">{display.title}</div>
           ) : null}
           {showOutput ? (
             <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded border border-hairline bg-canvas px-2 py-1.5 font-mono text-[10px] text-secondary">
@@ -72,27 +76,6 @@ export function CommandCard({ item, meta, running = false }: CommandCardProps) {
   )
 }
 
-function getCommandTitle(item: RanCommandItem): string {
-  if (item.kind === 'command') {
-    return item.command
-  }
-  if (item.kind === 'tool-call') {
-    const input = formatInput(item.input)
-    return input ? `${item.name} ${input}` : item.name
-  }
-  return item.name
-}
-
-function formatInput(input: unknown): string | undefined {
-  if (typeof input === 'string') return input.trim() || undefined
-  if (input === undefined || input === null) return undefined
-
-  try {
-    return JSON.stringify(input)
-  } catch {
-    return String(input)
-  }
-}
 
 function getDotClass(
   status: 'pending' | 'running' | 'done' | 'error',
