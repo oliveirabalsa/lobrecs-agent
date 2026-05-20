@@ -1,4 +1,5 @@
 import type { ModelTier, SupportedAgentId } from './agents'
+import type { SwarmStrategy } from './swarms'
 import type { VerificationRecipe } from './system'
 
 export const SETTINGS_SCHEMA_VERSION = 1
@@ -87,7 +88,7 @@ export interface ExecutionSettings {
 export interface SwarmTemplate {
   id: string
   label: string
-  strategy: 'parallel' | 'sequential' | 'fan-out'
+  strategy: SwarmStrategy
   agents: Array<{
     role: string
     agentId: SupportedAgentId
@@ -118,6 +119,8 @@ export interface VerificationSettings {
   requireCommandPrefix: boolean
   maxOutputBytes: number
   defaultTimeoutSeconds: number
+  autoRunAfterAgentDiffs: boolean
+  selfHealingMaxAttempts: number
 }
 
 export interface ModelPricing {

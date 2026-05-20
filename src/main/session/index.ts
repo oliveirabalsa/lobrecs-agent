@@ -6,5 +6,7 @@ export type {
   CostEstimator,
   DispatchSessionParams,
   EventBroadcaster,
+  QualityGateRunner,
+  SessionContextResolver,
   SessionManagerOptions,
 } from './SessionManager'

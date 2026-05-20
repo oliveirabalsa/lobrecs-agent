@@ -319,7 +319,66 @@ describe('SessionManager', () => {
     })
   })
 
-  it('rejects local runs from another thread while a repository chat is active', async () => {
+  it('resolves project memory before appending same-thread transcript', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: () => undefined,
+      worktreeIsolation: false,
+      resolveContext: async ({ baseContext }) =>
+        [
+          baseContext?.trim(),
+          'Project knowledge base (.lobrecs/memory.json):\n- [workflow] Use rtk for shell commands.',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+    })
+
+    const first = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'build store foundation',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      context: 'AGENTS.md',
+    })
+
+    adapter.emit({
+      type: 'stdout',
+      sessionId: first.sessionId,
+      payload: { text: 'Store foundation is ready' },
+      timestamp: 10,
+    })
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: first.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+
+    await manager.dispatch({
+      projectId: project.id,
+      threadId: first.threadId,
+      prompt: 'add tests',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      context: 'AGENTS.md',
+    })
+
+    const context = adapter.dispatches[1]?.context ?? ''
+    expect(context.indexOf('AGENTS.md')).toBeLessThan(
+      context.indexOf('Project knowledge base'),
+    )
+    expect(context.indexOf('Project knowledge base')).toBeLessThan(
+      context.indexOf('Conversation history'),
+    )
+    expect(context).toContain('- [workflow] Use rtk for shell commands.')
+    expect(context).toContain('Assistant: Store foundation is ready')
+  })
+
+  it('allows overlapping local runs from different chat threads in the same repository', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
     const manager = new SessionManager({
@@ -336,18 +395,20 @@ describe('SessionManager', () => {
       repoPath: project.repoPath,
     })
 
-    await expect(
-      manager.dispatch({
-        projectId: project.id,
-        prompt: 'second chat',
-        agentId: 'claude-code',
-        model: 'claude-sonnet-4-6',
-        repoPath: project.repoPath,
-      }),
-    ).rejects.toThrow('Another chat is already running in this repository')
+    const second = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'second chat',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
 
     expect(manager.isActive(first.sessionId)).toBe(true)
-    expect(adapter.dispatches).toHaveLength(1)
+    expect(manager.isActive(second.sessionId)).toBe(true)
+    expect(first.threadId).not.toBe(second.threadId)
+    expect(sessionsStore.get(first.sessionId)?.threadId).toBe(first.threadId)
+    expect(sessionsStore.get(second.sessionId)?.threadId).toBe(second.threadId)
+    expect(adapter.dispatches).toHaveLength(2)
   })
 
   it('allows overlapping local runs when they belong to the same chat thread', async () => {
@@ -720,6 +781,71 @@ describe('SessionManager', () => {
     const storedTypes = sessionsStore.listEvents(sessionId).map((event) => event.type)
     expect(storedTypes.filter((type) => type === 'session-complete')).toHaveLength(1)
     expect(storedTypes.indexOf('diff')).toBeLessThan(storedTypes.indexOf('session-complete'))
+  })
+
+  it('runs the quality gate after applied diffs and before completion is emitted', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const qualityGateRunner = vi.fn(async (input) => {
+      input.emitActivity({
+        kind: 'step',
+        title: 'Automated QA passed',
+        status: 'done',
+      })
+    })
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      qualityGateRunner,
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated with qa\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    expect(qualityGateRunner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId,
+        projectId: project.id,
+        repoPath,
+        attempt: 0,
+        changedFiles: [
+          expect.objectContaining({
+            filePath: path.join(repoPath, 'existing.ts'),
+            status: 'applied',
+          }),
+        ],
+      }),
+    )
+
+    const qualityIndex = broadcasts.findIndex(
+      (event) =>
+        event.type === 'activity' &&
+        typeof event.payload === 'object' &&
+        event.payload !== null &&
+        (event.payload as { title?: string }).title === 'Automated QA passed',
+    )
+    expect(qualityIndex).toBeGreaterThanOrEqual(0)
+    expect(qualityIndex).toBeLessThan(
+      broadcasts.findIndex((event) => event.type === 'session-complete'),
+    )
   })
 
   it('keeps conflicted auto-apply changes as review-only conflicts without blocking completion', async () => {

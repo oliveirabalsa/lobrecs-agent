@@ -1,6 +1,7 @@
 import {
   SETTINGS_SCHEMA_VERSION,
   SUPPORTED_AGENT_IDS,
+  SWARM_STRATEGIES,
   type AgentPermissionMode,
   type AppSettings,
   type AppSettingsPatch,
@@ -159,6 +160,13 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
         1_800,
         120,
       ),
+      autoRunAfterAgentDiffs: booleanOr(cloned.verification.autoRunAfterAgentDiffs, true),
+      selfHealingMaxAttempts: clampInteger(
+        cloned.verification.selfHealingMaxAttempts,
+        0,
+        5,
+        1,
+      ),
     },
     costs: {
       currency: 'USD',
@@ -249,14 +257,15 @@ function normalizeTemplates(templates: unknown): SwarmTemplate[] {
       const record = objectLike(template)
       const id = stringOr(record.id, `template-${index + 1}`).trim()
       const label = stringOr(record.label, id).trim()
+      const strategy = swarmStrategyOr(record.strategy, 'parallel')
       const agents = normalizeTemplateAgents(record.agents)
 
-      if (!id || !label || agents.length === 0) return null
+      if (!id || !label || (strategy !== 'managed' && agents.length === 0)) return null
 
       return {
         id,
         label,
-        strategy: swarmStrategyOr(record.strategy, 'parallel'),
+        strategy,
         agents,
       }
     })
@@ -389,8 +398,8 @@ function permissionModeOr(value: unknown, fallback: AgentPermissionMode): AgentP
 }
 
 function swarmStrategyOr(value: unknown, fallback: SwarmTemplate['strategy']): SwarmTemplate['strategy'] {
-  return value === 'parallel' || value === 'sequential' || value === 'fan-out'
-    ? value
+  return typeof value === 'string' && SWARM_STRATEGIES.includes(value as SwarmTemplate['strategy'])
+    ? (value as SwarmTemplate['strategy'])
     : fallback
 }
 

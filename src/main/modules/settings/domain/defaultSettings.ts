@@ -189,6 +189,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     requireCommandPrefix: true,
     maxOutputBytes: 512_000,
     defaultTimeoutSeconds: 120,
+    autoRunAfterAgentDiffs: true,
+    selfHealingMaxAttempts: 1,
   },
   costs: {
     currency: 'USD',

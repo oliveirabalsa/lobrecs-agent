@@ -1,7 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
-import path from 'node:path'
 import type {
   AgentActivity,
   AgentEvent,
@@ -61,6 +60,7 @@ export type DispatchSessionParams = {
   imageAttachments?: ImageAttachment[]
   runtimeSettings?: AgentRuntimeSettings
   isolate?: boolean
+  qualityAttempt?: number
   /** When provided, links the new session to an existing thread. */
   threadId?: string
 }
@@ -73,17 +73,28 @@ export type DispatchSessionResult = {
 export type EventBroadcaster = (event: AgentEvent) => void
 export type CostEstimator = (model: string, tokensIn: number, tokensOut: number) => number
 export type AdapterResolver = (agentId: AgentId) => AgentAdapter | undefined
+export type SessionContextResolver = (input: {
+  projectId: string
+  repoPath: string
+  prompt: string
+  baseContext?: string | null
+}) => Promise<string | null>
+export type QualityGateRunner = (input: {
+  sessionId: string
+  threadId: string
+  projectId: string
+  repoPath: string
+  changedFiles: DiffProposal[]
+  attempt: number
+  emitActivity(payload: AgentActivity): void
+}) => Promise<void>
 
 type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   repoPath: string
   threadId: string
   worktreePath: string | null
   localBaseline: LocalChangeBaseline | null
-}
-
-interface LocalRunReservation {
-  repoPath: string
-  threadId: string
+  qualityAttempt: number
 }
 
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
@@ -97,6 +108,8 @@ export type SessionManagerOptions = {
   broadcast?: EventBroadcaster
   estimateCost?: CostEstimator
   worktreeIsolation?: boolean
+  resolveContext?: SessionContextResolver
+  qualityGateRunner?: QualityGateRunner
 }
 
 export class SessionManager {
@@ -108,14 +121,17 @@ export class SessionManager {
   private readonly processWarningsBySession = new Map<string, Set<string>>()
   private readonly sessionsPausedForUserInput = new Set<string>()
   private readonly pendingQueues = new Map<string, QueuedMessage[]>()
-  private readonly activeLocalRuns = new Map<string, LocalRunReservation>()
   private estimateCost: CostEstimator
+  private resolveContext?: SessionContextResolver
+  private qualityGateRunner?: QualityGateRunner
 
   constructor(options: SessionManagerOptions = {}) {
     this.adapterResolver = options.adapterResolver
     this.broadcastEvent = options.broadcast ?? broadcastToRenderer
     this.worktreeIsolation = options.worktreeIsolation ?? false
     this.estimateCost = options.estimateCost ?? (() => 0)
+    this.resolveContext = options.resolveContext
+    this.qualityGateRunner = options.qualityGateRunner
 
     for (const adapter of options.adapters ?? []) {
       this.registerAdapter(adapter)
@@ -130,25 +146,25 @@ export class SessionManager {
     this.estimateCost = estimateCost
   }
 
+  setContextResolver(resolveContext: SessionContextResolver): void {
+    this.resolveContext = resolveContext
+  }
+
+  setQualityGateRunner(runner: QualityGateRunner | undefined): void {
+    this.qualityGateRunner = runner
+  }
+
   async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
     const shouldIsolate = params.isolate ?? this.worktreeIsolation
-    if (!params.threadId) {
-      this.assertNoLocalRunConflict(params.repoPath, null, shouldIsolate)
-    }
 
     const threadId = this.resolveOrCreateThread(params)
     const sessionId = randomUUID()
-    const localRunReserved = this.reserveLocalRun({
-      sessionId,
-      repoPath: params.repoPath,
-      threadId,
-      isolated: shouldIsolate,
-    })
     let sessionCreated = false
 
     try {
+      const baseContext = await this.resolveDispatchContext(params)
       const context = buildAdapterContext(
-        params.context,
+        baseContext,
         sessionsStore.listThreadTranscript(threadId, { limit: THREAD_CONTEXT_SESSION_LIMIT }),
       )
 
@@ -208,6 +224,7 @@ export class SessionManager {
         threadId,
         worktreePath,
         localBaseline,
+        qualityAttempt: params.qualityAttempt ?? 0,
       })
 
       agentSession.events.on('event', (event: AgentEvent) => {
@@ -216,7 +233,6 @@ export class SessionManager {
 
       return { sessionId: session.id, threadId }
     } catch (error) {
-      if (localRunReserved) this.releaseLocalRun(sessionId)
       await worktreeManager.remove(sessionId, params.repoPath)
       if (sessionCreated) {
         this.failSession(sessionId, error)
@@ -244,7 +260,6 @@ export class SessionManager {
   cancel(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
-    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
     const session = sessionsStore.get(sessionId)
@@ -365,6 +380,19 @@ export class SessionManager {
     return this.adapterResolver?.(agentId) ?? this.adapters.get(agentId)
   }
 
+  private async resolveDispatchContext(
+    params: DispatchSessionParams,
+  ): Promise<string | null | undefined> {
+    if (!this.resolveContext) return params.context
+
+    return this.resolveContext({
+      projectId: params.projectId,
+      repoPath: params.repoPath,
+      prompt: params.prompt,
+      baseContext: params.context,
+    })
+  }
+
   private resolveOrCreateThread(params: DispatchSessionParams): string {
     if (params.threadId) {
       const existing = threadsStore.get(params.threadId)
@@ -436,7 +464,6 @@ export class SessionManager {
       this.recordEvent(event)
       void this.removeWorktree(event.sessionId, active)
       this.activeSessions.delete(event.sessionId)
-      this.releaseLocalRun(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
       return
     }
@@ -475,7 +502,6 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId)
     this.sessionsPausedForUserInput.add(sessionId)
     this.activeSessions.delete(sessionId)
-    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
 
     if (!active) return
@@ -517,15 +543,15 @@ export class SessionManager {
   ): Promise<void> {
     if (!active) {
       this.recordEvent(finalEvent)
-      this.releaseLocalRun(sessionId)
       return
     }
 
     if (!active.worktreePath && !active.localBaseline) {
       this.recordEvent(finalEvent)
-      this.releaseLocalRun(sessionId)
       return
     }
+
+    let changedFiles: DiffProposal[] = []
 
     try {
       const proposals = active.worktreePath
@@ -537,6 +563,7 @@ export class SessionManager {
         const reviewedProposals = active.worktreePath
           ? await this.applyDiffProposals(sessionId, proposals)
           : proposals
+        changedFiles = reviewedProposals.filter((proposal) => proposal.status === 'applied')
         this.handleAgentEvent({
           type: 'diff',
           sessionId,
@@ -572,9 +599,53 @@ export class SessionManager {
       try {
         await this.removeWorktree(sessionId, active)
       } finally {
-        this.releaseLocalRun(sessionId)
+        if (completionStatus(finalEvent) === 'done') {
+          await this.runQualityGate(sessionId, active, changedFiles)
+        }
         this.recordEvent(finalEvent)
       }
+    }
+  }
+
+  private async runQualityGate(
+    sessionId: string,
+    active: ActiveSession,
+    changedFiles: DiffProposal[],
+  ): Promise<void> {
+    if (!this.qualityGateRunner || changedFiles.length === 0) return
+
+    const session = sessionsStore.get(sessionId)
+    if (!session) return
+
+    try {
+      await this.qualityGateRunner({
+        sessionId,
+        threadId: active.threadId,
+        projectId: session.projectId,
+        repoPath: active.repoPath,
+        changedFiles,
+        attempt: active.qualityAttempt,
+        emitActivity: (payload) => {
+          this.recordEvent({
+            type: 'activity',
+            sessionId,
+            payload,
+            timestamp: Date.now(),
+          })
+        },
+      })
+    } catch (error) {
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Automated QA failed to run',
+          detail: errorMessage(error),
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
     }
   }
 
@@ -691,49 +762,6 @@ export class SessionManager {
     }
   }
 
-  private reserveLocalRun(input: {
-    sessionId: string
-    repoPath: string
-    threadId: string
-    isolated: boolean
-  }): LocalRunReservation | null {
-    if (input.isolated) return null
-
-    const reservation: LocalRunReservation = {
-      repoPath: normalizeRepoPath(input.repoPath),
-      threadId: input.threadId,
-    }
-    this.assertNoLocalRunConflict(reservation.repoPath, reservation.threadId, false)
-
-    this.activeLocalRuns.set(input.sessionId, reservation)
-    return reservation
-  }
-
-  private assertNoLocalRunConflict(
-    repoPath: string,
-    threadId: string | null,
-    isolated: boolean,
-  ): void {
-    if (isolated) return
-
-    const normalizedRepoPath = normalizeRepoPath(repoPath)
-    const conflictingRun = [...this.activeLocalRuns.values()].find(
-      (run) =>
-        run.repoPath === normalizedRepoPath &&
-        (threadId === null || run.threadId !== threadId),
-    )
-
-    if (!conflictingRun) return
-
-    throw new Error(
-      'Another chat is already running in this repository. Wait for it to finish before starting a different chat so edited files stay scoped to the current chat.',
-    )
-  }
-
-  private releaseLocalRun(sessionId: string): void {
-    this.activeLocalRuns.delete(sessionId)
-  }
-
   private failSession(sessionId: string, error: unknown): void {
     const event: AgentEvent = {
       type: 'error',
@@ -746,7 +774,6 @@ export class SessionManager {
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
     this.activeSessions.delete(sessionId)
-    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
   }
@@ -770,10 +797,6 @@ function isUserQuestionActivity(payload: unknown): payload is Extract<
     payload !== null &&
     (payload as { kind?: unknown }).kind === 'user-question'
   )
-}
-
-function normalizeRepoPath(repoPath: string): string {
-  return path.resolve(repoPath)
 }
 
 function completionStatus(event: AgentEvent): SessionStatus {

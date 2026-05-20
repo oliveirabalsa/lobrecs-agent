@@ -13,6 +13,9 @@ describe('settings validation', () => {
         maxAgents: 99,
         maxReviewerIterations: 99,
       },
+      verification: {
+        selfHealingMaxAttempts: 99,
+      },
       routing: {
         tierThresholds: {
           lightweightMax: 95,
@@ -28,6 +31,7 @@ describe('settings validation', () => {
     expect(settings.agents.imageAttachments.maxSizeMb).toBe(1)
     expect(settings.swarms.maxAgents).toBe(16)
     expect(settings.swarms.maxReviewerIterations).toBe(10)
+    expect(settings.verification.selfHealingMaxAttempts).toBe(5)
     expect(settings.routing.tierThresholds).toEqual({
       lightweightMax: 95,
       balancedMax: 96,
@@ -179,6 +183,30 @@ describe('settings validation', () => {
           },
         },
       },
+    })
+  })
+
+  it('preserves managed swarm strategy settings', () => {
+    const settings = normalizeSettings({
+      swarms: {
+        defaultStrategy: 'managed',
+        templates: [
+          {
+            id: 'auto',
+            label: 'Autonomous',
+            strategy: 'managed',
+            agents: [],
+          },
+        ],
+      },
+    })
+
+    expect(settings.swarms.defaultStrategy).toBe('managed')
+    expect(settings.swarms.templates[0]).toEqual({
+      id: 'auto',
+      label: 'Autonomous',
+      strategy: 'managed',
+      agents: [],
     })
   })
 })
