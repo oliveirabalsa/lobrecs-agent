@@ -50,10 +50,12 @@ describe('preload api shape', () => {
       'router',
       'feedback',
       'cost',
+      'context',
       'automations',
       'specs',
       'runs',
       'git',
+      'memory',
       'settings',
       'updates',
       'on',
@@ -224,6 +226,19 @@ describe('preload api shape', () => {
       },
       { call: (agentforge) => agentforge.cost.byPeriod(30), expected: ['cost:by-period', 30] },
       {
+        call: (agentforge) => agentforge.context.index('project-1'),
+        expected: ['context:index', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.context.status('project-1'),
+        expected: ['context:status', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.context.search({ projectId: 'project-1', query: 'session routing' }),
+        expected: ['context:search', { projectId: 'project-1', query: 'session routing' }],
+      },
+      {
         call: (agentforge) => agentforge.automations.list('project-1'),
         expected: ['automations:list', 'project-1'],
       },
@@ -349,6 +364,31 @@ describe('preload api shape', () => {
             ],
           },
         ],
+      },
+      {
+        call: (agentforge) => agentforge.memory.list('project-1'),
+        expected: ['memory:list', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.memory.save({
+            projectId: 'project-1',
+            kind: 'architecture',
+            summary: 'Keep privileged filesystem access in the main process.',
+          }),
+        expected: [
+          'memory:save',
+          {
+            projectId: 'project-1',
+            kind: 'architecture',
+            summary: 'Keep privileged filesystem access in the main process.',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.memory.delete({ projectId: 'project-1', entryId: 'memory-1' }),
+        expected: ['memory:delete', { projectId: 'project-1', entryId: 'memory-1' }],
       },
       {
         call: (agentforge) => agentforge.settings.getGlobal(),

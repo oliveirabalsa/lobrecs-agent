@@ -221,6 +221,25 @@ const migrations: Migration[] = [
         WHERE value LIKE '%"gemini"%';
     `,
   },
+  {
+    version: 8,
+    up: `
+      CREATE TABLE IF NOT EXISTS project_context_chunks (
+        project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        path         TEXT NOT NULL,
+        start_line   INTEGER NOT NULL,
+        end_line     INTEGER NOT NULL,
+        content      TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        embedding    TEXT NOT NULL,
+        updated_at   INTEGER NOT NULL,
+        PRIMARY KEY (project_id, path, start_line, end_line)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_project_context_chunks_project
+        ON project_context_chunks(project_id, updated_at DESC);
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {

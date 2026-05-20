@@ -4,9 +4,12 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
+import { registerContextHandlers, repositoryContextService } from '../modules/context'
 import { registerFeedbackHandlers } from '../modules/feedback/ipc/registerFeedbackHandlers'
 import { registerGitHandlers } from '../modules/git/ipc/registerGitHandlers'
+import { projectMemoryService, registerMemoryHandlers } from '../modules/memory'
 import { registerProjectHandlers } from '../modules/projects/ipc/registerProjectHandlers'
+import { runQualityGate } from '../modules/quality/application/qualityGateService'
 import { registerRoutingHandlers } from '../modules/routing/ipc/registerRoutingHandlers'
 import { registerRunHandlers } from '../modules/runs/ipc/registerRunHandlers'
 import { registerSessionHandlers } from '../modules/sessions/ipc/registerSessionHandlers'
@@ -39,8 +42,10 @@ export function registerIpcHandlers(): void {
   registerAgentHandlers(context)
   registerSwarmHandlers(context)
   registerRoutingHandlers(context)
-  registerFeedbackHandlers()
+  registerFeedbackHandlers(context)
   registerCostHandlers()
+  registerContextHandlers(context)
+  registerMemoryHandlers(context)
   registerAutomationHandlers(context)
   registerSpecHandlers()
   registerRunHandlers(context)
@@ -54,6 +59,8 @@ function createMainIpcContext(): MainIpcContext {
   return {
     adapters: adapterRegistry,
     modelRouter,
+    projectMemoryService,
+    repositoryContext: repositoryContextService,
     sessionManager,
     settingsService,
     swarmOrchestrator,
@@ -67,6 +74,30 @@ function configureSessionManager(context: MainIpcContext): void {
   }
   context.sessionManager.setCostEstimator((model, tokensIn, tokensOut) =>
     estimateCost(model, tokensIn, tokensOut, context.settingsService.getGlobal().costs.pricing),
+  )
+  context.sessionManager.setContextResolver((input) =>
+    buildSessionContext(context, input.projectId, input.repoPath, input.prompt, input.baseContext),
+  )
+  context.sessionManager.setQualityGateRunner((input) =>
+    runQualityGate(input, {
+      getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
+      routeModel: (routeInput) => context.modelRouter.route(routeInput),
+      dispatchRepair: async (repairInput) => {
+        const settings = context.settingsService.getEffective(repairInput.projectId).settings
+        return context.sessionManager.dispatch({
+          projectId: repairInput.projectId,
+          threadId: repairInput.threadId,
+          prompt: repairInput.prompt,
+          agentId: repairInput.agentId,
+          model: repairInput.model,
+          repoPath: repairInput.repoPath,
+          context: projectsStore.getContext(repairInput.projectId),
+          isolate: settings.execution.worktreeIsolation,
+          runtimeSettings: settings.agents.runtimes[repairInput.agentId],
+          qualityAttempt: repairInput.qualityAttempt,
+        })
+      },
+    }),
   )
 }
 
@@ -95,4 +126,25 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
     worktrees: context.worktreeManager,
     getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
   })
+}
+
+async function buildSessionContext(
+  context: MainIpcContext,
+  projectId: string,
+  repoPath: string,
+  prompt: string,
+  baseContext?: string | null,
+): Promise<string | null> {
+  const projectContext = (baseContext ?? projectsStore.getContext(projectId))?.trim()
+  const repositoryContext = await context.repositoryContext.buildPromptContext({
+    projectId,
+    repoPath,
+    prompt,
+  })
+  const memoryContext = await context.projectMemoryService.buildPromptContext({
+    repoPath,
+    baseContext: null,
+  })
+
+  return [projectContext, memoryContext, repositoryContext].filter(Boolean).join('\n\n') || null
 }

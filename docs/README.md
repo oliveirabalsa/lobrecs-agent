@@ -14,6 +14,8 @@ refactor.
   with a focus on bugs, regressions, security, and missing verification.
 - [Settings](features/settings.md) documents configurable app behavior and the
   values that are intentionally excluded from persistence.
+- [Project memory](features/memory.md) documents repo-local learned knowledge
+  stored at `.lobrecs/memory.json`.
 - [Updates](features/updates.md) documents how packaged builds check,
   download, and install new releases.
 

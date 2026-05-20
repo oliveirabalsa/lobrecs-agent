@@ -2,9 +2,11 @@ import type { IpcRenderer } from 'electron'
 import { createAgentApi, type AgentApi } from './agents'
 import { createAutomationsApi, type AutomationsApi } from './automations'
 import { createCostApi, type CostApi } from './cost'
+import { createRepositoryContextApi, type RepositoryContextApi } from './context'
 import { createEventApi, type AgentForgeEventsApi } from './events'
 import { createFeedbackApi, type FeedbackApi } from './feedback'
 import { createGitApi, type GitApi } from './git'
+import { createMemoryApi, type MemoryApi } from './memory'
 import { createProjectsApi, type ProjectsApi } from './projects'
 import { createRouterApi, type RouterApi } from './routing'
 import { createRunsApi, type RunsApi } from './runs'
@@ -25,10 +27,12 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   router: RouterApi
   feedback: FeedbackApi
   cost: CostApi
+  context: RepositoryContextApi
   automations: AutomationsApi
   specs: SpecsApi
   runs: RunsApi
   git: GitApi
+  memory: MemoryApi
   settings: SettingsApi
   system: SystemApi
   updates: UpdatesApi
@@ -46,10 +50,12 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     router: createRouterApi(ipcRenderer),
     feedback: createFeedbackApi(ipcRenderer),
     cost: createCostApi(ipcRenderer),
+    context: createRepositoryContextApi(ipcRenderer),
     automations: createAutomationsApi(ipcRenderer),
     specs: createSpecsApi(ipcRenderer),
     runs: createRunsApi(ipcRenderer),
     git: createGitApi(ipcRenderer),
+    memory: createMemoryApi(ipcRenderer),
     settings: createSettingsApi(ipcRenderer),
     updates: createUpdatesApi(ipcRenderer),
     on: events.on,
