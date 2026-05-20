@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter'
 import { CodexAdapter } from './CodexAdapter'
-import { GeminiAdapter } from './GeminiAdapter'
+import { AntigravityAdapter } from './AntigravityAdapter'
 import { OpenCodeAdapter } from './OpenCodeAdapter'
 import { adapterRegistry } from './index'
 import { processPool } from '../process/ProcessPool'
@@ -11,7 +11,7 @@ import type { AgentEvent } from '../../shared/types'
 
 const claudeMock = fileURLToPath(new URL('./__mocks__/claude-mock.cjs', import.meta.url))
 const codexMock = fileURLToPath(new URL('./__mocks__/codex-mock.cjs', import.meta.url))
-const geminiMock = fileURLToPath(new URL('./__mocks__/gemini-mock.cjs', import.meta.url))
+const antigravityMock = fileURLToPath(new URL('./__mocks__/antigravity-mock.cjs', import.meta.url))
 const opencodeMock = fileURLToPath(new URL('./__mocks__/opencode-mock.cjs', import.meta.url))
 
 describe('agent adapters', () => {
@@ -22,7 +22,8 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
     delete process.env.CODEX_COMMAND
-    delete process.env.GEMINI_COMMAND
+    delete process.env.ANTIGRAVITY_COMMAND
+    delete process.env.ANTIGRAVITY_MOCK_MODE
     delete process.env.OPENCODE_COMMAND
     delete process.env.OPENCODE_MOCK_IMMEDIATE
     delete process.env.OPENCODE_MOCK_STEP_FINISH
@@ -33,7 +34,7 @@ describe('agent adapters', () => {
     expect(adapterRegistry.get('claude-code')).toBeInstanceOf(ClaudeCodeAdapter)
     expect(adapterRegistry.get('codex')).toBeInstanceOf(CodexAdapter)
     expect(adapterRegistry.get('opencode')).toBeInstanceOf(OpenCodeAdapter)
-    expect(adapterRegistry.get('gemini')).toBeInstanceOf(GeminiAdapter)
+    expect(adapterRegistry.get('antigravity')).toBeInstanceOf(AntigravityAdapter)
   })
 
   it('dispatches Claude Code with JSONL parsing and command override support', async () => {
@@ -329,14 +330,14 @@ describe('agent adapters', () => {
     expect(events.filter((event) => event.type === 'session-complete')).toHaveLength(1)
   })
 
-  it('dispatches Gemini with stream JSON args and normalizes result usage', async () => {
-    process.env.GEMINI_COMMAND = geminiMock
-    const adapter = new GeminiAdapter()
+  it('dispatches Antigravity in print mode and normalizes compatibility result usage', async () => {
+    process.env.ANTIGRAVITY_COMMAND = antigravityMock
+    const adapter = new AntigravityAdapter()
 
     expect(await adapter.isInstalled()).toBe(true)
 
     const session = await adapter.dispatch({
-      sessionId: 'gemini-session',
+      sessionId: 'antigravity-session',
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
       model: 'flash',
@@ -347,23 +348,25 @@ describe('agent adapters', () => {
     const argv = argvFromEvent(argvEvent)
     const stderr = events.find((event) => event.type === 'stderr')
     const complete = events.find((event) => event.type === 'session-complete')
+    const printIndex = argv.indexOf('--print')
 
-    expect(argv).toEqual(
-      expect.arrayContaining([
-        '--model',
-        'flash',
-        '--output-format',
-        'stream-json',
-        '--skip-trust',
-        '--approval-mode',
-        'yolo',
-      ]),
-    )
-    expect(argValue(argv, '--prompt')).toContain('Repository instructions:\nAlways use rtk.')
-    expect(argValue(argv, '--prompt')).toContain('Task:\nSummarize this repo')
-    expect(events.some((event) => payloadField(event, 'content') === 'Hello from Gemini mock')).toBe(true)
+    expect(argv).toEqual(expect.arrayContaining(['--print', '--add-dir', process.cwd()]))
+    expect(argv).toContain('--dangerously-skip-permissions')
+    expect(argv.indexOf('--add-dir')).toBeLessThan(printIndex)
+    expect(argv.indexOf('--dangerously-skip-permissions')).toBeLessThan(printIndex)
+    expect(argv).not.toContain('pure')
+    expect(argv).not.toContain('--model')
+    expect(argv).not.toContain('flash')
+    expect(argv).not.toContain('--prompt')
+    expect(argv).not.toContain('--output-format')
+    expect(argv).not.toContain('stream-json')
+    expect(argv).not.toContain('--skip-trust')
+    expect(argv).not.toContain('--approval-mode')
+    expect(argv.at(-1)).toContain('Repository instructions:\nAlways use rtk.')
+    expect(argv.at(-1)).toContain('Task:\nSummarize this repo')
+    expect(events.some((event) => payloadField(event, 'text') === 'Hello from Antigravity mock\n')).toBe(true)
     expect(events.some((event) => payloadField(event, 'tool_name') === 'shell')).toBe(true)
-    expect(payloadField(stderr, 'message')).toBe('gemini warning')
+    expect(payloadField(stderr, 'text')).toContain('antigravity warning')
     expect(payloadField(complete, 'usage')).toMatchObject({
       input_tokens: 11,
       output_tokens: 10,
@@ -371,29 +374,88 @@ describe('agent adapters', () => {
     })
   })
 
-  it.each([
-    ['read-only' as const, 'plan'],
-    ['ask-for-approval' as const, 'default'],
-  ])('maps Gemini %s permission mode to approval-mode %s', async (permissionMode, approvalMode) => {
-    const adapter = new GeminiAdapter()
+  it('completes Antigravity plain multiline print output on process exit', async () => {
+    process.env.ANTIGRAVITY_COMMAND = antigravityMock
+    process.env.ANTIGRAVITY_MOCK_MODE = 'plain-only'
+    const adapter = new AntigravityAdapter()
 
     const session = await adapter.dispatch({
-      sessionId: `gemini-${permissionMode}-session`,
+      sessionId: 'antigravity-plain-session',
+      prompt: 'Print two lines',
+      repoPath: process.cwd(),
+      model: 'gemini-2.5-flash',
+    })
+    const events = await collectEvents(session)
+    const stdoutTexts = events
+      .filter((event) => event.type === 'stdout')
+      .map((event) => payloadField(event, 'text'))
+      .filter((text): text is string => typeof text === 'string')
+    const complete = events.find((event) => event.type === 'session-complete')
+
+    expect(stdoutTexts).toEqual([
+      'First Antigravity line\n',
+      'Second Antigravity line\n',
+    ])
+    expect(payloadField(complete, 'exitCode')).toBe(0)
+  })
+
+  it('surfaces a clear error when the Antigravity CLI is missing', async () => {
+    const adapter = new AntigravityAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'antigravity-missing-session',
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'gemini-2.5-flash',
+      runtimeSettings: {
+        enabled: true,
+        command: '/tmp/lobrecs-agent-missing-agy',
+        permissionMode: 'dangerous',
+        extraArgs: [],
+      },
+    })
+    const events = await collectEvents(session)
+    const error = events.find((event) => event.type === 'error')
+
+    expect(payloadField(error, 'message')).toContain('Antigravity CLI not found')
+    expect(payloadField(error, 'message')).toContain('ANTIGRAVITY_COMMAND')
+    expect(events.some((event) => event.type === 'session-complete')).toBe(false)
+  })
+
+  it.each([
+    ['dangerous' as const, ['--dangerously-skip-permissions'], ['--sandbox']],
+    ['bypass-permissions' as const, ['--dangerously-skip-permissions'], ['--sandbox']],
+    ['read-only' as const, ['--sandbox'], ['--dangerously-skip-permissions']],
+    ['ask-for-approval' as const, [], ['--dangerously-skip-permissions', '--sandbox']],
+  ])('maps Antigravity %s permission mode to CLI flags', async (permissionMode, expected, forbidden) => {
+    const adapter = new AntigravityAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: `antigravity-${permissionMode}-session`,
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
       model: 'flash',
       runtimeSettings: {
         enabled: true,
-        command: geminiMock,
+        command: antigravityMock,
         permissionMode,
-        extraArgs: [],
+        extraArgs: ['--print-timeout', '10m'],
       },
     })
     const events = await collectEvents(session)
     const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
     const argv = argvFromEvent(argvEvent)
+    const printIndex = argv.indexOf('--print')
 
-    expect(argValue(argv, '--approval-mode')).toBe(approvalMode)
+    expect(argv).toEqual(expect.arrayContaining(['--print-timeout', '10m']))
+    expect(argv.indexOf('--print-timeout')).toBeLessThan(printIndex)
+    for (const flag of expected) {
+      expect(argv).toContain(flag)
+      expect(argv.indexOf(flag)).toBeLessThan(printIndex)
+    }
+    for (const flag of forbidden) {
+      expect(argv).not.toContain(flag)
+    }
   })
 })
 
@@ -430,11 +492,6 @@ function payloadText(event: AgentEvent | undefined): unknown {
 function argvFromEvent(event: AgentEvent | undefined): string[] {
   const argv = payloadField(event, 'argv')
   return Array.isArray(argv) && argv.every((item) => typeof item === 'string') ? argv : []
-}
-
-function argValue(argv: string[], flag: string): string | undefined {
-  const index = argv.indexOf(flag)
-  return index >= 0 ? argv[index + 1] : undefined
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {

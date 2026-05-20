@@ -110,8 +110,8 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   }
 
   const type = typeof payload.type === 'string' ? payload.type : ''
-  const geminiActivity = activityFromGeminiPayload(payload, type)
-  if (geminiActivity !== undefined) return geminiActivity
+  const antigravityActivity = activityFromAntigravityPayload(payload, type)
+  if (antigravityActivity !== undefined) return antigravityActivity
 
   const openCodeActivity = activityFromOpenCodePayload(payload, type)
   if (openCodeActivity !== undefined) return openCodeActivity
@@ -172,12 +172,12 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   return null
 }
 
-function activityFromGeminiPayload(
+function activityFromAntigravityPayload(
   payload: Record<string, unknown>,
   type: string,
 ): AgentActivity | AgentActivity[] | null | undefined {
   if (type === 'init') {
-    return { kind: 'step', title: 'Gemini ready', status: 'done' }
+    return { kind: 'step', title: 'Antigravity ready', status: 'done' }
   }
 
   if (type === 'message') {
@@ -187,7 +187,7 @@ function activityFromGeminiPayload(
   }
 
   if (type === 'tool_use') {
-    const toolCall = geminiToolCallFromPayload(payload)
+    const toolCall = antigravityToolCallFromPayload(payload)
     if (!toolCall) return undefined
 
     return {
@@ -199,7 +199,7 @@ function activityFromGeminiPayload(
   }
 
   if (type === 'tool_result') {
-    const toolResult = geminiToolResultFromPayload(payload)
+    const toolResult = antigravityToolResultFromPayload(payload)
     if (!toolResult) return undefined
 
     return {
@@ -217,13 +217,13 @@ function activityFromGeminiPayload(
   return undefined
 }
 
-function geminiToolCallFromPayload(
+function antigravityToolCallFromPayload(
   payload: Record<string, unknown>,
 ): { name: string; input: unknown } | null {
   const part = isRecord(payload.part) ? payload.part : undefined
   const functionCall = isRecord(part?.functionCall) ? part.functionCall : undefined
 
-  if (part && !functionCall && !hasGeminiToolFields(payload, part)) {
+  if (part && !functionCall && !hasAntigravityToolFields(payload, part)) {
     return null
   }
 
@@ -245,13 +245,13 @@ function geminiToolCallFromPayload(
   }
 }
 
-function geminiToolResultFromPayload(
+function antigravityToolResultFromPayload(
   payload: Record<string, unknown>,
 ): { name: string; output?: string; isError: boolean } | null {
   const part = isRecord(payload.part) ? payload.part : undefined
   const functionResponse = isRecord(part?.functionResponse) ? part.functionResponse : undefined
 
-  if (part && !functionResponse && !hasGeminiToolFields(payload, part)) {
+  if (part && !functionResponse && !hasAntigravityToolFields(payload, part)) {
     return null
   }
 
@@ -281,7 +281,7 @@ function geminiToolResultFromPayload(
   }
 }
 
-function hasGeminiToolFields(
+function hasAntigravityToolFields(
   payload: Record<string, unknown>,
   part: Record<string, unknown>,
 ): boolean {

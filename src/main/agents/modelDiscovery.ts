@@ -149,7 +149,15 @@ export function inferModelTier(id: string, label = ''): ModelTier {
     return 'frontier'
   }
 
-  if (normalized.includes('gemini-3')) {
+  if (normalized.includes('gemini-3.5') || normalized.includes('antigravity-3.5')) {
+    return 'frontier'
+  }
+
+  if (normalized.includes('gemini-3.0') || normalized.includes('antigravity-3.0')) {
+    return 'advanced'
+  }
+
+  if (normalized.includes('gemini-3') || normalized.includes('antigravity-3')) {
     return 'frontier'
   }
 
@@ -159,7 +167,9 @@ export function inferModelTier(id: string, label = ''): ModelTier {
 
   if (
     normalized.includes('gemini-2.5-pro') ||
+    normalized.includes('antigravity-2.5-pro') ||
     normalized.includes('gemini-pro') ||
+    normalized.includes('antigravity-pro') ||
     normalized === 'pro'
   ) {
     return 'advanced'
@@ -167,7 +177,9 @@ export function inferModelTier(id: string, label = ''): ModelTier {
 
   if (
     normalized.includes('gemini-2.5-flash') ||
+    normalized.includes('antigravity-2.5-flash') ||
     normalized.includes('gemini-flash') ||
+    normalized.includes('antigravity-flash') ||
     normalized === 'flash'
   ) {
     return 'balanced'

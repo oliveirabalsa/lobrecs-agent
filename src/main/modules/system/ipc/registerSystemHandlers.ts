@@ -203,12 +203,12 @@ function capabilityFlags(
     }
   }
 
-  if (agentId === 'gemini') {
+  if (agentId === 'antigravity') {
     return {
-      supportsStreamingJson: true,
+      supportsStreamingJson: false,
       supportsResume: false,
       supportsFileAttachments: false,
-      supportsCustomAgents: false,
+      supportsCustomAgents: true,
       supportsMcp: true,
       supportsApprovalMode: true,
       supportsModelListing: false,

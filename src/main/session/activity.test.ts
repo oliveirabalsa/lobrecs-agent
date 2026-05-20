@@ -489,7 +489,7 @@ describe('agent activity normalization', () => {
     ])
   })
 
-  it('turns Gemini stream JSON events into visible messages and tools', () => {
+  it('turns Antigravity stream JSON events into visible messages and tools', () => {
     const events: AgentEvent[] = [
       {
         type: 'stdout',
@@ -503,7 +503,7 @@ describe('agent activity normalization', () => {
         payload: {
           type: 'message',
           role: 'assistant',
-          content: 'Gemini response',
+          content: 'Antigravity response',
         },
         timestamp: 2,
       },
@@ -532,11 +532,11 @@ describe('agent activity normalization', () => {
     const activities = events.flatMap(deriveActivityEvents).map((event) => event.payload)
 
     expect(activities).toEqual([
-      expect.objectContaining({ kind: 'step', title: 'Gemini ready', status: 'done' }),
+      expect.objectContaining({ kind: 'step', title: 'Antigravity ready', status: 'done' }),
       expect.objectContaining({
         kind: 'message',
         role: 'assistant',
-        text: 'Gemini response\n',
+        text: 'Antigravity response\n',
       }),
       expect.objectContaining({
         kind: 'tool-call',
@@ -553,7 +553,7 @@ describe('agent activity normalization', () => {
     ])
   })
 
-  it('turns nested Gemini tool parts into visible tool activities without stealing OpenCode events', () => {
+  it('turns nested Antigravity tool parts into visible tool activities without stealing OpenCode events', () => {
     const events: AgentEvent[] = [
       {
         type: 'stdout',

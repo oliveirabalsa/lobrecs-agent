@@ -5,13 +5,13 @@ import { commandExists, resolveCommand, withContext } from './command'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
 import type { AgentEvent } from '../../shared/types'
 
-const GEMINI_COMMAND_ENV = 'GEMINI_COMMAND'
+const ANTIGRAVITY_COMMAND_ENV = 'ANTIGRAVITY_COMMAND'
 
-interface GeminiParserState {
-  completionUsage?: GeminiCompletionUsage
+interface AntigravityParserState {
+  completionUsage?: AntigravityCompletionUsage
 }
 
-interface GeminiCompletionUsage {
+interface AntigravityCompletionUsage {
   usage: {
     input_tokens?: number
     output_tokens?: number
@@ -22,52 +22,73 @@ interface GeminiCompletionUsage {
   cost_usd?: number
 }
 
-export class GeminiAdapter implements AgentAdapter {
-  readonly id = 'gemini'
-  readonly name = 'Gemini CLI'
+export class AntigravityAdapter implements AgentAdapter {
+  readonly id = 'antigravity'
+  readonly name = 'Antigravity CLI'
 
   async isInstalled(): Promise<boolean> {
-    return commandExists(resolveCommand(GEMINI_COMMAND_ENV, 'gemini'))
+    return commandExists(resolveCommand(ANTIGRAVITY_COMMAND_ENV, 'agy'))
   }
 
   async dispatch(params: AgentDispatchParams): Promise<AgentSession> {
     const events = createBufferedEventEmitter()
-    const parserState: GeminiParserState = {}
+    const parserState: AntigravityParserState = {}
     let completed = false
     const emitEvent = (event: AgentEvent): void => {
-      if (event.type === 'session-complete') completed = true
+      if (event.type === 'session-complete' || event.type === 'error') completed = true
       events.emitBuffered(event)
     }
 
     const prompt = withContext(params.prompt, params.context)
     const command = resolveCommand(
-      GEMINI_COMMAND_ENV,
-      'gemini',
+      ANTIGRAVITY_COMMAND_ENV,
+      'agy',
       params.runtimeSettings?.command,
     )
     const args = [
-      '--model',
-      params.model,
-      '--prompt',
-      prompt,
-      '--output-format',
-      'stream-json',
-      '--skip-trust',
-      ...approvalModeArgs(params.runtimeSettings?.permissionMode),
+      '--add-dir',
+      params.repoPath,
+      ...permissionArgs(params.runtimeSettings?.permissionMode),
       ...(params.runtimeSettings?.extraArgs ?? []),
+      '--print',
+      // AGY currently exposes model selection through CLI settings and /model,
+      // not a supported per-run launch flag.
+      prompt,
     ]
 
     try {
+      if (!(await commandExists(command))) {
+        emitEvent({
+          type: 'error',
+          sessionId: params.sessionId,
+          payload: {
+            message: antigravityCommandMissingMessage(command),
+          },
+          timestamp: Date.now(),
+        } satisfies AgentEvent)
+        return createIdleSession(params.sessionId, events)
+      }
+
       const child = processPool.spawn(params.sessionId, command, args, {
         cwd: params.repoPath,
         stdin: 'ignore',
       })
 
+      child.once('error', (error) => {
+        emitEvent({
+          type: 'error',
+          sessionId: params.sessionId,
+          payload: {
+            message: antigravitySpawnErrorMessage(command, error),
+          },
+          timestamp: Date.now(),
+        } satisfies AgentEvent)
+      })
+
       if (child.stdout) {
         const rl = createInterface({ input: child.stdout })
         rl.on('line', (line) => {
-          if (!line.trim()) return
-          emitEvent(parseGeminiLine(line, params.sessionId, parserState))
+          emitEvent(parseAntigravityLine(line, params.sessionId, parserState))
         })
       }
 
@@ -109,21 +130,44 @@ export class GeminiAdapter implements AgentAdapter {
   }
 }
 
-function approvalModeArgs(permissionMode = 'dangerous'): string[] {
-  const approvalMode =
-    permissionMode === 'read-only'
-      ? 'plan'
-      : permissionMode === 'ask-for-approval'
-        ? 'default'
-        : 'yolo'
-
-  return ['--approval-mode', approvalMode]
+function createIdleSession(
+  sessionId: string,
+  events: EventEmitter,
+): AgentSession {
+  return {
+    sessionId,
+    events,
+    approve: () => undefined,
+    reject: () => undefined,
+    cancel: () => undefined,
+  }
 }
 
-function parseGeminiLine(
+function antigravityCommandMissingMessage(command: string): string {
+  return [
+    `Antigravity CLI not found: ${command}.`,
+    'Install or configure the `agy` executable, make sure it is on PATH,',
+    'or set ANTIGRAVITY_COMMAND / the Antigravity runtime command in Settings.',
+  ].join(' ')
+}
+
+function antigravitySpawnErrorMessage(command: string, error: Error): string {
+  return `Failed to start Antigravity CLI (${command}): ${error.message}`
+}
+
+function permissionArgs(permissionMode = 'dangerous'): string[] {
+  if (permissionMode === 'read-only') return ['--sandbox']
+  if (permissionMode === 'dangerous' || permissionMode === 'bypass-permissions') {
+    return ['--dangerously-skip-permissions']
+  }
+
+  return []
+}
+
+function parseAntigravityLine(
   line: string,
   sessionId: string,
-  state?: GeminiParserState,
+  state?: AntigravityParserState,
 ): AgentEvent {
   try {
     const data = JSON.parse(line) as Record<string, unknown>
@@ -139,7 +183,7 @@ function parseGeminiLine(
     }
 
     if (type === 'result') {
-      const usage = geminiCompletionUsage(data)
+      const usage = antigravityCompletionUsage(data)
       if (usage && state) {
         state.completionUsage = usage
       }
@@ -171,23 +215,23 @@ function parseGeminiLine(
 function completionPayload(
   exitCode: number | null,
   signal: NodeJS.Signals | null,
-  state: GeminiParserState,
+  state: AntigravityParserState,
 ): Record<string, unknown> {
   return state.completionUsage
     ? { exitCode, signal, ...state.completionUsage }
     : { exitCode, signal }
 }
 
-function geminiCompletionUsage(
+function antigravityCompletionUsage(
   data: Record<string, unknown>,
-): GeminiCompletionUsage | undefined {
+): AntigravityCompletionUsage | undefined {
   const stats = recordField(data, 'stats')
   const usage = sumTokenSources([
     recordField(data, 'usage'),
     recordField(data, 'usageMetadata'),
     recordField(stats, 'usage'),
     recordField(stats, 'usageMetadata'),
-    ...geminiModelStats(stats).flatMap((modelStats) => [
+    ...antigravityModelStats(stats).flatMap((modelStats) => [
       recordField(modelStats, 'tokens'),
       recordField(modelStats, 'usage'),
       recordField(modelStats, 'usageMetadata'),
@@ -206,7 +250,7 @@ function geminiCompletionUsage(
   return costUsd === undefined ? { usage } : { usage, cost_usd: costUsd }
 }
 
-function geminiModelStats(
+function antigravityModelStats(
   stats: Record<string, unknown> | undefined,
 ): Record<string, unknown>[] {
   const models = stats?.models
@@ -223,8 +267,8 @@ function geminiModelStats(
 
 function sumTokenSources(
   sources: Array<Record<string, unknown> | undefined>,
-): GeminiCompletionUsage['usage'] {
-  const usage: GeminiCompletionUsage['usage'] = {}
+): AntigravityCompletionUsage['usage'] {
+  const usage: AntigravityCompletionUsage['usage'] = {}
 
   for (const source of sources) {
     if (!source) continue
@@ -251,8 +295,8 @@ function sumTokenSources(
 }
 
 function addTokenUsage(
-  target: GeminiCompletionUsage['usage'],
-  source: GeminiCompletionUsage['usage'],
+  target: AntigravityCompletionUsage['usage'],
+  source: AntigravityCompletionUsage['usage'],
 ): void {
   addNumber(target, 'input_tokens', source.input_tokens)
   addNumber(target, 'output_tokens', source.output_tokens)
@@ -263,7 +307,7 @@ function addTokenUsage(
 
 function usageFromTokenRecord(
   record: Record<string, unknown>,
-): GeminiCompletionUsage['usage'] {
+): AntigravityCompletionUsage['usage'] {
   const candidates = firstNumber(record, ['candidatesTokenCount', 'candidates_tokens', 'candidates'])
   const thoughts = firstNumber(record, ['thoughtsTokenCount', 'thought_tokens', 'thoughts'])
   const outputTokens =
@@ -296,8 +340,8 @@ function usageFromTokenRecord(
 }
 
 function addNumber(
-  target: GeminiCompletionUsage['usage'],
-  key: keyof GeminiCompletionUsage['usage'],
+  target: AntigravityCompletionUsage['usage'],
+  key: keyof AntigravityCompletionUsage['usage'],
   value: number | undefined,
 ): void {
   if (value === undefined) return
