@@ -86,7 +86,7 @@ describe('splitFinalAssistant', () => {
 })
 
 describe('flattenCodeChangeFallbacks', () => {
-  it('flattens grouped and standalone code changes with last path metadata winning', () => {
+  it('sums repeated edits to one file and keeps the latest change type', () => {
     const items: StreamItem[] = [
       {
         kind: 'file-change',
@@ -131,8 +131,8 @@ describe('flattenCodeChangeFallbacks', () => {
       {
         filePath: 'src/a.ts',
         changeType: 'deleted',
-        additions: 0,
-        deletions: 12,
+        additions: 2,
+        deletions: 13,
       },
       {
         filePath: 'src/b.ts',

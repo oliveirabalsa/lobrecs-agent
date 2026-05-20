@@ -3,6 +3,7 @@ import {
   shouldSuppressUserQuestionToolResult,
   userQuestionActivityFromToolPayload,
 } from '../../../../shared/contracts/userQuestionPrompts'
+import { transformFileEditActivities } from './fileEditActivities'
 
 /**
  * A "turn" groups one user message together with all the activities the
@@ -102,11 +103,17 @@ const FILE_CHANGE_WINDOW_MS = 30_000
  *  - Singletons remain as the original activity.
  */
 export function groupTurns(
-  activities: AgentActivity[],
+  inputActivities: AgentActivity[],
   options: GroupTurnsOptions = {},
 ): Turn[] {
   const now = options.now ?? Date.now()
-  const times = options.activityTimes
+  // Reclassify file-editing tool calls (Edit/Write/apply_patch/…) into
+  // `file-change` activities before grouping, so edits render as the
+  // EditedFilesCard instead of a "Ran N commands" pill.
+  const { activities, times } = transformFileEditActivities(
+    inputActivities,
+    options.activityTimes,
+  )
   const turns: Turn[] = []
 
   let current: Turn | null = null

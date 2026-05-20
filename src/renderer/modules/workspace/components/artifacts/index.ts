@@ -7,8 +7,14 @@ export type { CommandPreviewProps } from './CommandPreview'
 export { EditedFilesCard } from './EditedFilesCard'
 export type { EditedFilesCardProps } from './EditedFilesCard'
 
+export { AnimatedDiffStat } from './AnimatedDiffStat'
+export type { AnimatedDiffStatProps } from './AnimatedDiffStat'
+
 export { FileChangeRow } from './FileChangeRow'
 export type { FileChangeRowProps, FileChangeType } from './FileChangeRow'
+
+export { ChangeBar } from './ChangeBar'
+export type { ChangeBarProps } from './ChangeBar'
 
 export { Callout } from './Callout'
 export type { CalloutProps, CalloutVariant } from './Callout'

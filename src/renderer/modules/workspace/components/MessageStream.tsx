@@ -72,25 +72,33 @@ export function flattenCodeChangeFallbacks(
 ): CodeChangeFallback[] {
   const files = new Map<string, CodeChangeFallback>()
 
+  // The same file can be edited several times in one turn — accumulate the
+  // per-edit `+/-` counts so the card shows the turn's running total.
+  const accumulate = (change: CodeChangeFallback): void => {
+    const existing = files.get(change.filePath)
+    if (!existing) {
+      files.set(change.filePath, {
+        filePath: change.filePath,
+        additions: change.additions,
+        deletions: change.deletions,
+        changeType: change.changeType,
+      })
+      return
+    }
+    existing.additions = (existing.additions ?? 0) + (change.additions ?? 0)
+    existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0)
+    existing.changeType = change.changeType
+  }
+
   for (const item of items) {
     if (item.kind === 'file-change') {
-      files.set(item.filePath, {
-        filePath: item.filePath,
-        additions: item.additions,
-        deletions: item.deletions,
-        changeType: item.changeType,
-      })
+      accumulate(item)
       continue
     }
 
     if (item.kind === 'edited-files-group') {
       for (const change of item.items) {
-        files.set(change.filePath, {
-          filePath: change.filePath,
-          additions: change.additions,
-          deletions: change.deletions,
-          changeType: change.changeType,
-        })
+        accumulate(change)
       }
     }
   }
@@ -295,6 +303,7 @@ function TurnBlock({
               | Parameters<typeof UserMessage>[0]['attachments']
               | undefined
           }
+          onOpenMarkdown={ctx.onOpenMarkdown}
         />
       ) : null}
 
@@ -317,7 +326,12 @@ function TurnBlock({
       ) : null}
 
       {finalAssistantText !== undefined ? (
-        <AssistantMessage text={finalAssistantText} showActions={isLast && !running} />
+        <AssistantMessage
+          text={finalAssistantText}
+          showActions={isLast && !running}
+          onOpenMarkdown={ctx.onOpenMarkdown}
+          onPreviewMarkdown={ctx.onPreviewMarkdown}
+        />
       ) : null}
 
       <TrailingEditedFilesCard

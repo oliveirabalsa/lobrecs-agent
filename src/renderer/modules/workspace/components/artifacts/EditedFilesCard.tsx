@@ -2,6 +2,7 @@ import { DiffEditor } from '@monaco-editor/react'
 import { useMemo, useState } from 'react'
 import type { DiffProposal } from '../../../../../shared/types'
 import { Button } from '../../../../components/ui'
+import { AnimatedDiffStat } from './AnimatedDiffStat'
 
 export interface EditedFilesCardProps {
   /** Real-time proposals from the parent run state. */
@@ -42,19 +43,36 @@ export function EditedFilesCard({
   onReview,
 }: EditedFilesCardProps) {
   const entries = useMemo<FileEntry[]>(() => {
+    // Live proposals carry a whole-file diff — one per path, last wins.
     if (proposals.length > 0) {
-      return proposals.map((proposal) => ({
-        filePath: proposal.filePath,
-        additions: proposal.additions ?? 0,
-        deletions: proposal.deletions ?? 0,
-        proposal,
-      }))
+      const byPath = new Map<string, FileEntry>()
+      for (const proposal of proposals) {
+        byPath.set(proposal.filePath, {
+          filePath: proposal.filePath,
+          additions: proposal.additions ?? 0,
+          deletions: proposal.deletions ?? 0,
+          proposal,
+        })
+      }
+      return [...byPath.values()]
     }
-    return (fallbackFiles ?? []).map((file) => ({
-      filePath: file.filePath,
-      additions: file.additions ?? 0,
-      deletions: file.deletions ?? 0,
-    }))
+    // Fallback rows come from per-edit `file-change` activities, so the same
+    // file can appear several times in one turn — sum those into one row.
+    const byPath = new Map<string, FileEntry>()
+    for (const file of fallbackFiles ?? []) {
+      const existing = byPath.get(file.filePath)
+      if (existing) {
+        existing.additions += file.additions ?? 0
+        existing.deletions += file.deletions ?? 0
+        continue
+      }
+      byPath.set(file.filePath, {
+        filePath: file.filePath,
+        additions: file.additions ?? 0,
+        deletions: file.deletions ?? 0,
+      })
+    }
+    return [...byPath.values()]
   }, [proposals, fallbackFiles])
 
   const totalAdditions = entries.reduce((sum, e) => sum + e.additions, 0)
@@ -73,11 +91,11 @@ export function EditedFilesCard({
           <div className="text-sm font-medium text-primary">
             Edited {count} file{count === 1 ? '' : 's'}
           </div>
-          <div className="text-xs font-mono">
-            <span className="text-accent-add">+{totalAdditions}</span>
-            <span className="mx-1 text-muted">·</span>
-            <span className="text-accent-del">-{totalDeletions}</span>
-          </div>
+          <AnimatedDiffStat
+            additions={totalAdditions}
+            deletions={totalDeletions}
+            className="text-xs"
+          />
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {onReview ? (
@@ -141,11 +159,11 @@ function FileRow({
         >
           {filePath}
         </button>
-        <div className="shrink-0 font-mono text-xs">
-          <span className="text-accent-add">+{additions}</span>
-          <span className="mx-1 text-muted">·</span>
-          <span className="text-accent-del">-{deletions}</span>
-        </div>
+        <AnimatedDiffStat
+          additions={additions}
+          deletions={deletions}
+          className="shrink-0 text-xs"
+        />
       </div>
 
       {expanded ? (
