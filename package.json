@@ -1,6 +1,6 @@
 {
   "name": "lobrecs-agent",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Electron desktop harness for AI coding agents, model routing, and swarm orchestration.",
   "productName": "Lobrecs Agent",
   "type": "module",
