@@ -396,33 +396,40 @@ describe('groupTurns', () => {
   })
 
   describe('streamItems aggregation', () => {
-    it('collapses 3 consecutive command activities into a single ran-commands-group', () => {
+    it('groups commands by type when consecutive', () => {
       const activities: AgentActivity[] = [
         { kind: 'command', command: 'ls', status: 'done' },
         { kind: 'command', command: 'pwd', status: 'done' },
-        { kind: 'command', command: 'echo hi', status: 'done' },
+        { kind: 'command', command: 'npm install', status: 'done' },
       ]
 
       const [turn] = groupTurns(activities)
-      expect(turn.streamItems).toHaveLength(1)
-      const group = turn.streamItems[0]
-      expect(group.kind).toBe('ran-commands-group')
-      if (group.kind === 'ran-commands-group') {
-        expect(group.items).toHaveLength(3)
-        expect(group.id).toContain('ran')
+      // ls and pwd are file-ops (grouped), npm install is package (singleton)
+      expect(turn.streamItems).toHaveLength(2)
+      expect(turn.streamItems[0].kind).toBe('ran-commands-group')
+      expect(turn.streamItems[1].kind).toBe('command')
+      if (turn.streamItems[0].kind === 'ran-commands-group') {
+        expect(turn.streamItems[0].type).toBe('file-ops')
+        expect(turn.streamItems[0].items).toHaveLength(2)
       }
     })
 
-    it('mixes tool-call + tool-result + command into one ran-commands-group when consecutive', () => {
+    it('groups tool-call + tool-result + command by type when consecutive', () => {
       const activities: AgentActivity[] = [
         { kind: 'tool-call', name: 'bash', status: 'running' },
         { kind: 'tool-result', name: 'bash', status: 'done', output: 'ok' },
-        { kind: 'command', command: 'ls', status: 'done' },
+        { kind: 'command', command: 'npm install', status: 'done' },
       ]
 
       const [turn] = groupTurns(activities)
-      expect(turn.streamItems).toHaveLength(1)
+      // bash tool-call/result are 'other' (grouped), npm is 'package' (singleton)
+      expect(turn.streamItems).toHaveLength(2)
       expect(turn.streamItems[0].kind).toBe('ran-commands-group')
+      expect(turn.streamItems[1].kind).toBe('command')
+      if (turn.streamItems[0].kind === 'ran-commands-group') {
+        expect(turn.streamItems[0].type).toBe('other')
+        expect(turn.streamItems[0].items).toHaveLength(2)
+      }
     })
 
     it('keeps a single command as a singleton (no group wrapper)', () => {

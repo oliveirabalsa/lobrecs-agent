@@ -4,6 +4,7 @@ import {
   userQuestionActivityFromToolPayload,
 } from '../../../../shared/contracts/userQuestionPrompts'
 import { transformFileEditActivities } from './fileEditActivities'
+import { classifyCommand, type CommandType } from './commandClassifier'
 
 /**
  * A "turn" groups one user message together with all the activities the
@@ -33,8 +34,9 @@ export interface TurnUserMessage {
  * Renderer-only synthetic groups produced by the M4 aggregation pass.
  *
  * `ran-commands-group` collapses consecutive `command | tool-call | tool-result`
- * activities. `edited-files-group` collapses consecutive `file-change`
- * activities that arrived within `AGGREGATE_TIME_WINDOW_MS` of each other.
+ * activities grouped by command type (shell, package, git, file-ops, other).
+ * `edited-files-group` collapses consecutive `file-change` activities that
+ * arrived within `AGGREGATE_TIME_WINDOW_MS` of each other.
  *
  * These do NOT live in the shared contracts — they're a pure UI concern.
  */
@@ -43,6 +45,7 @@ export type StreamItem =
   | {
       kind: 'ran-commands-group'
       id: string
+      type: 'shell' | 'package' | 'git' | 'file-ops' | 'other'
       items: Array<Extract<AgentActivity, { kind: 'command' | 'tool-call' | 'tool-result' }>>
     }
   | {
@@ -237,7 +240,7 @@ function aggregateStreamItems(
       continue
     }
 
-    // Consecutive command/tool-call/tool-result → ran-commands-group
+    // Consecutive command/tool-call/tool-result → ran-commands-group (grouped by type)
     if (isCommandLike(activity)) {
       const batch: Array<Extract<AgentActivity, { kind: 'command' | 'tool-call' | 'tool-result' }>> = []
       let j = i
@@ -250,15 +253,21 @@ function aggregateStreamItems(
         )
         j += 1
       }
-      if (batch.length === 1) {
-        items.push(batch[0])
-      } else {
-        groupCounter += 1
-        items.push({
-          kind: 'ran-commands-group',
-          id: `${turnId}-ran-${groupCounter}`,
-          items: batch,
-        })
+
+      // Group by command type
+      const typeGroups = groupByCommandType(batch)
+      for (const [type, typeBatch] of typeGroups) {
+        if (typeBatch.length === 1) {
+          items.push(typeBatch[0])
+        } else {
+          groupCounter += 1
+          items.push({
+            kind: 'ran-commands-group',
+            id: `${turnId}-ran-${groupCounter}`,
+            type,
+            items: typeBatch,
+          })
+        }
       }
       i = j
       continue
@@ -431,4 +440,20 @@ function mapCompletionStatus(
     default:
       return 'done'
   }
+}
+
+function groupByCommandType(
+  batch: Array<Extract<AgentActivity, { kind: 'command' | 'tool-call' | 'tool-result' }>>,
+): Map<CommandType, Array<Extract<AgentActivity, { kind: 'command' | 'tool-call' | 'tool-result' }>>> {
+  const groups = new Map<CommandType, typeof batch>()
+
+  for (const item of batch) {
+    const meta = classifyCommand(item)
+    if (!groups.has(meta.type)) {
+      groups.set(meta.type, [])
+    }
+    groups.get(meta.type)!.push(item)
+  }
+
+  return groups
 }
