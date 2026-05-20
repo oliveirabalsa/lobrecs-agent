@@ -11,6 +11,7 @@ import {
   type AppUpdateRelease,
   type AppUpdateState,
 } from '../../../../shared/types'
+import { createMacosCodeSigningErrorPatch } from '../domain/codeSigningErrors'
 
 const AUTO_CHECK_DELAY_MS = 3_000
 const { autoUpdater } = electronUpdater
@@ -193,16 +194,11 @@ export class AppUpdateService {
       }
       return this.state
     } catch (error) {
-      if (isMacosCodeSigningError(error)) {
-        return this.setState({
-          phase: 'error',
-          progress: undefined,
-          error: errorMessage(error),
-          message: 'Automatic install is unavailable — the app is not code-signed. Download the update manually from GitHub.',
-          canManualDownload: true,
-          releaseUrl: RELEASES_URL,
-        })
-      }
+      const codeSigningErrorPatch = createMacosCodeSigningErrorPatch(error, {
+        releaseUrl: RELEASES_URL,
+      })
+      if (codeSigningErrorPatch) return this.setState(codeSigningErrorPatch)
+
       return this.setState({
         phase: 'error',
         progress: undefined,
@@ -270,6 +266,14 @@ export class AppUpdateService {
     })
 
     this.updater.on('error', (error) => {
+      const codeSigningErrorPatch = createMacosCodeSigningErrorPatch(error, {
+        releaseUrl: RELEASES_URL,
+      })
+      if (codeSigningErrorPatch) {
+        this.setState(codeSigningErrorPatch)
+        return
+      }
+
       this.setState({
         phase: 'error',
         progress: undefined,
@@ -293,12 +297,16 @@ export class AppUpdateService {
   private decorateState(state: AppUpdateState): AppUpdateState {
     const busy = state.phase === 'checking' || state.phase === 'downloading'
     const usable = this.canUseUpdater()
+    const canManualDownload =
+      state.phase === 'error' ? state.canManualDownload : undefined
 
     return {
       ...state,
       canCheck: usable && !busy,
       canDownload: usable && state.phase === 'available',
       canInstall: usable && state.phase === 'downloaded',
+      canManualDownload,
+      releaseUrl: canManualDownload ? state.releaseUrl : undefined,
     }
   }
 
@@ -363,15 +371,6 @@ function finiteNumber(value: number): number {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function isMacosCodeSigningError(error: unknown): boolean {
-  const msg = errorMessage(error)
-  return (
-    process.platform === 'darwin' &&
-    (msg.includes('code failed to satisfy specified code requirement') ||
-      msg.includes('did not pass validation'))
-  )
 }
 
 export const appUpdateService = new AppUpdateService()

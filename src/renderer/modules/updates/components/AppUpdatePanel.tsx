@@ -120,7 +120,8 @@ export function AppUpdateBanner() {
   if (
     state?.phase !== 'available' &&
     state?.phase !== 'downloading' &&
-    state?.phase !== 'downloaded'
+    state?.phase !== 'downloaded' &&
+    !state?.canManualDownload
   ) {
     return null
   }

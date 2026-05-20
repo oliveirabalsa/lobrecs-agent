@@ -83,6 +83,15 @@ export function createAppUpdateViewModel(state: AppUpdateState | null): AppUpdat
   }
 
   if (state.phase === 'error') {
+    if (state.canManualDownload) {
+      return {
+        title: 'Manual update required',
+        detail: state.message ?? state.error ?? detail,
+        tone: 'warning',
+        busy: false,
+      }
+    }
+
     return {
       title: 'Update check failed',
       detail: state.error ?? detail,

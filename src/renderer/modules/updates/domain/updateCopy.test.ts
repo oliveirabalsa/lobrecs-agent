@@ -58,4 +58,21 @@ describe('createAppUpdateViewModel', () => {
     })
     expect(viewModel.primaryAction).toBeUndefined()
   })
+
+  it('shows a manual update action when macOS rejects the update signature', () => {
+    const viewModel = createAppUpdateViewModel({
+      ...baseState,
+      phase: 'error',
+      canManualDownload: true,
+      message: 'macOS rejected the downloaded update signature.',
+      error: 'code failed to satisfy specified code requirement(s)',
+    })
+
+    expect(viewModel).toMatchObject({
+      title: 'Manual update required',
+      detail: 'macOS rejected the downloaded update signature.',
+      tone: 'warning',
+    })
+    expect(viewModel.primaryAction).toBeUndefined()
+  })
 })
