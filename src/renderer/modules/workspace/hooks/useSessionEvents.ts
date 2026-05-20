@@ -17,6 +17,10 @@ import {
   isClaudeSessionEndHookWarning,
   processWarningKey,
 } from '../../../../shared/contracts/agentOutput'
+import {
+  shouldSuppressUserQuestionToolResult,
+  userQuestionActivityFromToolPayload,
+} from '../../../../shared/contracts/userQuestionPrompts'
 
 export type PlanPromptActivity = Extract<AgentActivity, { kind: 'plan-prompt' }>
 export type UserQuestionActivity = Extract<AgentActivity, { kind: 'user-question' }>
@@ -168,20 +172,26 @@ export function deriveSessionActivities(events: readonly AgentEvent[]): AgentAct
 function timedActivitiesFromEvents(events: readonly AgentEvent[]): TimedActivity[] {
   const explicitProcessWarnings = collectExplicitProcessWarnings(events)
   const seenProcessWarnings = new Set<string>()
+  const seenUserQuestionPromptIds = new Set<string>()
 
   return events.flatMap((event) =>
-    timedActivitiesFromEvent(event, { explicitProcessWarnings, seenProcessWarnings }),
+    timedActivitiesFromEvent(event, {
+      explicitProcessWarnings,
+      seenProcessWarnings,
+      seenUserQuestionPromptIds,
+    }),
   )
 }
 
 type ProcessWarningState = {
   explicitProcessWarnings: ReadonlySet<string>
   seenProcessWarnings: Set<string>
+  seenUserQuestionPromptIds: Set<string>
 }
 
 function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
   if (event.type === 'activity' && isAgentActivity(event.payload)) {
-    if (event.payload.kind === 'user-question') {
+    if (userQuestionFromActivity(event.payload)) {
       options.onStatusChange?.('awaiting-input')
     }
     return
@@ -218,6 +228,15 @@ function activityFromEvent(
   warningState: ProcessWarningState,
 ): AgentActivity[] {
   if (event.type === 'activity' && isAgentActivity(event.payload)) {
+    const question = userQuestionFromActivity(event.payload)
+    if (question) {
+      if (warningState.seenUserQuestionPromptIds.has(question.promptId)) return []
+
+      warningState.seenUserQuestionPromptIds.add(question.promptId)
+      return [question]
+    }
+
+    if (shouldSuppressUserQuestionToolResultFromActivity(event.payload)) return []
     if (shouldSuppressProcessWarningActivity(event.payload, warningState)) return []
 
     return [event.payload]
@@ -294,6 +313,20 @@ function collectExplicitProcessWarnings(events: readonly AgentEvent[]): Set<stri
   }
 
   return warnings
+}
+
+function userQuestionFromActivity(activity: AgentActivity): UserQuestionActivity | null {
+  if (activity.kind === 'user-question') return activity
+  if (activity.kind !== 'tool-call') return null
+
+  return userQuestionActivityFromToolPayload(activity)
+}
+
+function shouldSuppressUserQuestionToolResultFromActivity(activity: AgentActivity): boolean {
+  return (
+    activity.kind === 'tool-result' &&
+    shouldSuppressUserQuestionToolResult(activity.name, activity.output)
+  )
 }
 
 function shouldSuppressProcessWarningActivity(

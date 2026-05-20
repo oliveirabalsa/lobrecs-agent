@@ -16,6 +16,10 @@ import {
 } from '../components/artifacts'
 import type { UserQuestionActivity } from '../components/artifacts'
 import type { StreamItem } from './groupTurns'
+import {
+  shouldSuppressUserQuestionToolResult,
+  userQuestionActivityFromToolPayload,
+} from '../../../../shared/contracts/userQuestionPrompts'
 
 /**
  * Context passed from `RunWorkspace` → `MessageStream` → the dispatch table.
@@ -122,8 +126,19 @@ export function renderStreamItem(
         />
       )
 
-    case 'tool-call':
-    case 'tool-result':
+    case 'tool-call': {
+      const userQuestion = userQuestionActivityFromToolPayload(item)
+      if (userQuestion) {
+        return (
+          <UserQuestionPromptCard
+            key={key}
+            prompt={userQuestion}
+            active={ctx.pendingUserQuestionPromptId === userQuestion.promptId}
+            onAnswer={ctx.onAnswerUserQuestion}
+          />
+        )
+      }
+
       // When a tool-call/result lands by itself (not part of a batch),
       // render as a slim mono pill rather than a full RanCommands group.
       return (
@@ -133,6 +148,26 @@ export function renderStreamItem(
         >
           <span className="font-medium uppercase tracking-wide text-muted">
             {item.kind === 'tool-call' ? 'call' : 'result'}
+          </span>
+          <span className="min-w-0 truncate font-mono text-primary" title={item.name}>
+            {item.name}
+          </span>
+        </div>
+      )
+    }
+
+    case 'tool-result':
+      if (shouldSuppressUserQuestionToolResult(item.name, item.output)) return null
+
+      // When a tool-call/result lands by itself (not part of a batch),
+      // render as a slim mono pill rather than a full RanCommands group.
+      return (
+        <div
+          key={key}
+          className="inline-flex max-w-full items-center gap-2 self-start rounded-pill border border-hairline bg-card-raised px-2.5 py-1 text-[11px] text-secondary"
+        >
+          <span className="font-medium uppercase tracking-wide text-muted">
+            result
           </span>
           <span className="min-w-0 truncate font-mono text-primary" title={item.name}>
             {item.name}

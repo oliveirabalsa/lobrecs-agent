@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   ApprovalRequest,
   DiffProposal,
@@ -18,6 +19,7 @@ import {
 } from '../components/modals/UserQuestionPromptModal'
 import { UserMessage } from '../components/UserMessage'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
+import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import type { StartedSessionSummary } from '../../sessions/types'
 
 interface RunWorkspaceProps {
@@ -34,7 +36,7 @@ interface RunWorkspaceProps {
   diffProposals: DiffProposal[]
   approvalRequest: ApprovalRequest | null
   onApprovalRequest: (request: ApprovalRequest | null) => void
-  onDiffProposals: (proposals: DiffProposal[]) => void
+  onDiffProposals: (proposals: DiffProposal[], source?: DiffProposalScope) => void
   onStatusChange: (status: SessionStatus) => void
   onApproveApproval: () => void | Promise<void>
   onRejectApproval: () => void | Promise<void>
@@ -80,6 +82,16 @@ export function RunWorkspace({
   onReviewFile,
   onContextPercent,
 }: RunWorkspaceProps) {
+  const handleSessionDiffProposals = useCallback(
+    (proposals: DiffProposal[]) => {
+      onDiffProposals(proposals, {
+        sessionId,
+        threadId: threadId ?? null,
+      })
+    },
+    [onDiffProposals, sessionId, threadId],
+  )
+
   const {
     activities,
     activityTimes,
@@ -91,7 +103,7 @@ export function RunWorkspace({
     tokensIn,
   } = useSessionEvents(sessionId, {
     onApprovalRequest,
-    onDiffProposals,
+    onDiffProposals: handleSessionDiffProposals,
     onStatusChange,
   })
 
@@ -331,8 +343,8 @@ export function RunWorkspace({
 }
 
 function toSupportedAgentId(agentId: Project['agentId'] | undefined): SupportedAgentId | undefined {
-  if (agentId === 'claude-code' || agentId === 'codex' || agentId === 'opencode') {
-    return agentId
+  if (typeof agentId === 'string' && SUPPORTED_AGENT_IDS.includes(agentId as SupportedAgentId)) {
+    return agentId as SupportedAgentId
   }
   return undefined
 }

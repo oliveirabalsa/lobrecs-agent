@@ -72,6 +72,74 @@ describe('deriveSessionActivities', () => {
 
     expect(activities).toEqual([])
   })
+
+  it('turns persisted AskUserQuestion tool-call activities into question prompts', () => {
+    const activities = deriveSessionActivities([
+      {
+        type: 'activity',
+        sessionId: 'session-1',
+        payload: {
+          kind: 'tool-call',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                header: 'Scope',
+                question: 'Which area?',
+                options: [{ label: 'Renderer' }],
+              },
+            ],
+          },
+          status: 'running',
+        },
+        timestamp: 1,
+      },
+      {
+        type: 'activity',
+        sessionId: 'session-1',
+        payload: {
+          kind: 'tool-call',
+          name: 'AskUserQuestion',
+          input: {
+            questions: [
+              {
+                header: 'Scope',
+                question: 'Which area?',
+                options: [{ label: 'Renderer' }],
+              },
+            ],
+          },
+          status: 'done',
+        },
+        timestamp: 1.001,
+      },
+      {
+        type: 'activity',
+        sessionId: 'session-1',
+        payload: {
+          kind: 'tool-result',
+          name: 'AskUserQuestion',
+          output: 'Answer questions?',
+          status: 'done',
+        },
+        timestamp: 1.002,
+      },
+    ])
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: expect.stringMatching(/^user-question:/),
+        questions: [
+          expect.objectContaining({
+            header: 'Scope',
+            question: 'Which area?',
+            options: [expect.objectContaining({ label: 'Renderer' })],
+          }),
+        ],
+      }),
+    ])
+  })
 })
 
 function stderrEvent(sessionId: string, text: string, timestamp: number): AgentEvent {

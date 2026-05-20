@@ -30,7 +30,7 @@ import { ProjectContextDialog } from '../components/ProjectContextDialog'
 import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
-import type { MainView } from '../hooks/useWorkspaceController'
+import type { DiffProposalScope, MainView } from '../hooks/useWorkspaceController'
 import { RunWorkspace } from './RunWorkspace'
 
 interface WorkspaceViewProps {
@@ -57,7 +57,7 @@ interface WorkspaceViewProps {
     outcome: 'success' | 'failure' | 'partial',
     note?: string,
   ) => void
-  onDiffProposals: (proposals: DiffProposal[]) => void
+  onDiffProposals: (proposals: DiffProposal[], source?: DiffProposalScope) => void
   onApprovalRequest: (request: ApprovalRequest | null) => void
   onStatusChange: (status: SessionStatus) => void
   onApproveApproval: () => void | Promise<void>
@@ -168,6 +168,15 @@ export function WorkspaceView({
   const activeThreadId = activeSession?.threadId ?? null
   const activeThreadIdRef = useRef(activeThreadId)
   activeThreadIdRef.current = activeThreadId
+  const handleActiveDiffProposals = useCallback(
+    (proposals: DiffProposal[]) => {
+      onDiffProposals(proposals, {
+        sessionId: activeSessionId,
+        threadId: activeThreadId,
+      })
+    },
+    [activeSessionId, activeThreadId, onDiffProposals],
+  )
 
   const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() =>
     readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false),
@@ -641,7 +650,7 @@ export function WorkspaceView({
                         sessionId={activeSessionId}
                         diffProposals={[]}
                         approvalRequest={approvalRequest}
-                        onDiffProposals={onDiffProposals}
+                        onDiffProposals={handleActiveDiffProposals}
                         onApprovalRequest={onApprovalRequest}
                         onStatusChange={onStatusChange}
                         onApproveApproval={onApproveApproval}

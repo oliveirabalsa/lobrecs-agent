@@ -1,4 +1,8 @@
 import type { AgentActivity, ImageAttachment } from '../../../../shared/types'
+import {
+  shouldSuppressUserQuestionToolResult,
+  userQuestionActivityFromToolPayload,
+} from '../../../../shared/contracts/userQuestionPrompts'
 
 /**
  * A "turn" groups one user message together with all the activities the
@@ -208,8 +212,23 @@ function aggregateStreamItems(
   const items: StreamItem[] = []
   let i = 0
   let groupCounter = 0
+  const seenUserQuestionPromptIds = new Set<string>()
   while (i < activities.length) {
     const activity = activities[i]
+    const userQuestion = userQuestionStreamItem(activity)
+    if (userQuestion) {
+      if (!seenUserQuestionPromptIds.has(userQuestion.promptId)) {
+        seenUserQuestionPromptIds.add(userQuestion.promptId)
+        items.push(userQuestion)
+      }
+      i += 1
+      continue
+    }
+
+    if (shouldSuppressUserQuestionToolResultActivity(activity)) {
+      i += 1
+      continue
+    }
 
     // Consecutive command/tool-call/tool-result → ran-commands-group
     if (isCommandLike(activity)) {
@@ -310,7 +329,7 @@ function normalizeAssistantTimeline(
     if (activity.kind === 'message' && activity.role === 'assistant') {
       if (activity.stream) {
         pendingStreamTime ??= times[index]
-        pendingStreamText += activity.text
+        pendingStreamText = mergeAssistantStreamText(pendingStreamText, activity.text)
         return
       }
 
@@ -337,11 +356,44 @@ function normalizeAssistantText(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+function mergeAssistantStreamText(current: string, incoming: string): string {
+  if (!incoming.trim()) return current
+  if (!current) return incoming
+
+  const currentKey = normalizeAssistantText(current)
+  const incomingKey = normalizeAssistantText(incoming)
+  if (!incomingKey || incomingKey === currentKey) return current
+
+  if (incoming.startsWith(current)) return incoming
+  if (current.endsWith(incoming)) return current
+
+  if (currentKey.length >= 12 && incomingKey.startsWith(currentKey)) return incoming
+  if (incomingKey.length >= 12 && currentKey.endsWith(incomingKey)) return current
+
+  return current + incoming
+}
+
 function isCommandLike(activity: AgentActivity): boolean {
   return (
     activity.kind === 'command' ||
     activity.kind === 'tool-call' ||
     activity.kind === 'tool-result'
+  )
+}
+
+function userQuestionStreamItem(
+  activity: AgentActivity,
+): Extract<AgentActivity, { kind: 'user-question' }> | null {
+  if (activity.kind === 'user-question') return activity
+  if (activity.kind !== 'tool-call') return null
+
+  return userQuestionActivityFromToolPayload(activity)
+}
+
+function shouldSuppressUserQuestionToolResultActivity(activity: AgentActivity): boolean {
+  return (
+    activity.kind === 'tool-result' &&
+    shouldSuppressUserQuestionToolResult(activity.name, activity.output)
   )
 }
 

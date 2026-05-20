@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildSwarmWorkspaceState } from './useWorkspaceController'
+import {
+  buildSwarmWorkspaceState,
+  visibleDiffProposalsForActiveSession,
+  type ScopedDiffProposalState,
+} from './useWorkspaceController'
 
 describe('buildSwarmWorkspaceState', () => {
   it('opens a swarm as one chat using the shared thread and visible session', () => {
@@ -72,5 +76,30 @@ describe('buildSwarmWorkspaceState', () => {
 
     expect(state?.activeSession.status).toBe('running')
     expect(state?.tab.status).toBe('running')
+  })
+})
+
+describe('visibleDiffProposalsForActiveSession', () => {
+  const state: ScopedDiffProposalState = {
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    proposals: [
+      {
+        filePath: '/repo/current.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
+      },
+    ],
+  }
+
+  it('returns proposals only for the active chat session', () => {
+    expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-1')).toEqual(
+      state.proposals,
+    )
+  })
+
+  it('hides proposals captured from another thread or session', () => {
+    expect(visibleDiffProposalsForActiveSession(state, 'session-2', 'thread-1')).toEqual([])
+    expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-2')).toEqual([])
   })
 })

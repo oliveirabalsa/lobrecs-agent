@@ -19,16 +19,36 @@ export function UserQuestionPromptCard({
   onAnswer,
 }: UserQuestionPromptCardProps) {
   const count = prompt.questions.length
+  const totalOptions = prompt.questions.reduce(
+    (sum, question) => sum + question.options.length,
+    0,
+  )
 
   return (
-    <div className="self-start rounded-card border border-accent-primary/30 bg-card px-3 py-2.5">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-accent-primary">
-            Agent question{count === 1 ? '' : 's'}
+    <article
+      className={[
+        'self-start rounded-card border px-3 py-3 shadow-sm',
+        active
+          ? 'border-accent-primary/50 bg-accent-primary/10'
+          : 'border-hairline bg-card',
+      ].join(' ')}
+    >
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase text-accent-primary">
+            <span>Agent question{count === 1 ? '' : 's'}</span>
+            {active ? (
+              <span className="rounded-pill border border-accent-primary/35 bg-accent-primary/10 px-2 py-0.5 normal-case text-accent-primary">
+                Waiting for you
+              </span>
+            ) : null}
           </div>
           <div className="mt-1 text-sm font-medium leading-5 text-primary">
             {prompt.title}
+          </div>
+          <div className="mt-1 text-xs leading-5 text-secondary">
+            {count} required question{count === 1 ? '' : 's'}
+            {totalOptions > 0 ? `, ${totalOptions} option${totalOptions === 1 ? '' : 's'}` : ''}
           </div>
         </div>
         {onAnswer ? (
@@ -36,13 +56,14 @@ export function UserQuestionPromptCard({
             variant={active ? 'primary' : 'chip'}
             size="sm"
             onClick={() => onAnswer(prompt)}
+            aria-label={`Answer ${prompt.title}`}
           >
-            Answer
+            Choose answer
           </Button>
         ) : null}
       </div>
 
-      <ol className="mt-2 flex flex-col gap-2">
+      <ol className="mt-3 flex flex-col gap-2">
         {prompt.questions.map((question, index) => (
           <li key={question.id} className="min-w-0">
             <div className="text-[11px] font-medium uppercase tracking-wide text-muted">
@@ -52,26 +73,38 @@ export function UserQuestionPromptCard({
               {question.question}
             </div>
             {question.options.length > 0 ? (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {question.options.slice(0, 4).map((option) => (
-                  <span
+              <div className="mt-2 grid gap-1.5">
+                {question.options.slice(0, 3).map((option) => (
+                  <div
                     key={option.id}
-                    className="max-w-full truncate rounded-pill border border-hairline bg-card-raised px-2 py-0.5 text-[11px] text-secondary"
+                    className="min-w-0 rounded-card border border-hairline bg-card-raised px-2 py-1.5"
                     title={option.label}
                   >
-                    {option.label}
-                  </span>
+                    <div className="break-words text-[12px] font-medium leading-4 text-primary">
+                      {option.label}
+                    </div>
+                    {option.description ? (
+                      <div className="mt-0.5 break-words text-[11px] leading-4 text-secondary">
+                        {option.description}
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
-                {question.options.length > 4 ? (
-                  <span className="rounded-pill border border-hairline bg-card-raised px-2 py-0.5 text-[11px] text-muted">
-                    +{question.options.length - 4}
-                  </span>
+                {question.options.length > 3 ? (
+                  <div className="text-[11px] text-muted">
+                    +{question.options.length - 3} more option
+                    {question.options.length - 3 === 1 ? '' : 's'}
+                  </div>
                 ) : null}
               </div>
-            ) : null}
+            ) : (
+              <div className="mt-2 rounded-card border border-hairline bg-card-raised px-2 py-1.5 text-[11px] text-secondary">
+                Free-text answer required
+              </div>
+            )}
           </li>
         ))}
       </ol>
-    </div>
+    </article>
   )
 }

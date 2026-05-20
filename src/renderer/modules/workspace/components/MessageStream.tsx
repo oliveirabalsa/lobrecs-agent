@@ -42,7 +42,7 @@ export function shouldPinMessageStream({
   running,
   sticky,
 }: AutoPinState): boolean {
-  return running || loading || sticky
+  return sticky
 }
 
 function getScrollElement(container: HTMLDivElement | null): HTMLElement | null {
@@ -139,8 +139,7 @@ export function MessageStream({
     return () => element.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Re-pin to bottom after content changes. Running sessions are forced to the
-  // latest output because the primary workflow is watching the active turn.
+  // Re-pin to bottom after content changes, only if user is already near the bottom.
   useLayoutEffect(() => {
     const element = getScrollElement(containerRef.current)
     if (!element) return
@@ -150,10 +149,6 @@ export function MessageStream({
       sticky: isStickyRef.current,
     })
     if (!shouldPin) return
-
-    if (running || loading) {
-      isStickyRef.current = true
-    }
 
     return pinToBottom(element)
   }, [activities.length, loading, running, turns])
@@ -173,10 +168,6 @@ export function MessageStream({
         sticky: isStickyRef.current,
       })
       if (!shouldPin) return
-
-      if (running || loading) {
-        isStickyRef.current = true
-      }
 
       cleanupPin?.()
       cleanupPin = pinToBottom(element)

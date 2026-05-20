@@ -49,7 +49,15 @@ export function UserQuestionPromptModal({
   }, [open, prompt.promptId, prompt.questions])
 
   const canSubmit = useMemo(
-    () => prompt.questions.every((question) => questionAnswered(question, selections, textAnswers)),
+    () =>
+      prompt.questions.length > 0 &&
+      prompt.questions.every((question) => questionAnswered(question, selections, textAnswers)),
+    [prompt.questions, selections, textAnswers],
+  )
+  const unansweredCount = useMemo(
+    () =>
+      prompt.questions.filter((question) => !questionAnswered(question, selections, textAnswers))
+        .length,
     [prompt.questions, selections, textAnswers],
   )
 
@@ -77,11 +85,21 @@ export function UserQuestionPromptModal({
       open={open}
       onOpenChange={onOpenChange}
       title={prompt.title}
+      description="Answer the agent question before the next run continues."
       maxWidth={680}
-      closeOnBackdrop={!submitting}
-      closeOnEsc={!submitting}
+      closeOnBackdrop={false}
+      closeOnEsc={false}
     >
       <form onSubmit={handleSubmit} className="flex max-h-[70vh] flex-col">
+        <div className="mb-4 rounded-card border border-accent-primary/30 bg-accent-primary/10 px-3 py-2">
+          <div className="text-xs font-medium text-accent-primary">
+            The agent is waiting for your answer
+          </div>
+          <div className="mt-1 text-xs leading-5 text-secondary">
+            Pick one option per single-choice question, all that apply for multi-select
+            questions, or type a free-text answer.
+          </div>
+        </div>
         <div className="min-h-0 overflow-y-auto pr-1">
           <div className="flex flex-col gap-4">
             {prompt.questions.map((question, questionIndex) => (
@@ -116,6 +134,7 @@ export function UserQuestionPromptModal({
                             name={question.id}
                             checked={selected}
                             disabled={submitting}
+                            required={!question.multiSelect}
                             onChange={() => toggleOption(question, option)}
                             className="mt-1 h-3.5 w-3.5 accent-accent-primary"
                           />
@@ -143,6 +162,7 @@ export function UserQuestionPromptModal({
                       }))
                     }
                     disabled={submitting}
+                    required
                     className="mt-3 min-h-[92px] w-full resize-y rounded-card border border-hairline bg-bubble-user px-3 py-2 text-sm leading-6 text-primary outline-none placeholder:text-muted focus:border-accent-primary/60"
                     placeholder="Type your answer"
                   />
@@ -158,7 +178,12 @@ export function UserQuestionPromptModal({
           </div>
         ) : null}
 
-        <div className="mt-4 flex items-center justify-end gap-2 border-t border-hairline pt-3">
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-hairline pt-3">
+          <div className="mr-auto min-w-[10rem] text-xs text-muted">
+            {unansweredCount > 0
+              ? `${unansweredCount} question${unansweredCount === 1 ? '' : 's'} left`
+              : 'Ready to send'}
+          </div>
           <Button
             type="button"
             variant="ghost"
@@ -166,7 +191,7 @@ export function UserQuestionPromptModal({
             disabled={submitting}
             onClick={() => onOpenChange(false)}
           >
-            Dismiss
+            Hide for now
           </Button>
           <Button
             type="submit"

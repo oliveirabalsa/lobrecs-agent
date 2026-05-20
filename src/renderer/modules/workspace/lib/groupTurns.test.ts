@@ -247,6 +247,56 @@ describe('groupTurns', () => {
     expect(result[0].endedAt).toBeUndefined()
   })
 
+  it('keeps AskUserQuestion tool calls out of the ran-commands group', () => {
+    const activities: AgentActivity[] = [
+      {
+        kind: 'tool-call',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Where should the badge appear?',
+              options: [{ label: 'Bottom terminal pane' }],
+            },
+          ],
+        },
+        status: 'running',
+      },
+      {
+        kind: 'tool-call',
+        name: 'AskUserQuestion',
+        input: {
+          questions: [
+            {
+              question: 'Where should the badge appear?',
+              options: [{ label: 'Bottom terminal pane' }],
+            },
+          ],
+        },
+        status: 'done',
+      },
+      {
+        kind: 'tool-result',
+        name: 'AskUserQuestion',
+        output: 'Answer questions?',
+        status: 'done',
+      },
+    ]
+
+    const [turn] = groupTurns(activities)
+
+    expect(turn.streamItems).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        questions: [
+          expect.objectContaining({
+            question: 'Where should the badge appear?',
+          }),
+        ],
+      }),
+    ])
+  })
+
   it('coalesces streamed assistant chunks before rendering the turn', () => {
     const [turn] = groupTurns([
       { kind: 'message', role: 'assistant', text: 'Now I ', stream: true },
@@ -258,6 +308,49 @@ describe('groupTurns', () => {
         kind: 'message',
         role: 'assistant',
         text: 'Now I have the full picture.',
+        stream: true,
+      },
+    ])
+  })
+
+  it('coalesces repeated cumulative Claude stream snapshots', () => {
+    const activities: AgentActivity[] = [
+      { kind: 'message', role: 'assistant', text: 'Let me inspect ', stream: true },
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Let me inspect the session event flow.',
+        stream: true,
+      },
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Let me inspect the session event flow.',
+        stream: true,
+      },
+    ]
+
+    expect(normalizeAssistantMessages(activities)).toEqual([
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Let me inspect the session event flow.',
+        stream: true,
+      },
+    ])
+  })
+
+  it('keeps true streamed deltas when they are not cumulative snapshots', () => {
+    const activities: AgentActivity[] = [
+      { kind: 'message', role: 'assistant', text: 'Now I ', stream: true },
+      { kind: 'message', role: 'assistant', text: 'have the fix.', stream: true },
+    ]
+
+    expect(normalizeAssistantMessages(activities)).toEqual([
+      {
+        kind: 'message',
+        role: 'assistant',
+        text: 'Now I have the fix.',
         stream: true,
       },
     ])

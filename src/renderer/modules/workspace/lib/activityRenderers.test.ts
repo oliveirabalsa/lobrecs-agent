@@ -94,4 +94,37 @@ describe('renderStreamItem diff actions', () => {
     expect(props.active).toBe(true)
     expect(props.onAnswer).toBe(onAnswer)
   })
+
+  it('renders raw AskUserQuestion tool calls as answerable cards', () => {
+    const onAnswer = vi.fn()
+    const item = {
+      kind: 'tool-call',
+      name: 'AskUserQuestion',
+      input: {
+        questions: [
+          {
+            question: 'Which terminal?',
+            options: [{ label: 'Bottom pane' }],
+          },
+        ],
+      },
+      status: 'running',
+    } satisfies Extract<StreamItem, { kind: 'tool-call' }>
+
+    const node = renderStreamItem(item, 'question-tool', {
+      sessionId: 'session-1',
+      running: false,
+      onAnswerUserQuestion: onAnswer,
+    })
+    const props = elementProps<{
+      prompt: Extract<StreamItem, { kind: 'user-question' }>
+      onAnswer?: unknown
+    }>(node)
+
+    expect(props.prompt).toMatchObject({
+      kind: 'user-question',
+      questions: [expect.objectContaining({ question: 'Which terminal?' })],
+    })
+    expect(props.onAnswer).toBe(onAnswer)
+  })
 })

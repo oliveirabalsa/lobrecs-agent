@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   AgentId,
   ApprovalRequest,
@@ -7,6 +8,7 @@ import type {
   QueuedMessage,
   Session,
   SessionStatus,
+  SupportedAgentId,
 } from '../../../../shared/types'
 import { isSessionStatus } from '../../sessions/domain/sessionStatus'
 import { useTabs, type Tab } from '../../sessions/state/tabs'
@@ -47,8 +49,8 @@ function writeActiveThread(projectId: string, threadId: string | null): void {
 function toStartedSessionAgentId(
   agentId: Project['agentId'] | undefined,
 ): StartedSessionSummary['agentId'] {
-  if (agentId === 'claude-code' || agentId === 'codex' || agentId === 'opencode') {
-    return agentId
+  if (typeof agentId === 'string' && SUPPORTED_AGENT_IDS.includes(agentId as SupportedAgentId)) {
+    return agentId as SupportedAgentId
   }
   return undefined
 }
@@ -69,6 +71,29 @@ export interface WorkspaceSwarmStartedResult {
 export interface SwarmWorkspaceState {
   activeSession: ActiveSessionMeta
   tab: Tab
+}
+
+export interface DiffProposalScope {
+  sessionId?: string | null
+  threadId?: string | null
+}
+
+export interface ScopedDiffProposalState {
+  sessionId: string
+  threadId: string | null
+  proposals: DiffProposal[]
+}
+
+export function visibleDiffProposalsForActiveSession(
+  state: ScopedDiffProposalState | null,
+  activeSessionId: string | null,
+  activeThreadId: string | null,
+): DiffProposal[] {
+  if (!state || state.sessionId !== activeSessionId || state.threadId !== activeThreadId) {
+    return []
+  }
+
+  return state.proposals
 }
 
 export function buildSwarmWorkspaceState(
@@ -115,7 +140,8 @@ export function useWorkspaceController() {
   const tabs = useTabs()
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
   const [activeSession, setActiveSession] = useState<ActiveSessionMeta | null>(null)
-  const [diffProposals, setDiffProposals] = useState<DiffProposal[]>([])
+  const [diffProposalState, setDiffProposalState] =
+    useState<ScopedDiffProposalState | null>(null)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
   const [prefillPrompt, setPrefillPrompt] = useState<string | undefined>(undefined)
   const [bannerError, setBannerError] = useState<string | null>(null)
@@ -125,13 +151,22 @@ export function useWorkspaceController() {
 
   const activeSessionId = activeSession?.id ?? null
   const activeThreadId = activeSession?.threadId ?? null
+  const diffProposals = useMemo(
+    () =>
+      visibleDiffProposalsForActiveSession(
+        diffProposalState,
+        activeSessionId,
+        activeThreadId,
+      ),
+    [activeSessionId, activeThreadId, diffProposalState],
+  )
 
   const clearActiveThread = useCallback(
     (projectId?: string) => {
       const targetProjectId = projectId ?? selectedProject?.id
       if (targetProjectId) writeActiveThread(targetProjectId, null)
       setActiveSession(null)
-      setDiffProposals([])
+      setDiffProposalState(null)
       setApprovalRequest(null)
       setBannerError(null)
     },
@@ -195,7 +230,7 @@ export function useWorkspaceController() {
     setSelectedProject(project)
     setActiveSession(null)
     tabs.resetTabs()
-    setDiffProposals([])
+    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
     setMainView('workspace')
@@ -238,7 +273,7 @@ export function useWorkspaceController() {
       modelOverride: summary.modelOverride,
       createdAt: summary.createdAt ?? Date.now(),
     })
-    setDiffProposals([])
+    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
     if (selectedProject) writeActiveThread(selectedProject.id, summary.threadId)
@@ -273,10 +308,20 @@ export function useWorkspaceController() {
   )
 
   const handleDiffProposals = useCallback(
-    (proposals: DiffProposal[]) => {
-      setDiffProposals(proposals)
+    (proposals: DiffProposal[], source: DiffProposalScope = {}) => {
+      const sourceSessionId = source.sessionId ?? activeSessionId
+      const sourceThreadId = source.threadId ?? activeThreadId
+
+      if (!sourceSessionId || sourceSessionId !== activeSessionId) return
+      if ((sourceThreadId ?? null) !== activeThreadId) return
+
+      setDiffProposalState({
+        sessionId: sourceSessionId,
+        threadId: sourceThreadId ?? null,
+        proposals,
+      })
     },
-    [],
+    [activeSessionId, activeThreadId],
   )
 
   async function handleApproveApproval() {
@@ -351,7 +396,7 @@ export function useWorkspaceController() {
       updateActiveStatus('cancelled')
       tabs.updateStatus(sessionId, 'cancelled')
       setApprovalRequest(null)
-      setDiffProposals([])
+      setDiffProposalState(null)
       setBannerError(null)
     } catch (error: unknown) {
       setBannerError(error instanceof Error ? error.message : 'Failed to cancel session')
@@ -469,7 +514,7 @@ export function useWorkspaceController() {
       createdAt: session.createdAt,
     })
     setMainView('workspace')
-    setDiffProposals([])
+    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
   }
@@ -529,7 +574,7 @@ export function useWorkspaceController() {
     tabs.closeTab(sessionId)
     if (activeSession?.id === sessionId) {
       setActiveSession(null)
-      setDiffProposals([])
+      setDiffProposalState(null)
       setApprovalRequest(null)
       if (selectedProject) writeActiveThread(selectedProject.id, null)
     }
@@ -578,7 +623,7 @@ export function useWorkspaceController() {
     setSelectedProject(project)
     setActiveSession(null)
     tabs.resetTabs()
-    setDiffProposals([])
+    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
     setMainView('workspace')
@@ -599,7 +644,7 @@ export function useWorkspaceController() {
     isBusy,
     busyReason,
     toggleTerminal: () => setMainView('workspace'),
-    setDiffProposals,
+    setDiffProposals: (proposals: DiffProposal[]) => handleDiffProposals(proposals),
     handleDiffProposals,
     setMainView,
     setSwarmOpen,
