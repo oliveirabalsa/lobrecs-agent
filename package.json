@@ -9,6 +9,7 @@
     "dev": "node scripts/ensure-electron-native.mjs && electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
+    "pretest": "node scripts/ensure-node-native.mjs",
     "test": "vitest --passWithNoTests",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3 -w node-pty",
     "rebuild:node": "npm rebuild better-sqlite3 node-pty",
