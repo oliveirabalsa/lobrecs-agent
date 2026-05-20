@@ -13,6 +13,12 @@ describe('shouldPinMessageStream', () => {
     ).toBe(true)
   })
 
+  it('forces pinning while the initial stream is loading', () => {
+    expect(
+      shouldPinMessageStream({ loading: true, running: false, sticky: false }),
+    ).toBe(true)
+  })
+
   it('keeps historical views respectful of the current sticky state', () => {
     expect(
       shouldPinMessageStream({ loading: false, running: false, sticky: false }),

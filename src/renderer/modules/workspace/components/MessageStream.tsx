@@ -42,7 +42,7 @@ export function shouldPinMessageStream({
   running,
   sticky,
 }: AutoPinState): boolean {
-  return sticky
+  return sticky || loading || running
 }
 
 function getScrollElement(container: HTMLDivElement | null): HTMLElement | null {

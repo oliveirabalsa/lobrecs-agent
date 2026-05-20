@@ -2,20 +2,30 @@ import { execFileSync, spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 const DEFAULT_BUILDER_ARGS = ['--mac', '--config.npmRebuild=false']
+const PUBLISH_BUILDER_ARGS = [
+  '--publish',
+  'always',
+  '--config.mac.forceCodeSigning=true',
+  '--config.mac.notarize=true',
+]
 const PUBLISH_HELP =
   'Publishing requires GH_TOKEN or GITHUB_TOKEN, or an authenticated GitHub CLI session. Run `gh auth login` or export GH_TOKEN before `npm run release:mac`.'
+const NOTARIZATION_HELP =
+  'macOS publish builds must be notarized. Set one complete notarization credential group: APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or APPLE_KEYCHAIN_PROFILE.'
+const CODE_SIGNING_HELP =
+  'macOS publish builds must be signed with a Developer ID Application certificate. Set CSC_LINK/CSC_KEY_PASSWORD, set CSC_NAME for an installed certificate, or install a Developer ID Application identity in the macOS keychain.'
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const publish = argv.includes('--publish')
-  const builderArgs = [...DEFAULT_BUILDER_ARGS]
-
-  if (publish) {
-    builderArgs.push('--publish', 'always')
-  }
+  const builderArgs = createMacBuilderArgs(publish)
 
   let exitCode = 0
 
   try {
+    if (publish) {
+      validateMacPublishEnvironment(env)
+    }
+
     await run('npm', ['run', 'build'])
     await run('npm', ['run', 'rebuild:electron'])
     await run('electron-builder', builderArgs, {
@@ -34,6 +44,29 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   }
 
   return exitCode
+}
+
+export function createMacBuilderArgs(publish = false) {
+  return publish
+    ? [...DEFAULT_BUILDER_ARGS, ...PUBLISH_BUILDER_ARGS]
+    : [...DEFAULT_BUILDER_ARGS]
+}
+
+export function validateMacPublishEnvironment(
+  env = process.env,
+  {
+    platform = process.platform,
+    hasLocalDeveloperIdApplicationIdentity = findLocalDeveloperIdApplicationIdentity,
+  } = {},
+) {
+  const notarizationProfile = resolveNotarizationProfile(env)
+  if (!notarizationProfile) {
+    throw new Error(NOTARIZATION_HELP)
+  }
+
+  if (!hasCodeSigningMaterial(env, platform, hasLocalDeveloperIdApplicationIdentity)) {
+    throw new Error(CODE_SIGNING_HELP)
+  }
 }
 
 export function createElectronBuilderEnv(
@@ -58,6 +91,51 @@ export function resolvePublishToken(env = process.env, getGhToken = getGhCliToke
   }
 
   throw new Error(PUBLISH_HELP)
+}
+
+function resolveNotarizationProfile(env) {
+  const profiles = [
+    ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'],
+    ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'],
+    ['APPLE_KEYCHAIN_PROFILE'],
+  ]
+
+  return profiles.find(profile => profile.every(name => normalizeToken(env[name])))
+}
+
+function hasCodeSigningMaterial(env, platform, hasLocalDeveloperIdApplicationIdentity) {
+  if (normalizeToken(env.CSC_LINK) || normalizeToken(env.CSC_NAME)) {
+    return true
+  }
+
+  if (platform !== 'darwin' || isExplicitlyFalse(env.CSC_IDENTITY_AUTO_DISCOVERY)) {
+    return false
+  }
+
+  return hasLocalDeveloperIdApplicationIdentity()
+}
+
+function findLocalDeveloperIdApplicationIdentity() {
+  try {
+    const identities = execFileSync(
+      '/usr/bin/security',
+      ['find-identity', '-v', '-p', 'codesigning'],
+      {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    )
+
+    return identities
+      .split('\n')
+      .some(line => line.includes('Developer ID Application:'))
+  } catch {
+    return false
+  }
+}
+
+function isExplicitlyFalse(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'false'
 }
 
 function getGhCliToken() {

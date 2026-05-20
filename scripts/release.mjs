@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { validateMacPublishEnvironment } from './build-mac.mjs'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.dirname(__dirname)
 const packageJsonPath = path.join(projectRoot, 'package.json')
@@ -10,6 +12,11 @@ const builderConfigPath = path.join(projectRoot, 'electron-builder.yml')
 
 const versionRegex = /^\d+\.\d+\.\d+$/
 const bumpTypes = ['patch', 'minor', 'major']
+
+export function isBranchBehindRemote(leftRightCount) {
+  const [, behind = '0'] = leftRightCount.split('\t')
+  return parseInt(behind, 10) > 0
+}
 
 function log(message) {
   console.log(`\n📦 ${message}`)
@@ -33,6 +40,14 @@ function exec(command, args, silent = false) {
   }
 }
 
+function errorMessage(err) {
+  if (err instanceof Error && err.message) {
+    return err.message
+  }
+
+  return String(err)
+}
+
 function validateGitState() {
   log('Validating git state...')
 
@@ -52,8 +67,7 @@ function validateGitState() {
     ['rev-list', '--left-right', '--count', 'main...origin/main'],
     true,
   )
-  const [behind] = behindOrigin.split('\t')
-  if (parseInt(behind, 10) > 0) {
+  if (isBranchBehindRemote(behindOrigin)) {
     error(`Your main branch is behind origin/main. Run 'git pull' first.`)
   }
 
@@ -75,6 +89,17 @@ function validateGhToken() {
     error(
       'No GitHub token found. Export GH_TOKEN or run `gh auth login`.',
     )
+  }
+}
+
+function validateMacReleaseEnvironment() {
+  log('Validating macOS signing and notarization...')
+
+  try {
+    validateMacPublishEnvironment(process.env)
+    log('✓ macOS signing and notarization prerequisites are configured')
+  } catch (err) {
+    error(errorMessage(err))
   }
 }
 
@@ -176,10 +201,11 @@ Examples:
 The release script will:
   1. Validate git state (clean, on main, up to date)
   2. Validate GitHub authentication
-  3. Update version in package.json and electron-builder.yml
-  4. Commit and tag the version bump
-  5. Push commits and tags to GitHub
-  6. Build and publish to oliveirabalsa/lobrecs-agent-releases
+  3. Validate macOS signing and notarization prerequisites
+  4. Update version in package.json and electron-builder.yml
+  5. Commit and tag the version bump
+  6. Push commits and tags to GitHub
+  7. Build, notarize, and publish to oliveirabalsa/lobrecs-agent-releases
 `)
 }
 
@@ -211,6 +237,7 @@ export async function main(argv = process.argv.slice(2)) {
 
     validateGitState()
     validateGhToken()
+    validateMacReleaseEnvironment()
 
     const currentVersion = readVersion()
     log(`Current version: ${currentVersion}`)

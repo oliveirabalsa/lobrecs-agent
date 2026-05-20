@@ -1,6 +1,18 @@
 import { describe, it, expect } from 'vitest'
 
+import { isBranchBehindRemote } from './release.mjs'
+
 describe('release.mjs', () => {
+  describe('git remote state parsing', () => {
+    it('allows local commits ahead of origin because the release push will publish them', () => {
+      expect(isBranchBehindRemote('1\t0')).toBe(false)
+    })
+
+    it('rejects a branch that is actually behind origin', () => {
+      expect(isBranchBehindRemote('0\t1')).toBe(true)
+    })
+  })
+
   describe('version bumping', () => {
     function bumpVersion(currentVersion, bumpType) {
       const [major, minor, patch] = currentVersion.split('.').map(Number)
