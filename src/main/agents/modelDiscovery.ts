@@ -74,13 +74,29 @@ export function parseOpenCodeModels(output: string): AgentModel[] {
     .split(/\r?\n/)
     .map((line) => line.replace(ANSI_PATTERN, '').trim())
     .filter((line) => line.includes('/') && !line.includes(' '))
-    .filter(isOpenCodeMiniMaxTokenPlanModel)
 
-  return dedupeModels(ids.map((id) => createAgentModel('opencode', id, 'cli')))
+  return dedupeModels(
+    ids.map((id) => createAgentModel('opencode', id, 'cli', {
+      label: labelForOpenCodeModel(id),
+    }))
+  )
 }
 
 export function isOpenCodeMiniMaxTokenPlanModel(id: string): boolean {
   return id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)
+}
+
+function labelForOpenCodeModel(id: string): string {
+  if (id.startsWith('minimax-coding-plan/')) {
+    return `${id.slice('minimax-coding-plan/'.length)} (MiniMax Token Plan)`
+  }
+  if (id.startsWith('minimax-cn-coding-plan/')) {
+    return `${id.slice('minimax-cn-coding-plan/'.length)} (MiniMax CN)`
+  }
+  if (id.startsWith('opencode/')) {
+    return id.slice('opencode/'.length)
+  }
+  return id
 }
 
 export function createAgentModel(
@@ -149,12 +165,15 @@ export function inferModelTier(id: string, label = ''): ModelTier {
     return 'frontier'
   }
 
-  if (normalized.includes('gemini-3.5') || normalized.includes('antigravity-3.5')) {
-    return 'frontier'
+  if (
+    normalized.includes('gemini-3.5') ||
+    normalized.includes('antigravity-3.5')
+  ) {
+    return normalized.includes('flash') ? 'frontier' : 'advanced'
   }
 
   if (normalized.includes('gemini-3.0') || normalized.includes('antigravity-3.0')) {
-    return 'advanced'
+    return normalized.includes('flash') ? 'balanced' : 'advanced'
   }
 
   if (normalized.includes('gemini-3') || normalized.includes('antigravity-3')) {

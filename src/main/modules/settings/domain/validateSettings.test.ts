@@ -106,7 +106,7 @@ describe('settings validation', () => {
       lightweight: 'gemini-2.0-flash-lite',
       balanced: 'gemini-2.5-flash',
       advanced: 'gemini-3.0-pro',
-      frontier: 'gemini-3.5-pro',
+      frontier: 'gemini-3.5-flash',
     })
   })
 

@@ -22,7 +22,7 @@ describe('modelDiscovery', () => {
     expect(models[0]).toMatchObject({ agentId: 'codex', tier: 'frontier' })
   })
 
-  it('parses only OpenCode MiniMax token-plan model lines', () => {
+  it('parses all OpenCode model lines with provider labels', () => {
     const models = parseOpenCodeModels(
       [
         'opencode/minimax-m2.5-free',
@@ -35,10 +35,28 @@ describe('modelDiscovery', () => {
     )
 
     expect(models.map((model) => model.id)).toEqual([
+      'opencode/minimax-m2.5-free',
+      'minimax/MiniMax-M2.7',
+      'minimax-cn-coding-plan/MiniMax-M2.7',
       'minimax-coding-plan/MiniMax-M2',
       'minimax-coding-plan/MiniMax-M2.5',
       'minimax-coding-plan/MiniMax-M2.7',
     ])
+
+    expect(models[0]).toMatchObject({
+      label: 'minimax-m2.5-free',
+      agentId: 'opencode',
+    })
+
+    expect(models[3]).toMatchObject({
+      label: 'MiniMax-M2 (MiniMax Token Plan)',
+      agentId: 'opencode',
+    })
+
+    expect(models[2]).toMatchObject({
+      label: 'MiniMax-M2.7 (MiniMax CN)',
+      agentId: 'opencode',
+    })
   })
 
   it('picks the closest available model for the requested tier', () => {
@@ -58,8 +76,10 @@ describe('modelDiscovery', () => {
     expect(inferModelTier('gemini-2.5-flash-lite')).toBe('lightweight')
     expect(inferModelTier('gemini-3.0-pro')).toBe('advanced')
     expect(inferModelTier('antigravity-3.0-pro')).toBe('advanced')
-    expect(inferModelTier('gemini-3.5-pro')).toBe('frontier')
-    expect(inferModelTier('antigravity-3.5-pro')).toBe('frontier')
+    expect(inferModelTier('gemini-3.0-flash')).toBe('balanced')
+    expect(inferModelTier('gemini-3.5-flash')).toBe('frontier')
+    expect(inferModelTier('antigravity-3.5-flash')).toBe('frontier')
+    expect(inferModelTier('gemini-3.5-pro')).toBe('advanced')
     expect(inferModelTier('auto')).toBe('frontier')
   })
 
@@ -77,7 +97,7 @@ describe('modelDiscovery', () => {
       'gemini-2.0-flash-lite',
       'gemini-2.5-flash',
       'gemini-3.0-pro',
-      'gemini-3.5-pro',
+      'gemini-3.5-flash',
     ])
   })
 })
