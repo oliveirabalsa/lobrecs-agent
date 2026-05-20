@@ -219,11 +219,16 @@ export function SwarmBuilder({
     return () => window.removeEventListener('keydown', handleKeyDown)
   })
 
-  const costEstimate = useMemo(() => estimateCost(agents), [agents])
+  const isManaged = strategy === 'managed'
+  const costEstimate = useMemo(() => estimateCost(agents, strategy), [agents, strategy])
   const templates = swarmSettings?.templates ?? TEMPLATES
   const maxAgents = swarmSettings?.maxAgents ?? MAX_AGENTS
   const canLaunch = Boolean(
-    projectId && prompt.trim() && agents.length > 0 && availableAgents.length > 0 && !launching,
+    projectId &&
+      prompt.trim() &&
+      (isManaged || agents.length > 0) &&
+      availableAgents.length > 0 &&
+      !launching,
   )
 
   if (!open) return null
@@ -240,7 +245,7 @@ export function SwarmBuilder({
         threadId: threadId ?? undefined,
         prompt: prompt.trim(),
         strategy,
-        agents,
+        agents: isManaged ? [] : agents,
         maxIterations: swarmSettings?.maxReviewerIterations,
       })
       onSwarmStarted?.(result.swarmId, result)
@@ -265,7 +270,7 @@ export function SwarmBuilder({
             Swarm Builder
           </h2>
           <fieldset className="flex items-center gap-1">
-            {(['parallel', 'sequential', 'fan-out'] as Strategy[]).map((nextStrategy) => (
+            {(['parallel', 'sequential', 'fan-out', 'managed'] as Strategy[]).map((nextStrategy) => (
               <label
                 key={nextStrategy}
                 className={`cursor-pointer rounded px-3 py-1.5 text-xs ${
@@ -319,75 +324,77 @@ export function SwarmBuilder({
               ))}
             </div>
 
-            <section className="rounded-md border border-zinc-800">
-              <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-                <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-                  Agents
+            {!isManaged ? (
+              <section className="rounded-md border border-zinc-800">
+                <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+                  <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Agents
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={agents.length >= maxAgents || availableAgents.length === 0}
+                    onClick={() =>
+                      setAgents((current) => {
+                        autoManageAgentsRef.current = false
+
+                        return [
+                          ...current,
+                          {
+                            role: `agent ${current.length + 1}`,
+                            agentId:
+                              availableAgents[current.length % availableAgents.length] ??
+                              'claude-code',
+                          },
+                        ]
+                      })
+                    }
+                  >
+                    + Add agent
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  disabled={agents.length >= maxAgents || availableAgents.length === 0}
-                  onClick={() =>
-                    setAgents((current) => {
-                      autoManageAgentsRef.current = false
+                <div className="px-3">
+                  {agents.map((agent, index) => (
+                    <AgentRow
+                      key={index}
+                      index={index}
+                      config={agent}
+                      installedAgents={availableAgents}
+                      modelCatalogs={modelCatalogs}
+                      sequential={strategy === 'sequential'}
+                      removable={agents.length > 1}
+                      onChange={(nextAgent) =>
+                        setAgents((current) => {
+                          autoManageAgentsRef.current = false
+                          const prev = current[index]
+                          const roleChanged = nextAgent.role !== prev?.role
+                          const resolved =
+                            roleChanged && !nextAgent.promptSuffix
+                              ? {
+                                  ...nextAgent,
+                                  promptSuffix: defaultPromptForRole(
+                                    nextAgent.role,
+                                    swarmSettings?.rolePrompts,
+                                  ),
+                                }
+                              : nextAgent
+                          return current.map((item, itemIndex) =>
+                            itemIndex === index ? resolved : item,
+                          )
+                        })
+                      }
+                      onRemove={() =>
+                        setAgents((current) => {
+                          autoManageAgentsRef.current = false
 
-                      return [
-                        ...current,
-                        {
-                          role: `agent ${current.length + 1}`,
-                          agentId:
-                            availableAgents[current.length % availableAgents.length] ??
-                            'claude-code',
-                        },
-                      ]
-                    })
-                  }
-                >
-                  + Add agent
-                </button>
-              </div>
-              <div className="px-3">
-                {agents.map((agent, index) => (
-                  <AgentRow
-                    key={index}
-                    index={index}
-                    config={agent}
-                    installedAgents={availableAgents}
-                    modelCatalogs={modelCatalogs}
-                    sequential={strategy === 'sequential'}
-                    removable={agents.length > 1}
-                    onChange={(nextAgent) =>
-                      setAgents((current) => {
-                        autoManageAgentsRef.current = false
-                        const prev = current[index]
-                        const roleChanged = nextAgent.role !== prev?.role
-                        const resolved =
-                          roleChanged && !nextAgent.promptSuffix
-                            ? {
-                                ...nextAgent,
-                                promptSuffix: defaultPromptForRole(
-                                  nextAgent.role,
-                                  swarmSettings?.rolePrompts,
-                                ),
-                              }
-                            : nextAgent
-                        return current.map((item, itemIndex) =>
-                          itemIndex === index ? resolved : item,
-                        )
-                      })
-                    }
-                    onRemove={() =>
-                      setAgents((current) => {
-                        autoManageAgentsRef.current = false
-
-                        return current.filter((_, itemIndex) => itemIndex !== index)
-                      })
-                    }
-                  />
-                ))}
-              </div>
-            </section>
+                          return current.filter((_, itemIndex) => itemIndex !== index)
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </div>
         </div>
 
@@ -420,7 +427,9 @@ export function SwarmBuilder({
   )
 }
 
-function estimateCost(agents: SwarmAgentConfig[]): string {
+function estimateCost(agents: SwarmAgentConfig[], strategy: Strategy): string {
+  if (strategy === 'managed') return '~$0.03+'
+
   const estimatedUnits = agents.reduce((total, agent) => {
     const model = agent.modelOverride?.toLowerCase() ?? ''
     if (model.includes('opus') || model.includes('frontier')) return total + 5

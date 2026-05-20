@@ -1,6 +1,10 @@
 import type { ModelTier, SupportedAgentId } from './agents'
 import type { SessionStatus } from './sessions'
 
+export const SWARM_STRATEGIES = ['parallel', 'sequential', 'fan-out', 'managed'] as const
+
+export type SwarmStrategy = (typeof SWARM_STRATEGIES)[number]
+
 export interface SwarmAgentConfig {
   role: string
   agentId: SupportedAgentId
@@ -16,7 +20,11 @@ export interface SwarmConfig {
    */
   threadId?: string
   prompt: string
-  strategy: 'parallel' | 'sequential' | 'fan-out'
+  /**
+   * `managed` starts with a frontier manager agent that produces a dynamic
+   * sub-agent plan. `agents` is ignored for that strategy.
+   */
+  strategy: SwarmStrategy
   agents: SwarmAgentConfig[]
   /**
    * Max reviewer cycles when a sequential step has a "reviewer" role. Hard

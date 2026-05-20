@@ -1,17 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import type {
-  AgentActivity,
-  Project,
-  RoutingDecision,
-  SessionStatus,
-  AppSettings,
-  SupportedAgentId,
-  SwarmAgentConfig,
-  SwarmConfig,
-  SwarmResult,
+import {
+  SWARM_STRATEGIES,
+  type AgentActivity,
+  type AppSettings,
+  type Project,
+  type RoutingDecision,
+  type SessionStatus,
+  type SupportedAgentId,
+  type SwarmAgentConfig,
+  type SwarmConfig,
+  type SwarmResult,
 } from '../../shared/types'
 import { worktreeManager, type WorktreeManager } from '../git/WorktreeManager'
 import { DEFAULT_APP_SETTINGS, settingsService } from '../modules/settings'
+import {
+  buildManagerPrompt,
+  MANAGER_AGENT_ROLE,
+  parseManagerPlan,
+} from '../modules/swarms/domain/managerPrompt'
 import { modelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore, sessionsStore, threadsStore } from '../store'
@@ -140,7 +146,15 @@ export class SwarmOrchestrator {
 
     this.swarms.set(result.swarmId, result)
 
-    if (config.strategy === 'parallel') {
+    if (config.strategy === 'managed') {
+      result.sessions = await this.spawnManaged(
+        config,
+        project.repoPath,
+        result.swarmId,
+        threadId,
+        settings,
+      )
+    } else if (config.strategy === 'parallel') {
       result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId, threadId)
     } else if (config.strategy === 'sequential') {
       result.sessions = await this.spawnSequential(
@@ -288,6 +302,65 @@ export class SwarmOrchestrator {
     })
 
     return [firstSession]
+  }
+
+  private async spawnManaged(
+    config: SwarmConfig,
+    repoPath: string,
+    swarmId: string,
+    threadId: string,
+    settings: AppSettings,
+  ): Promise<SpawnedSession[]> {
+    const supportedAgentIds = enabledSwarmAgentIds(settings)
+    const managerAgentId = selectManagerAgent(supportedAgentIds)
+    const sessions: SpawnedSession[] = []
+    const managerSession = await this.spawnAgent({
+      agentConfig: {
+        role: MANAGER_AGENT_ROLE,
+        agentId: managerAgentId,
+        modelOverride: settings.agents.modelMap[managerAgentId].frontier,
+        promptSuffix: buildManagerPrompt({
+          supportedAgentIds,
+          maxAgents: settings.swarms.maxAgents,
+        }),
+      },
+      basePrompt: config.prompt,
+      projectId: config.projectId,
+      repoPath,
+      swarmId,
+      threadId,
+    })
+
+    sessions.push(managerSession)
+    const swarm = this.swarms.get(swarmId)
+    if (swarm) swarm.sessions = sessions
+
+    const managerCompletion = await this.waitForCompletion(managerSession)
+    managerSession.status = managerCompletion.status
+    managerSession.output = managerCompletion.output
+
+    if (managerCompletion.status !== 'done') {
+      throw new Error('Manager agent failed before producing a plan')
+    }
+
+    const plan = parseManagerPlan(managerCompletion.output ?? '', {
+      supportedAgentIds,
+      maxAgents: settings.swarms.maxAgents,
+    })
+    const plannedConfig: SwarmConfig = {
+      ...config,
+      strategy: plan.strategy,
+      agents: plan.agents,
+    }
+    const spawned =
+      plan.strategy === 'parallel'
+        ? await this.spawnParallel(plannedConfig, repoPath, swarmId, threadId)
+        : await this.spawnSequential(plannedConfig, repoPath, swarmId, threadId, settings)
+
+    sessions.push(...spawned)
+    if (swarm) swarm.sessions = sessions
+
+    return sessions
   }
 
   private async spawnFanOut(
@@ -553,9 +626,11 @@ function validateConfig(config: SwarmConfig, settings: AppSettings): void {
     throw new Error('Swarm threadId must be a non-empty string when provided')
   }
   if (!config.prompt.trim()) throw new Error('Swarm prompt is required')
-  if (!['parallel', 'sequential', 'fan-out'].includes(config.strategy)) {
+  if (!SWARM_STRATEGIES.includes(config.strategy)) {
     throw new Error(`Unsupported swarm strategy: ${config.strategy}`)
   }
+  if (config.strategy === 'managed') return
+
   if (config.agents.length === 0) throw new Error('At least one swarm agent is required')
   if (config.agents.length > settings.swarms.maxAgents) {
     throw new Error(`Swarm agent limit is ${settings.swarms.maxAgents}`)
@@ -567,10 +642,29 @@ function validateConfig(config: SwarmConfig, settings: AppSettings): void {
 }
 
 function buildSwarmThreadTitle(config: SwarmConfig): string {
-  const prefix = config.strategy === 'sequential' ? 'Sequential swarm' : 'Swarm'
+  const prefix =
+    config.strategy === 'managed'
+      ? 'Managed swarm'
+      : config.strategy === 'sequential'
+        ? 'Sequential swarm'
+        : 'Swarm'
   const prompt = config.prompt.trim()
   const title = prompt ? `${prefix}: ${prompt}` : prefix
   return title.slice(0, 200)
+}
+
+function selectManagerAgent(agentIds: readonly SupportedAgentId[]): SupportedAgentId {
+  for (const preferred of ['claude-code', 'codex', 'antigravity', 'opencode'] as const) {
+    if (agentIds.includes(preferred)) return preferred
+  }
+
+  return agentIds[0] ?? 'claude-code'
+}
+
+function enabledSwarmAgentIds(settings: AppSettings): SupportedAgentId[] {
+  return settings.agents.enabledAgentIds.length > 0
+    ? [...settings.agents.enabledAgentIds]
+    : ['claude-code']
 }
 
 function isReviewerRole(role: string): boolean {

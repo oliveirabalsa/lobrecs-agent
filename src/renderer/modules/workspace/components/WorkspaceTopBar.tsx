@@ -3,7 +3,7 @@ import type { EditorInfo } from '../../../../shared/types'
 import { Pill } from '../../../components/ui'
 import { OpenInEditorMenu } from './OpenInEditorMenu'
 
-export type RightPanelMode = 'diff' | 'terminal'
+export type RightPanelMode = 'diff' | 'terminal' | 'swarm'
 
 interface WorkspaceTopBarProps {
   title: string
@@ -11,6 +11,7 @@ interface WorkspaceTopBarProps {
   rightPanelOpen: boolean
   rightPanelMode: RightPanelMode
   hasDiff: boolean
+  hasSwarmGraph: boolean
   canRerun: boolean
   onRerun?: () => void | Promise<void>
   onToggleRightPanel: (mode: RightPanelMode) => void
@@ -36,6 +37,7 @@ export function WorkspaceTopBar({
   rightPanelOpen,
   rightPanelMode,
   hasDiff,
+  hasSwarmGraph,
   canRerun,
   onRerun,
   onToggleRightPanel,
@@ -83,6 +85,7 @@ export function WorkspaceTopBar({
 
   const diffActive = rightPanelOpen && rightPanelMode === 'diff'
   const termActive = rightPanelOpen && rightPanelMode === 'terminal'
+  const swarmActive = rightPanelOpen && rightPanelMode === 'swarm'
   const leftInsetClass = reserveTrafficLightInset
     ? 'pl-[70px] md:pl-4'
     : 'pl-2 md:pl-4'
@@ -218,6 +221,14 @@ export function WorkspaceTopBar({
           <DiffIcon />
         </IconButton>
         <IconButton
+          aria-label={swarmActive ? 'Hide swarm graph' : 'Show swarm graph'}
+          onClick={() => onToggleRightPanel('swarm')}
+          disabled={!hasSwarmGraph}
+          active={swarmActive}
+        >
+          <GraphIcon />
+        </IconButton>
+        <IconButton
           aria-label={termActive ? 'Hide terminal panel' : 'Show terminal panel'}
           onClick={() => onToggleRightPanel('terminal')}
           active={termActive}
@@ -342,6 +353,29 @@ function TerminalIcon() {
     >
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  )
+}
+
+function GraphIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M8.5 6h7" />
+      <path d="M7.5 8.2 10.6 15.8" />
+      <path d="M16.5 8.2 13.4 15.8" />
     </svg>
   )
 }

@@ -143,6 +143,109 @@ describe('SwarmOrchestrator', () => {
     expect(createThread).not.toHaveBeenCalled()
   })
 
+  it('runs a frontier manager agent before spawning planned parallel agents', async () => {
+    const { orchestrator, dispatched, completions } = createManagedHarness()
+
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+
+    expect(dispatched[0].role).toBe('manager')
+    expect(dispatched[0].threadId).toBe('thread-1')
+    expect(dispatched[0].agentId).toBe('claude-code')
+    expect(dispatched[0].model).toBe('claude-opus-4-7')
+    expect(dispatched[0].prompt).toContain('Return only a JSON object')
+    expect(dispatched[0].prompt).toContain('agentId must be one of')
+
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'planner',
+            agentId: 'claude-code',
+            promptSuffix: 'Identify the files and implementation order.',
+          },
+          {
+            role: 'implementer',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.3-codex',
+            promptSuffix: 'Apply the complete patch and tests.',
+          },
+        ],
+      }),
+    })
+
+    const result = await spawnPromise
+
+    expect(result.strategy).toBe('managed')
+    expect(result.sessions).toHaveLength(3)
+    expect(result.sessions.map((session) => session.role)).toEqual([
+      'manager',
+      'planner',
+      'implementer',
+    ])
+    expect(result.sessions.map((session) => session.threadId)).toEqual([
+      'thread-1',
+      'thread-1',
+      'thread-1',
+    ])
+    expect(result.sessions[0].status).toBe('done')
+    expect(dispatched.map((call) => call.role)).toEqual([
+      'manager',
+      'planner',
+      'implementer',
+    ])
+    expect(dispatched[1].prompt).toContain('[Role: planner]')
+    expect(dispatched[1].prompt).toContain('Identify the files')
+    expect(dispatched[2].model).toBe('gpt-5.3-codex')
+  })
+
+  it('rejects invalid manager JSON before spawning workers', async () => {
+    const { orchestrator, dispatched, completions } = createManagedHarness()
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: 'I would use a planner and implementer.',
+    })
+
+    await expect(spawnPromise).rejects.toThrow('Manager plan must be valid JSON')
+    expect(dispatched).toHaveLength(1)
+  })
+
+  it('rejects empty manager plans before spawning workers', async () => {
+    const { orchestrator, dispatched, completions } = createManagedHarness()
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({ strategy: 'parallel', agents: [] }),
+    })
+
+    await expect(spawnPromise).rejects.toThrow(
+      'Manager plan agents must contain at least one agent',
+    )
+    expect(dispatched).toHaveLength(1)
+  })
+
+  it('stops managed swarms when the manager session fails', async () => {
+    const { orchestrator, dispatched, completions } = createManagedHarness()
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'error',
+      output: 'manager process failed',
+    })
+
+    await expect(spawnPromise).rejects.toThrow('Manager agent failed before producing a plan')
+    expect(dispatched).toHaveLength(1)
+  })
+
   it('waits for sequential completion before launching the next agent prompt', async () => {
     const worktrees = createFakeWorktrees()
     const dispatched: SwarmDispatchInput[] = []
@@ -467,6 +570,41 @@ function baseConfig(): SwarmConfig {
       },
     ],
   }
+}
+
+function managedConfig(): SwarmConfig {
+  return {
+    projectId: 'project-1',
+    prompt: 'Refactor the session module and add regression tests',
+    strategy: 'managed',
+    agents: [],
+  }
+}
+
+function createManagedHarness() {
+  const worktrees = createFakeWorktrees()
+  const dispatched: SwarmDispatchInput[] = []
+  const completions = new Map<
+    string,
+    Deferred<{ status: 'done' | 'error'; output: string }>
+  >()
+  const orchestrator = new SwarmOrchestrator({
+    getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+    createThread: () => ({ id: 'thread-1' }),
+    routeModel: (input) => ({
+      agentId: input.preferredAgentId,
+      model: input.modelOverride ?? `auto-${input.preferredAgentId}`,
+    }),
+    dispatchSession: (input) => {
+      dispatched.push(input)
+      completions.set(input.sessionId, deferred<{ status: 'done' | 'error'; output: string }>())
+      return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
+    },
+    waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+    worktrees,
+  })
+
+  return { orchestrator, dispatched, completions, worktrees }
 }
 
 function createFakeWorktrees() {

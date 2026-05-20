@@ -467,6 +467,7 @@ export function SettingsView({
                     { value: 'parallel', label: 'parallel' },
                     { value: 'sequential', label: 'sequential' },
                     { value: 'fan-out', label: 'fan-out' },
+                    { value: 'managed', label: 'managed' },
                   ]}
                   onChange={(defaultStrategy) =>
                     update('swarms', { ...draft.swarms, defaultStrategy })

@@ -16,7 +16,7 @@ import {
   type ActiveSessionMeta,
   type StartedSessionSummary,
 } from '../../sessions'
-import { SwarmBuilder } from '../../swarms'
+import { SwarmBuilder, SwarmGraphPanel } from '../../swarms'
 import { useSettings } from '../../settings'
 import {
   BottomTerminalPanel,
@@ -32,6 +32,7 @@ import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import type { DiffProposalScope, MainView } from '../hooks/useWorkspaceController'
 import { RunWorkspace } from './RunWorkspace'
+import type { SwarmGraphNode } from '../../swarms/domain/swarmGraph'
 
 interface WorkspaceViewProps {
   isMac?: boolean
@@ -46,6 +47,7 @@ interface WorkspaceViewProps {
   bannerError: string | null
   busy: boolean
   busyReason?: string
+  onBannerError: (message: string) => void
   onMainViewChange: Dispatch<SetStateAction<MainView>>
   onSwarmOpenChange: Dispatch<SetStateAction<boolean>>
   onCancelSession: (sessionId: string) => void | Promise<void>
@@ -124,7 +126,8 @@ function readPanelMode(threadId: string | null, fallback: RightPanelMode = 'diff
   const key = rightPanelModeKey(threadId)
   const value = ls?.getItem(key)
   if (value === null || value === undefined) return fallback
-  return value === 'terminal' ? 'terminal' : 'diff'
+  if (value === 'terminal' || value === 'swarm') return value
+  return 'diff'
 }
 
 export function WorkspaceView({
@@ -140,6 +143,7 @@ export function WorkspaceView({
   bannerError,
   busy,
   busyReason,
+  onBannerError,
   onMainViewChange,
   onSwarmOpenChange,
   onCancelSession,
@@ -264,6 +268,12 @@ export function WorkspaceView({
     }
   }, [diffProposals.length, rightPanelMode, rightPanelOpen])
 
+  useEffect(() => {
+    if (rightPanelMode === 'swarm' && !activeThreadId && rightPanelOpen) {
+      setRightPanelModeState('terminal')
+    }
+  }, [activeThreadId, rightPanelMode, rightPanelOpen])
+
   const handleToggleRightPanel = useCallback(
     (mode: RightPanelMode) => {
       setRightPanelOpenState((prev) => {
@@ -369,6 +379,39 @@ export function WorkspaceView({
     [selectedProject?.repoPath, bottomPanelInitialTab, bottomPanelOpen],
   )
 
+  const handleResumeSwarmWithEdit = useCallback(
+    async (handoff: string, node: SwarmGraphNode) => {
+      if (!selectedProject || !activeThreadId) return
+
+      const prompt = [
+        `[Debugger resume from: ${node.role}]`,
+        'The previous swarm output was edited by the user. Continue this thread using the edited handoff as the source of truth.',
+        '',
+        'Edited handoff:',
+        handoff,
+      ].join('\n')
+      const createdAt = Date.now()
+      const result = await window.agentforge.agent.dispatch({
+        projectId: selectedProject.id,
+        threadId: activeThreadId,
+        prompt,
+        agentId: node.agentLabel,
+        modelOverride: node.model,
+      })
+
+      onSessionStarted({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt,
+        routingDecision: null,
+        agentId: node.agentLabel === 'cursor' ? undefined : node.agentLabel,
+        modelOverride: node.model,
+        createdAt,
+      })
+    },
+    [activeThreadId, onSessionStarted, selectedProject],
+  )
+
   const titleForTopBar = activeSession?.prompt?.trim()
     ? activeSession.prompt.trim().slice(0, 80)
     : selectedProject
@@ -386,6 +429,7 @@ export function WorkspaceView({
               rightPanelOpen={rightPanelOpen}
               rightPanelMode={rightPanelMode}
               hasDiff={diffProposals.length > 0}
+              hasSwarmGraph={Boolean(activeThreadId)}
               canRerun={Boolean(activeSession?.prompt) && !busy}
               onRerun={onRerunSession}
               onToggleRightPanel={handleToggleRightPanel}
@@ -555,6 +599,8 @@ export function WorkspaceView({
                   <BottomTerminalPanel
                     key={bottomPanelInitialTab.id}
                     initialTab={bottomPanelInitialTab}
+                    projectId={selectedProject.id}
+                    activeThreadId={activeSession?.threadId ?? null}
                     visible={bottomPanelOpen}
                     fullscreen={bottomPanelFullscreen}
                     height={bottomPanelHeight}
@@ -582,6 +628,8 @@ export function WorkspaceView({
                       bottomPanelAddTabRef.current?.(tab)
                     }}
                     addTabRef={bottomPanelAddTabRef}
+                    onSessionStarted={onSessionStarted}
+                    onRemediationError={onBannerError}
                   />
                 ) : null}
               </div>
@@ -611,6 +659,12 @@ export function WorkspaceView({
                       label="Terminal"
                       active={rightPanelMode === 'terminal'}
                       onClick={() => setRightPanelModeState('terminal')}
+                    />
+                    <RightPanelTab
+                      label="Swarm"
+                      active={rightPanelMode === 'swarm'}
+                      disabled={!activeThreadId}
+                      onClick={() => setRightPanelModeState('swarm')}
                     />
                     <div className="flex-1" />
                     <button
@@ -645,6 +699,15 @@ export function WorkspaceView({
                       <div className="flex h-full items-center justify-center px-6 text-center text-[12px] text-muted">
                         No code changes to review.
                       </div>
+                    ) : rightPanelMode === 'swarm' ? (
+                      <SwarmGraphPanel
+                        project={selectedProject}
+                        threadId={activeThreadId}
+                        activeSessionId={activeSessionId}
+                        activeSessionStatus={activeSession?.status ?? null}
+                        onPauseSession={onCancelSession}
+                        onResumeWithEdit={handleResumeSwarmWithEdit}
+                      />
                     ) : (
                       <TerminalPanel
                         sessionId={activeSessionId}
