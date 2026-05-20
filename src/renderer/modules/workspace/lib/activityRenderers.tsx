@@ -11,6 +11,7 @@ import {
   ApprovalRequestPill,
   Callout,
   CommandPreview,
+  CommandsGroup,
   CompletionFooter,
   EditedFilesCard,
   RanCommandsPill,
@@ -241,8 +242,9 @@ export function renderStreamItem(
 
     case 'ran-commands-group':
       return (
-        <RanCommandsPill
+        <CommandsGroup
           key={key}
+          type={item.type}
           items={item.items}
           running={ctx.running}
         />

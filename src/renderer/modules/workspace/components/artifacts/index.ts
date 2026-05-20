@@ -4,6 +4,12 @@ export type { RanCommandsPillProps, RanCommandItem } from './RanCommandsPill'
 export { CommandPreview } from './CommandPreview'
 export type { CommandPreviewProps } from './CommandPreview'
 
+export { CommandCard } from './CommandCard'
+export type { CommandCardProps } from './CommandCard'
+
+export { CommandsGroup } from './CommandsGroup'
+export type { CommandsGroupProps } from './CommandsGroup'
+
 export { EditedFilesCard } from './EditedFilesCard'
 export type { EditedFilesCardProps } from './EditedFilesCard'
 
