@@ -47,9 +47,11 @@ export function ProjectTreeItem({
   }, [expanded])
 
   function handleRowClick() {
-    onSelectProject(project)
-    if (!expanded) {
+    if (expanded && selected) {
       onToggleExpand(project)
+    } else {
+      onSelectProject(project)
+      if (!expanded) onToggleExpand(project)
     }
   }
 
