@@ -8,17 +8,6 @@ interface Props {
   onError?: (message: string) => void
 }
 
-/**
- * Matches `SHELL_TERMINAL_EDITOR_ID` in the main process — selecting this
- * pseudo-editor spawns the user's $SHELL inside the project repo instead of
- * launching a detected CLI editor.
- */
-const SHELL_TERMINAL_EDITOR: EditorInfo = {
-  id: 'shell',
-  name: 'Terminal',
-  kind: 'cli',
-}
-
 export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) {
   const [open, setOpen] = useState(false)
   const [editors, setEditors] = useState<EditorInfo[] | null>(null)
@@ -67,8 +56,7 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
   }
 
   const guiEditors = editors?.filter((e) => e.kind === 'gui') ?? []
-  const cliEditors = editors?.filter((e) => e.kind === 'cli') ?? []
-  const hasAny = (editors?.length ?? 0) > 0
+  const hasAny = guiEditors.length > 0
 
   return (
     <div ref={containerRef} className="relative">
@@ -97,35 +85,12 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
             <div className="px-3 py-2 text-xs text-muted">Detecting editors…</div>
           ) : (
             <>
-              <div className="border-b border-hairline pb-1">
-                <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-wide text-muted">
-                  Shell
-                </div>
-                <EditorRow editor={SHELL_TERMINAL_EDITOR} onSelect={handleSelect} />
-              </div>
-              {guiEditors.length > 0 ? (
-                <div className="border-b border-hairline pb-1">
-                  <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-wide text-muted">
-                    Applications
-                  </div>
-                  {guiEditors.map((editor) => (
-                    <EditorRow key={editor.id} editor={editor} onSelect={handleSelect} />
-                  ))}
-                </div>
-              ) : null}
-              {cliEditors.length > 0 ? (
-                <div className="pt-1">
-                  <div className="px-3 pb-1 pt-1 text-[10px] uppercase tracking-wide text-muted">
-                    Editor in terminal
-                  </div>
-                  {cliEditors.map((editor) => (
-                    <EditorRow key={editor.id} editor={editor} onSelect={handleSelect} />
-                  ))}
-                </div>
-              ) : null}
+              {guiEditors.map((editor) => (
+                <EditorRow key={editor.id} editor={editor} onSelect={handleSelect} />
+              ))}
               {!hasAny ? (
                 <div className="px-3 py-2 text-[10px] text-muted/70">
-                  No editors detected. Install VS Code, Cursor, vim, etc. to launch them here.
+                  No editors detected. Install VS Code, Cursor, etc. to launch them here.
                 </div>
               ) : null}
             </>

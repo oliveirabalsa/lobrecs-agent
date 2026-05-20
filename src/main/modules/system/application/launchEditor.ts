@@ -50,6 +50,18 @@ export async function launchEditor(input: LaunchEditorInput): Promise<void> {
 }
 
 async function launchGuiEditor(editor: EditorInfo, repoPath: string): Promise<void> {
+  if (editor.id === 'default-app') {
+    await execFileAsync('/usr/bin/open', [repoPath], {
+      timeout: 5000,
+    })
+    return
+  }
+  if (editor.id === 'open-in-folder') {
+    await execFileAsync('/usr/bin/open', ['-a', 'Finder', repoPath], {
+      timeout: 5000,
+    })
+    return
+  }
   await execFileAsync('/usr/bin/open', ['-a', editor.target, repoPath], {
     timeout: 5000,
   })
