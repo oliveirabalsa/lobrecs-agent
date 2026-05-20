@@ -5,6 +5,17 @@ export interface MarkdownContentProps {
   text: string
   className?: string
   variant?: 'assistant' | 'compact'
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+}
+
+export interface MarkdownLinkRequest {
+  href: string
+  title?: string
+  label?: string
+}
+
+interface MarkdownRenderContext {
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
 }
 
 const MARKDOWN_OPTIONS = {
@@ -16,27 +27,33 @@ export function MarkdownContent({
   text,
   className,
   variant = 'assistant',
+  onOpenMarkdown,
 }: MarkdownContentProps) {
   const tokens = lexer(text, MARKDOWN_OPTIONS)
+  const context: MarkdownRenderContext = { onOpenMarkdown }
 
   return (
     <div className={cx(containerClass(variant), className)}>
-      {tokens.map((token, index) => renderBlockToken(token, `${index}`))}
+      {tokens.map((token, index) => renderBlockToken(token, `${index}`, context))}
     </div>
   )
 }
 
-function renderBlockToken(token: Token, key: string): ReactNode {
+function renderBlockToken(
+  token: Token,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   switch (token.type) {
     case 'space':
     case 'def':
       return null
     case 'heading':
-      return renderHeading(token as Tokens.Heading, key)
+      return renderHeading(token as Tokens.Heading, key, context)
     case 'paragraph':
       return (
         <p key={key} className="min-w-0">
-          {renderInlineTokens((token as Tokens.Paragraph).tokens ?? [], key)}
+          {renderInlineTokens((token as Tokens.Paragraph).tokens ?? [], key, context)}
         </p>
       )
     case 'text': {
@@ -44,7 +61,7 @@ function renderBlockToken(token: Token, key: string): ReactNode {
       return (
         <p key={key} className="min-w-0">
           {'tokens' in textToken && textToken.tokens
-            ? renderInlineTokens(textToken.tokens, key)
+            ? renderInlineTokens(textToken.tokens, key, context)
             : decodeEntities(textToken.text)}
         </p>
       )
@@ -57,18 +74,18 @@ function renderBlockToken(token: Token, key: string): ReactNode {
         <blockquote key={key} className="border-l-2 border-hairline pl-3 text-secondary">
           <div className="flex flex-col gap-2">
             {blockquote.tokens.map((child, index) =>
-              renderBlockToken(child, `${key}-quote-${index}`),
+              renderBlockToken(child, `${key}-quote-${index}`, context),
             )}
           </div>
         </blockquote>
       )
     }
     case 'list':
-      return renderList(token as Tokens.List, key)
+      return renderList(token as Tokens.List, key, context)
     case 'hr':
       return <hr key={key} className="border-hairline" />
     case 'table':
-      return renderTable(token as Tokens.Table, key)
+      return renderTable(token as Tokens.Table, key, context)
     case 'html':
       return (
         <p key={key} className="whitespace-pre-wrap font-mono text-xs text-secondary">
@@ -80,7 +97,11 @@ function renderBlockToken(token: Token, key: string): ReactNode {
   }
 }
 
-function renderHeading(token: Tokens.Heading, key: string): ReactNode {
+function renderHeading(
+  token: Tokens.Heading,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   const level = Math.min(Math.max(token.depth, 1), 6)
   const className = cx(
     'min-w-0 font-semibold text-primary',
@@ -89,7 +110,7 @@ function renderHeading(token: Tokens.Heading, key: string): ReactNode {
     level === 3 && 'text-base leading-6',
     level >= 4 && 'text-sm leading-6',
   )
-  const children = renderInlineTokens(token.tokens, key)
+  const children = renderInlineTokens(token.tokens, key, context)
 
   switch (level) {
     case 1:
@@ -124,7 +145,11 @@ function renderCodeBlock(token: Tokens.Code, key: string): ReactNode {
   )
 }
 
-function renderList(token: Tokens.List, key: string): ReactNode {
+function renderList(
+  token: Tokens.List,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   const className = cx(
     'flex flex-col gap-1 pl-5',
     token.ordered ? 'list-decimal' : 'list-disc',
@@ -137,28 +162,36 @@ function renderList(token: Tokens.List, key: string): ReactNode {
         start={typeof token.start === 'number' ? token.start : undefined}
         className={className}
       >
-        {renderListItems(token, key)}
+        {renderListItems(token, key, context)}
       </ol>
     )
   }
 
   return (
     <ul key={key} className={className}>
-      {renderListItems(token, key)}
+      {renderListItems(token, key, context)}
     </ul>
   )
 }
 
-function renderListItems(token: Tokens.List, key: string): ReactNode[] {
+function renderListItems(
+  token: Tokens.List,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode[] {
   return token.items.map((item, index) => (
     <li key={`${key}-item-${index}`} className="pl-1">
-      {renderListItem(item, `${key}-item-${index}`)}
+      {renderListItem(item, `${key}-item-${index}`, context)}
     </li>
   ))
 }
 
-function renderListItem(item: Tokens.ListItem, key: string): ReactNode {
-  const content = renderListItemContent(item, key)
+function renderListItem(
+  item: Tokens.ListItem,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
+  const content = renderListItemContent(item, key, context)
   if (!item.task) return content
 
   return (
@@ -176,30 +209,38 @@ function renderListItem(item: Tokens.ListItem, key: string): ReactNode {
   )
 }
 
-function renderListItemContent(item: Tokens.ListItem, key: string): ReactNode {
+function renderListItemContent(
+  item: Tokens.ListItem,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   if (item.tokens.length === 1) {
     const [only] = item.tokens
     if (only.type === 'text') {
       const textToken = only as Tokens.Text | Tokens.Tag
       return 'tokens' in textToken && textToken.tokens
-        ? renderInlineTokens(textToken.tokens, key)
+        ? renderInlineTokens(textToken.tokens, key, context)
         : decodeEntities(textToken.text)
     }
     if (only.type === 'paragraph') {
-      return renderInlineTokens((only as Tokens.Paragraph).tokens ?? [], key)
+      return renderInlineTokens((only as Tokens.Paragraph).tokens ?? [], key, context)
     }
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
       {item.tokens.map((token, index) =>
-        renderBlockToken(token, `${key}-block-${index}`),
+        renderBlockToken(token, `${key}-block-${index}`, context),
       )}
     </div>
   )
 }
 
-function renderTable(token: Tokens.Table, key: string): ReactNode {
+function renderTable(
+  token: Tokens.Table,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   return (
     <div key={key} className="overflow-x-auto rounded-card border border-hairline">
       <table className="min-w-full border-collapse text-left text-xs">
@@ -207,7 +248,7 @@ function renderTable(token: Tokens.Table, key: string): ReactNode {
           <tr>
             {token.header.map((cell, index) => (
               <th key={`${key}-head-${index}`} className={tableCellClass(cell.align, true)}>
-                {renderInlineTokens(cell.tokens, `${key}-head-${index}`)}
+                {renderInlineTokens(cell.tokens, `${key}-head-${index}`, context)}
               </th>
             ))}
           </tr>
@@ -220,7 +261,7 @@ function renderTable(token: Tokens.Table, key: string): ReactNode {
                   key={`${key}-cell-${rowIndex}-${cellIndex}`}
                   className={tableCellClass(cell.align, false)}
                 >
-                  {renderInlineTokens(cell.tokens, `${key}-cell-${rowIndex}-${cellIndex}`)}
+                  {renderInlineTokens(cell.tokens, `${key}-cell-${rowIndex}-${cellIndex}`, context)}
                 </td>
               ))}
             </tr>
@@ -231,13 +272,21 @@ function renderTable(token: Tokens.Table, key: string): ReactNode {
   )
 }
 
-function renderInlineTokens(tokens: Token[], keyPrefix: string): ReactNode[] {
+function renderInlineTokens(
+  tokens: Token[],
+  keyPrefix: string,
+  context: MarkdownRenderContext,
+): ReactNode[] {
   return tokens.map((token, index) =>
-    renderInlineToken(token, `${keyPrefix}-inline-${index}`),
+    renderInlineToken(token, `${keyPrefix}-inline-${index}`, context),
   )
 }
 
-function renderInlineToken(token: Token, key: string): ReactNode {
+function renderInlineToken(
+  token: Token,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
   switch (token.type) {
     case 'text':
     case 'escape':
@@ -245,15 +294,15 @@ function renderInlineToken(token: Token, key: string): ReactNode {
     case 'strong':
       return (
         <strong key={key} className="font-semibold text-primary">
-          {renderInlineTokens((token as Tokens.Strong).tokens ?? [], key)}
+          {renderInlineTokens((token as Tokens.Strong).tokens ?? [], key, context)}
         </strong>
       )
     case 'em':
-      return <em key={key}>{renderInlineTokens((token as Tokens.Em).tokens ?? [], key)}</em>
+      return <em key={key}>{renderInlineTokens((token as Tokens.Em).tokens ?? [], key, context)}</em>
     case 'del':
       return (
         <del key={key} className="text-muted">
-          {renderInlineTokens((token as Tokens.Del).tokens ?? [], key)}
+          {renderInlineTokens((token as Tokens.Del).tokens ?? [], key, context)}
         </del>
       )
     case 'codespan':
@@ -268,7 +317,7 @@ function renderInlineToken(token: Token, key: string): ReactNode {
     case 'br':
       return <br key={key} />
     case 'link':
-      return renderLink(token as Tokens.Link, key)
+      return renderLink(token as Tokens.Link, key, context)
     case 'image':
       return renderImageFallback(token as Tokens.Image, key)
     case 'html':
@@ -278,10 +327,37 @@ function renderInlineToken(token: Token, key: string): ReactNode {
   }
 }
 
-function renderLink(token: Tokens.Link, key: string): ReactNode {
-  const children = renderInlineTokens(token.tokens, key)
+function renderLink(
+  token: Tokens.Link,
+  key: string,
+  context: MarkdownRenderContext,
+): ReactNode {
+  const children = renderInlineTokens(token.tokens, key, context)
   if (!isSafeHref(token.href)) {
     return <span key={key}>{children}</span>
+  }
+
+  if (context.onOpenMarkdown && isPreviewableMarkdownHref(token.href)) {
+    const label = inlinePlainText(token.tokens)
+    return (
+      <a
+        key={key}
+        href={normalizeHref(token.href)}
+        title={token.title ?? undefined}
+        data-markdown-preview="true"
+        onClick={(event) => {
+          event.preventDefault()
+          context.onOpenMarkdown?.({
+            href: token.href,
+            title: token.title ?? undefined,
+            label,
+          })
+        }}
+        className="text-accent-primary underline decoration-accent-primary/40 underline-offset-2 hover:decoration-accent-primary"
+      >
+        {children}
+      </a>
+    )
   }
 
   return (
@@ -324,6 +400,7 @@ function renderImageFallback(token: Tokens.Image, key: string): ReactNode {
 function isSafeHref(href: string): boolean {
   const trimmed = href.trim()
   if (trimmed.startsWith('#')) return true
+  if (isPreviewableMarkdownHref(trimmed)) return true
 
   if (trimmed.startsWith('/')) return true
   if (/^[a-zA-Z]:\\/.test(trimmed)) return true
@@ -334,6 +411,20 @@ function isSafeHref(href: string): boolean {
     return ['http:', 'https:', 'mailto:', 'file:'].includes(parsed.protocol)
   } catch {
     return false
+  }
+}
+
+export function isPreviewableMarkdownHref(href: string): boolean {
+  const trimmed = href.trim()
+  if (!trimmed || trimmed.startsWith('#')) return false
+
+  try {
+    const parsed = new URL(trimmed)
+    return ['http:', 'https:', 'file:'].includes(parsed.protocol) &&
+      hasMarkdownExtension(parsed.pathname)
+  } catch {
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) return false
+    return hasMarkdownExtension(stripQueryAndHash(trimmed))
   }
 }
 
@@ -353,6 +444,26 @@ function normalizeHref(href: string): string {
   }
 
   return trimmed
+}
+
+function hasMarkdownExtension(pathname: string): boolean {
+  const lower = pathname.toLowerCase()
+  return lower.endsWith('.md') || lower.endsWith('.mdx') || lower.endsWith('.markdown')
+}
+
+function stripQueryAndHash(value: string): string {
+  return value.split(/[?#]/, 1)[0] ?? value
+}
+
+function inlinePlainText(tokens: Token[]): string {
+  return tokens
+    .map((token) => {
+      if ('text' in token && typeof token.text === 'string') return decodeEntities(token.text)
+      if ('tokens' in token && Array.isArray(token.tokens)) return inlinePlainText(token.tokens)
+      return ''
+    })
+    .join('')
+    .trim()
 }
 
 function tableCellClass(align: Tokens.TableCell['align'], header: boolean): string {

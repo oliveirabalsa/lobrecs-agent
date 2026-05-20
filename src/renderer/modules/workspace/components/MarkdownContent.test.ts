@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MarkdownContent } from './MarkdownContent'
+import { isPreviewableMarkdownHref, MarkdownContent } from './MarkdownContent'
 
 describe('MarkdownContent', () => {
   it('renders common assistant markdown as structured React markup', () => {
@@ -47,6 +47,28 @@ describe('MarkdownContent', () => {
 
     expect(html).toContain('href="file:///tmp/lobrecs-agent-0.1.1-mac-arm64.dmg"')
     expect(html).toContain('>DMG<')
+  })
+
+  it('marks markdown links for in-app preview when a handler is available', () => {
+    const html = renderToStaticMarkup(
+      createElement(MarkdownContent, {
+        text: '[Plan](docs/PLAN.md)',
+        onOpenMarkdown: () => undefined,
+      }),
+    )
+
+    expect(html).toContain('href="docs/PLAN.md"')
+    expect(html).toContain('data-markdown-preview="true"')
+    expect(html).not.toContain('target="_blank"')
+  })
+
+  it('detects previewable markdown hrefs', () => {
+    expect(isPreviewableMarkdownHref('docs/PLAN.md')).toBe(true)
+    expect(isPreviewableMarkdownHref('/tmp/notes.markdown#summary')).toBe(true)
+    expect(isPreviewableMarkdownHref('file:///tmp/release-notes.mdx')).toBe(true)
+    expect(isPreviewableMarkdownHref('https://example.com/readme.md')).toBe(true)
+    expect(isPreviewableMarkdownHref('mailto:team@example.com')).toBe(false)
+    expect(isPreviewableMarkdownHref('docs/archive.zip')).toBe(false)
   })
 
   it('renders quotes and apostrophes from source text, not raw html entities', () => {
