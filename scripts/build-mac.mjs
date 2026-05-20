@@ -1,4 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const DEFAULT_BUILDER_ARGS = ['--mac', '--config.npmRebuild=false']
@@ -13,11 +16,12 @@ const SIGNED_AND_NOTARIZED_PUBLISH_ARGS = [
 const PUBLISH_HELP =
   'Publishing requires GH_TOKEN or GITHUB_TOKEN, or an authenticated GitHub CLI session. Run `gh auth login` or export GH_TOKEN before `npm run release:mac`.'
 const NOTARIZATION_HELP =
-  'macOS publish builds must be notarized. Set one complete notarization credential group: APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or APPLE_KEYCHAIN_PROFILE.'
+  'macOS publish builds must be notarized. Set one complete notarization credential group: APPLE_API_KEY or APPLE_API_KEY_BASE64 + APPLE_API_KEY_ID + APPLE_API_ISSUER, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or APPLE_KEYCHAIN_PROFILE.'
 const CODE_SIGNING_HELP =
   'macOS publish builds must be signed with a Developer ID Application certificate. Set CSC_LINK/CSC_KEY_PASSWORD, set CSC_NAME for an installed certificate, or install a Developer ID Application identity in the macOS keychain.'
 const UNSIGNED_PUBLISH_HELP =
   'Unsigned macOS builds cannot be published to the auto-update feed. Build unsigned artifacts locally with `npm run build:mac` and publish only Developer ID signed and notarized macOS releases.'
+const APPLE_API_KEY_FILENAME = 'AuthKey.p8'
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const publish = argv.includes('--publish')
@@ -27,21 +31,25 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   })
 
   let exitCode = 0
+  let builderEnvContext = null
 
   try {
     if (publish && !allowUnsignedPublish) {
       validateMacPublishEnvironment(env)
+      builderEnvContext = createElectronBuilderEnvContext(env)
     }
 
     await run('npm', ['run', 'build'])
     await run('npm', ['run', 'rebuild:electron'])
     await run('electron-builder', builderArgs, {
-      env: publish ? createElectronBuilderEnv(env) : env,
+      env: builderEnvContext?.env ?? env,
     })
   } catch (error) {
     reportError(error)
     exitCode = getExitCode(error)
   } finally {
+    builderEnvContext?.cleanup()
+
     try {
       await run('npm', ['run', 'rebuild:node'])
     } catch (error) {
@@ -89,9 +97,41 @@ export function createElectronBuilderEnv(
   env = process.env,
   getGhToken = getGhCliToken,
 ) {
-  return {
+  return createElectronBuilderEnvContext(env, getGhToken).env
+}
+
+export function createElectronBuilderEnvContext(
+  env = process.env,
+  getGhToken = getGhCliToken,
+  {
+    createTempDir = createAppleApiKeyTempDir,
+    writeFile = writeFileSync,
+    removeDir = removeTempDir,
+  } = {},
+) {
+  const builderEnv = {
     ...env,
     GH_TOKEN: resolvePublishToken(env, getGhToken),
+  }
+  const preparedApiKey = prepareAppleApiKeyForElectronBuilder(builderEnv, {
+    createTempDir,
+    writeFile,
+    removeDir,
+  })
+
+  if (!preparedApiKey) {
+    return {
+      env: builderEnv,
+      cleanup: noop,
+    }
+  }
+
+  return {
+    env: {
+      ...builderEnv,
+      APPLE_API_KEY: preparedApiKey.path,
+    },
+    cleanup: preparedApiKey.cleanup,
   }
 }
 
@@ -110,11 +150,20 @@ export function resolvePublishToken(env = process.env, getGhToken = getGhCliToke
 }
 
 function resolveNotarizationProfile(env) {
+  const apiKey =
+    normalizeToken(env.APPLE_API_KEY) ?? normalizeToken(env.APPLE_API_KEY_BASE64)
   const profiles = [
-    ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'],
     ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'],
     ['APPLE_KEYCHAIN_PROFILE'],
   ]
+
+  if (
+    apiKey &&
+    normalizeToken(env.APPLE_API_KEY_ID) &&
+    normalizeToken(env.APPLE_API_ISSUER)
+  ) {
+    return ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
+  }
 
   return profiles.find(profile => profile.every(name => normalizeToken(env[name])))
 }
@@ -129,6 +178,99 @@ function hasCodeSigningMaterial(env, platform, hasLocalDeveloperIdApplicationIde
   }
 
   return hasLocalDeveloperIdApplicationIdentity()
+}
+
+function prepareAppleApiKeyForElectronBuilder(
+  env,
+  { createTempDir, writeFile, removeDir },
+) {
+  const apiKey = normalizeToken(env.APPLE_API_KEY)
+  if (apiKey) {
+    if (isAppleApiKeyPath(apiKey)) {
+      return null
+    }
+
+    const rawPrivateKey = normalizeAppleApiKeyContents(apiKey)
+    if (rawPrivateKey) {
+      return writeAppleApiKeyFile(rawPrivateKey, {
+        createTempDir,
+        writeFile,
+        removeDir,
+      })
+    }
+  }
+
+  const base64ApiKey = normalizeToken(env.APPLE_API_KEY_BASE64)
+  if (!base64ApiKey) {
+    return null
+  }
+
+  const rawPrivateKey = normalizeAppleApiKeyContents(base64ApiKey)
+  if (!rawPrivateKey) {
+    return null
+  }
+
+  return writeAppleApiKeyFile(rawPrivateKey, {
+    createTempDir,
+    writeFile,
+    removeDir,
+  })
+}
+
+function normalizeAppleApiKeyContents(value) {
+  if (looksLikePrivateKey(value)) {
+    return ensureTrailingNewline(value)
+  }
+
+  try {
+    const decodedValue = Buffer.from(value, 'base64').toString('utf8')
+    if (looksLikePrivateKey(decodedValue)) {
+      return ensureTrailingNewline(decodedValue)
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function writeAppleApiKeyFile(
+  rawPrivateKey,
+  { createTempDir, writeFile, removeDir },
+) {
+  const tempDir = createTempDir()
+  const apiKeyPath = path.join(tempDir, APPLE_API_KEY_FILENAME)
+  writeFile(apiKeyPath, rawPrivateKey, { mode: 0o600 })
+
+  return {
+    path: apiKeyPath,
+    cleanup: () => removeDir(tempDir),
+  }
+}
+
+function createAppleApiKeyTempDir() {
+  return mkdtempSync(path.join(tmpdir(), 'lobrecs-agent-notarize-'))
+}
+
+function removeTempDir(dir) {
+  rmSync(dir, { recursive: true, force: true })
+}
+
+function isAppleApiKeyPath(value) {
+  return (
+    value.endsWith('.p8') ||
+    value.includes('/') ||
+    value.includes('\\') ||
+    existsSync(value)
+  )
+}
+
+function looksLikePrivateKey(value) {
+  return value.includes('-----BEGIN PRIVATE KEY-----')
+}
+
+function ensureTrailingNewline(value) {
+  return value.endsWith('\n') ? value : `${value}\n`
 }
 
 function findLocalDeveloperIdApplicationIdentity() {
@@ -186,6 +328,8 @@ function errorMessage(error) {
 function getExitCode(error) {
   return typeof error?.exitCode === 'number' ? error.exitCode : 1
 }
+
+function noop() {}
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {

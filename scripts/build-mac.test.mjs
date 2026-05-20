@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   createElectronBuilderEnv,
+  createElectronBuilderEnvContext,
   createMacBuilderArgs,
   resolvePublishToken,
   validateMacPublishEnvironment,
 } from './build-mac.mjs'
+
+const privateKey = '-----BEGIN PRIVATE KEY-----\nmock-key\n-----END PRIVATE KEY-----\n'
+const privateKeyBase64 = Buffer.from(privateKey).toString('base64')
 
 describe('createMacBuilderArgs', () => {
   it('uses unsigned local mac packaging args by default', () => {
@@ -80,6 +84,47 @@ describe('createElectronBuilderEnv', () => {
       GH_TOKEN: 'github-token',
     })
   })
+
+  it('writes a base64 App Store Connect key to a temporary p8 file', () => {
+    const writeFile = vi.fn()
+    const removeDir = vi.fn()
+
+    const context = createElectronBuilderEnvContext(
+      {
+        GITHUB_TOKEN: 'github-token',
+        APPLE_API_KEY_BASE64: privateKeyBase64,
+      },
+      vi.fn(),
+      {
+        createTempDir: () => '/tmp/notary',
+        writeFile,
+        removeDir,
+      },
+    )
+
+    expect(context.env.APPLE_API_KEY).toBe('/tmp/notary/AuthKey.p8')
+    expect(writeFile).toHaveBeenCalledWith('/tmp/notary/AuthKey.p8', privateKey, {
+      mode: 0o600,
+    })
+
+    context.cleanup()
+    expect(removeDir).toHaveBeenCalledWith('/tmp/notary')
+  })
+
+  it('keeps an existing p8 APPLE_API_KEY path unchanged', () => {
+    expect(
+      createElectronBuilderEnv(
+        {
+          GITHUB_TOKEN: 'github-token',
+          APPLE_API_KEY: '/tmp/AuthKey_TEST.p8',
+        },
+        vi.fn(),
+      ),
+    ).toMatchObject({
+      APPLE_API_KEY: '/tmp/AuthKey_TEST.p8',
+      GH_TOKEN: 'github-token',
+    })
+  })
 })
 
 describe('validateMacPublishEnvironment', () => {
@@ -96,6 +141,20 @@ describe('validateMacPublishEnvironment', () => {
           ...apiKeyNotarization,
           CSC_LINK: '/tmp/developer-id.p12',
           CSC_KEY_PASSWORD: 'password',
+        },
+        { platform: 'linux' },
+      ),
+    ).not.toThrow()
+  })
+
+  it('accepts base64 API key notarization credentials with certificate material from env', () => {
+    expect(() =>
+      validateMacPublishEnvironment(
+        {
+          APPLE_API_KEY_BASE64: privateKeyBase64,
+          APPLE_API_KEY_ID: 'key-id',
+          APPLE_API_ISSUER: 'issuer-id',
+          CSC_LINK: '/tmp/developer-id.p12',
         },
         { platform: 'linux' },
       ),

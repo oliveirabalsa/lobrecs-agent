@@ -61,6 +61,8 @@ Configure one signing source:
 Configure one notarization source:
 
 - `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER` (preferred).
+  `APPLE_API_KEY` may be a `.p8` file path, raw `.p8` contents, or base64
+  encoded `.p8` contents. `APPLE_API_KEY_BASE64` is also accepted for CI.
 - Or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
 - Or a notarytool keychain profile through `APPLE_KEYCHAIN_PROFILE` (with
   `APPLE_KEYCHAIN` when the profile is not in the default keychain).
@@ -76,9 +78,9 @@ apps cannot apply. Configure one signing source and one notarization source in
 the `lobrecs-agent-releases` workflow environment:
 
 - `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`, or `MAC_CSC_NAME`.
-- `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`; or
-  `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`; or
-  `APPLE_KEYCHAIN_PROFILE`.
+- `APPLE_API_KEY` or `APPLE_API_KEY_BASE64`, plus `APPLE_API_KEY_ID` and
+  `APPLE_API_ISSUER`; or `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
+  `APPLE_TEAM_ID`; or `APPLE_KEYCHAIN_PROFILE` with optional `APPLE_KEYCHAIN`.
 
 ## Feed Constraints
 
