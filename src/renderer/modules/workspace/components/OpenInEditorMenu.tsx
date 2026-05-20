@@ -79,7 +79,7 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
       {open ? (
         <div
           role="menu"
-          className="absolute right-0 top-8 z-50 w-56 overflow-hidden rounded-card border border-hairline bg-card-raised py-1 shadow-xl shadow-black/40"
+          className="absolute right-0 top-8 z-50 w-56 overflow-hidden rounded-card border border-hairline bg-card-raised/75 py-1 shadow-xl shadow-black/40 backdrop-blur-lg"
         >
           {loading ? (
             <div className="px-3 py-2 text-xs text-muted">Detecting editors…</div>

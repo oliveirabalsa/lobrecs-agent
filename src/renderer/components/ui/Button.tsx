@@ -30,7 +30,7 @@ const BASE_CLASSES =
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-accent-primary text-white rounded-pill hover:bg-accent-primary/85 active:bg-accent-primary/75 shadow-md shadow-accent-primary/15 hover:shadow-lg hover:shadow-accent-primary/25 transition-all duration-150',
+    'btn-shimmer bg-accent-primary text-white rounded-pill hover:bg-accent-primary/85 active:bg-accent-primary/75 shadow-md shadow-accent-primary/15 hover:shadow-lg hover:shadow-accent-primary/25 transition-all duration-150',
   ghost:
     'bg-transparent text-secondary rounded-card hover:bg-white/5 hover:text-primary active:bg-white/10',
   chip:
@@ -117,6 +117,7 @@ export function Button({
     BASE_CLASSES,
     VARIANT_CLASSES[variant],
     getSizeClasses(variant, size),
+    variant === 'primary' && loading && 'btn-shimmer-loading',
     className,
   )
 

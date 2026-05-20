@@ -1,4 +1,5 @@
 import type { KeyboardEvent, MouseEvent } from 'react'
+import type { SessionStatus } from '../../../shared/types'
 import { Spinner } from '../ui'
 import { formatRelative } from '../../lib/relativeTime'
 import type { Thread } from './useProjectTree'
@@ -11,6 +12,25 @@ interface ThreadRowProps {
 }
 
 const RUNNING_STATUSES = new Set(['running', 'awaiting-approval', 'awaiting-input'])
+
+interface StatusDotStyle {
+  /** Tailwind background-color class for the dot. */
+  color: string
+  /** Render an expanding "ping" halo — used for live / needs-attention states. */
+  active: boolean
+  /** Accessible + tooltip label. */
+  label: string
+}
+
+// Exhaustive over SessionStatus: a new status won't compile until it's mapped.
+const STATUS_DOT: Record<SessionStatus, StatusDotStyle> = {
+  running: { color: 'bg-accent-primary', active: true, label: 'Running' },
+  'awaiting-approval': { color: 'bg-accent-warn', active: true, label: 'Awaiting approval' },
+  'awaiting-input': { color: 'bg-accent-warn', active: true, label: 'Waiting for your answer' },
+  done: { color: 'bg-accent-add', active: false, label: 'Done' },
+  error: { color: 'bg-accent-del', active: false, label: 'Failed' },
+  cancelled: { color: 'bg-muted', active: false, label: 'Cancelled' },
+}
 
 export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps) {
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)
@@ -42,7 +62,7 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
     >
       {active ? (
         <span
-          className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
+          className="animate-accent-line absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
           aria-hidden="true"
         />
       ) : null}
@@ -51,6 +71,7 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
         aria-current={active ? 'page' : undefined}
         title={thread.title}
       >
+        <StatusDot status={thread.sessionStatus} />
         <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
           {thread.title}
         </span>
@@ -78,6 +99,34 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
         </span>
       ) : null}
     </button>
+  )
+}
+
+/**
+ * Color-coded session-status circle. Active states (`running`, `awaiting-*`)
+ * get an expanding `animate-ping` halo so threads needing attention stand out
+ * when scanning the sidebar; terminal states show a calm solid dot.
+ */
+function StatusDot({ status }: { status: SessionStatus }) {
+  const style = STATUS_DOT[status] ?? STATUS_DOT.cancelled
+  return (
+    <span
+      className="relative flex h-2 w-2 shrink-0 items-center justify-center"
+      role="img"
+      aria-label={`Session status: ${style.label}`}
+      title={style.label}
+    >
+      {style.active ? (
+        <span
+          className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${style.color}`}
+          aria-hidden="true"
+        />
+      ) : null}
+      <span
+        className={`relative inline-flex h-2 w-2 rounded-full ${style.color}`}
+        aria-hidden="true"
+      />
+    </span>
   )
 }
 

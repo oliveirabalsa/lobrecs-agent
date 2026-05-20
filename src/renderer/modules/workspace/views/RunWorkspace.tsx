@@ -10,6 +10,8 @@ import type {
   ThreadTranscriptTurn,
 } from '../../../../shared/types'
 import { AssistantMessage } from '../components/AssistantMessage'
+import type { MarkdownLinkRequest } from '../components/MarkdownContent'
+import type { MarkdownPreviewDocument } from '../components/MarkdownPreviewer'
 import { MessageStream } from '../components/MessageStream'
 import { PlanPromptModal } from '../components/modals/PlanPromptModal'
 import {
@@ -18,6 +20,7 @@ import {
   type UserQuestionPromptAnswer,
 } from '../components/modals/UserQuestionPromptModal'
 import { UserMessage } from '../components/UserMessage'
+import { useAttentionSound } from '../hooks/useAttentionSound'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import type { StartedSessionSummary } from '../../sessions/types'
@@ -48,6 +51,8 @@ interface RunWorkspaceProps {
    * inside `<EditedFilesCard>` jump straight to the matching diff tab.
    */
   onReviewFile?: (filePath?: string) => void
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
   /** Called with the context window percentage (0–100) after a session completes. */
   onContextPercent?: (percent: number | null) => void
 }
@@ -81,6 +86,8 @@ export function RunWorkspace({
   onRejectApproval,
   onSessionStarted,
   onReviewFile,
+  onOpenMarkdown,
+  onPreviewMarkdown,
   onContextPercent,
 }: RunWorkspaceProps) {
   const handleSessionDiffProposals = useCallback(
@@ -122,6 +129,14 @@ export function RunWorkspace({
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
   const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
 
+  // Audible "agent needs you" alert — chimes on new questions, approvals, and
+  // finished runs. Tune *when* it fires in src/renderer/lib/attentionSound.ts.
+  useAttentionSound({
+    questionPromptId: pendingUserQuestion?.promptId ?? null,
+    approvalPending: approvalRequest !== null,
+    status,
+  })
+
   useEffect(() => {
     setPriorTurns([])
     if (!threadId) return
@@ -144,11 +159,17 @@ export function RunWorkspace({
     }
   }, [sessionId, threadId])
 
+  // A pending agent question belongs to the *thread*, not one session run.
+  // Queued follow-ups, steering, and answering all start a fresh `sessionId`
+  // on the same thread; resetting on `sessionId` used to wipe an unanswered
+  // question modal mid-flight. Only a real thread switch should clear it.
+  const questionThreadKey = threadId ?? sessionId
+
   useEffect(() => {
     dismissedUserQuestionIdsRef.current = new Set()
     setActiveUserQuestion(null)
     setQuestionSubmitError(null)
-  }, [sessionId])
+  }, [questionThreadKey])
 
   useEffect(() => {
     if (!pendingUserQuestion || activeUserQuestion) return
@@ -192,6 +213,8 @@ export function RunWorkspace({
         setActiveUserQuestion(prompt)
         setQuestionSubmitError(null)
       },
+      onOpenMarkdown,
+      onPreviewMarkdown,
     }),
     [
       diffProposals,
@@ -200,6 +223,8 @@ export function RunWorkspace({
       handleReviewFile,
       onApproveApproval,
       onRejectApproval,
+      onOpenMarkdown,
+      onPreviewMarkdown,
     ],
   )
 
@@ -291,7 +316,11 @@ export function RunWorkspace({
             pendingApprovals={pendingApprovals}
             pendingQuestions={pendingQuestions}
           />
-          <PriorThreadMessages turns={priorTurns} />
+          <PriorThreadMessages
+            turns={priorTurns}
+            onOpenMarkdown={onOpenMarkdown}
+            onPreviewMarkdown={onPreviewMarkdown}
+          />
           <MessageStream
             activities={activities}
             activityTimes={activityTimes}
@@ -415,7 +444,15 @@ function toSupportedAgentId(agentId: Project['agentId'] | undefined): SupportedA
   return undefined
 }
 
-function PriorThreadMessages({ turns }: { turns: ThreadTranscriptTurn[] }) {
+function PriorThreadMessages({
+  turns,
+  onOpenMarkdown,
+  onPreviewMarkdown,
+}: {
+  turns: ThreadTranscriptTurn[]
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
+}) {
   const visibleTurns = turns.filter((turn) => turn.prompt.trim() || turn.assistantText?.trim())
   if (visibleTurns.length === 0) return null
 
@@ -424,10 +461,19 @@ function PriorThreadMessages({ turns }: { turns: ThreadTranscriptTurn[] }) {
       {visibleTurns.map((turn) => (
         <section key={turn.sessionId} className="flex flex-col gap-3">
           {turn.prompt.trim() ? (
-            <UserMessage text={turn.prompt} attachments={turn.imageAttachments} />
+            <UserMessage
+              text={turn.prompt}
+              attachments={turn.imageAttachments}
+              onOpenMarkdown={onOpenMarkdown}
+            />
           ) : null}
           {turn.assistantText?.trim() ? (
-            <AssistantMessage text={turn.assistantText} showActions={false} />
+            <AssistantMessage
+              text={turn.assistantText}
+              showActions={false}
+              onOpenMarkdown={onOpenMarkdown}
+              onPreviewMarkdown={onPreviewMarkdown}
+            />
           ) : null}
         </section>
       ))}

@@ -65,7 +65,7 @@ export function ApprovalRequestPill({
   const risk = request.risk ?? 'medium'
 
   return (
-    <article className="self-start rounded-card border border-accent-warn/30 bg-accent-warn/10 px-3 py-2.5">
+    <article className="animate-approval-breathe self-start rounded-card border border-accent-warn/30 bg-accent-warn/10 px-3 py-2.5">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-accent-warn">

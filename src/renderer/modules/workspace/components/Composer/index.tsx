@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   AgentId,
   ImageAttachment,
@@ -150,8 +151,18 @@ export function Composer({
 
   const [submitting, setSubmitting] = useState(false)
   const [steerMode, setSteerMode] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const attachingRef = useRef(false)
+  // Counts dragenter minus dragleave. Native drag events fire leave+enter on
+  // every child-boundary crossing, so a raw boolean would flicker — the depth
+  // counter only drops the overlay once the pointer truly leaves the window.
+  const dragDepthRef = useRef(0)
+  // Holds the latest attachImageFiles closure so the window drag listeners,
+  // bound once, never need to re-subscribe when the closure is recreated.
+  const attachImageFilesRef = useRef<(files: File[]) => Promise<void>>(
+    async () => {},
+  )
 
   useEffect(() => {
     autosizeTextarea(textareaRef.current)
@@ -353,6 +364,52 @@ export function Composer({
     }
   }
 
+  attachImageFilesRef.current = attachImageFiles
+
+  // Window-level drag-and-drop: dropping image files anywhere over the app
+  // attaches them to the composer, with a full-viewport dropzone overlay.
+  useEffect(() => {
+    function dragHasFiles(event: DragEvent): boolean {
+      return event.dataTransfer?.types.includes('Files') ?? false
+    }
+    function handleDragEnter(event: DragEvent) {
+      if (!dragHasFiles(event)) return
+      dragDepthRef.current += 1
+      setDragActive(true)
+    }
+    function handleDragOver(event: DragEvent) {
+      if (!dragHasFiles(event)) return
+      // Required: without preventDefault the browser never fires `drop`.
+      event.preventDefault()
+    }
+    function handleDragLeave(event: DragEvent) {
+      if (!dragHasFiles(event)) return
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+      if (dragDepthRef.current === 0) setDragActive(false)
+    }
+    function handleDrop(event: DragEvent) {
+      dragDepthRef.current = 0
+      setDragActive(false)
+      if (!dragHasFiles(event)) return
+      // Stop the renderer from navigating to the dropped file.
+      event.preventDefault()
+      const images = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
+        file.type.startsWith('image/'),
+      )
+      if (images.length > 0) void attachImageFilesRef.current(images)
+    }
+    window.addEventListener('dragenter', handleDragEnter)
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [])
+
   const running =
     Boolean(activeSessionId) &&
     (activeSessionStatus === 'running' || activeSessionStatus === 'awaiting-approval')
@@ -389,10 +446,15 @@ export function Composer({
   const wrapperBorderClass = steerMode
     ? 'border-accent-warn/50 focus-within:border-accent-warn/70'
     : 'border-hairline focus-within:border-white/15'
+  // Soft accent glow breathing behind the bar while the agent runs a turn.
+  // Suppressed in steer mode, whose amber border owns the composer's color.
+  const wrapperGlowClass = running && !steerMode ? 'animate-composer-pulse' : ''
 
   return (
     <form onSubmit={handleSubmit} className="w-full pb-1 pt-2">
-      <div className={`rounded-bubble border bg-card ${wrapperBorderClass}`}>
+      <div
+        className={`rounded-bubble border bg-card ${wrapperBorderClass} ${wrapperGlowClass}`}
+      >
         <AttachmentStrip
           attachments={attachments}
           attaching={attaching}
@@ -494,6 +556,57 @@ export function Composer({
         hasProjectContext={hasProjectContext}
         onContextClick={onContextClick}
       />
+
+      {dragActive ? createPortal(<DropzoneOverlay />, document.body) : null}
     </form>
+  )
+}
+
+/**
+ * Full-viewport dropzone shown while image files are dragged over the app.
+ * Rendered into document.body so it floats above every workspace surface
+ * regardless of the composer's own stacking context, and kept
+ * `pointer-events-none` so it never intercepts the drag — events pass
+ * straight through to the window listeners that own the drop.
+ */
+function DropzoneOverlay() {
+  return (
+    <div
+      className="motion-fade-in pointer-events-none fixed inset-0 z-[60] flex items-center justify-center bg-canvas/55 backdrop-blur-md"
+      aria-hidden="true"
+    >
+      <div className="absolute inset-3 rounded-bubble border-2 border-dashed border-accent-primary/40" />
+      <div className="flex flex-col items-center gap-3 rounded-bubble border border-hairline bg-card-raised/80 px-10 py-8 text-center shadow-2xl shadow-black/50 backdrop-blur-md">
+        <span className="text-accent-primary">
+          <DropIcon />
+        </span>
+        <div className="text-sm font-medium text-primary">
+          Drop file to attach context
+        </div>
+        <div className="text-xs text-muted">
+          Images are added to your next message
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DropIcon() {
+  return (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v12" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+    </svg>
   )
 }
