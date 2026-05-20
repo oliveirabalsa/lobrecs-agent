@@ -118,6 +118,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         context: projectsStore.getContext(input.projectId),
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings: settings.agents.runtimes[input.agentId],
+        imageAttachments: input.imageAttachments,
       })
 
       return { sessionId, threadId, status: 'running' }

@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import type {
   AgentModelCatalog,
   AppSettings,
+  ImageAttachment,
   SupportedAgentId,
   SwarmAgentConfig,
   SwarmConfig,
   SwarmResult,
 } from '../../../shared/types'
+import { Spinner } from '../ui'
 import { AgentRow } from './AgentRow'
 import {
   buildDefaultSwarmAgents,
@@ -15,6 +17,24 @@ import {
   normalizeSwarmAgents,
   resolveAvailableSwarmAgents,
 } from './agentSelection'
+
+interface AttachedImage {
+  id: string
+  previewUrl: string
+  attachment: ImageAttachment
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result)
+      else reject(new Error('Failed to read image'))
+    }
+    reader.onerror = () => reject(new Error('Failed to read image'))
+    reader.readAsDataURL(file)
+  })
+}
 
 interface Props {
   open: boolean
@@ -126,6 +146,8 @@ export function SwarmBuilder({
   const [swarmSettings, setSwarmSettings] = useState<AppSettings['swarms'] | null>(null)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<AttachedImage[]>([])
+  const [attaching, setAttaching] = useState(false)
   const autoManageAgentsRef = useRef(true)
   const availableAgents = useMemo(
     () =>
@@ -141,6 +163,7 @@ export function SwarmBuilder({
     if (open) {
       setPrompt(initialPrompt)
       setError(null)
+      setAttachments([])
       autoManageAgentsRef.current = true
     }
   }, [initialPrompt, open])
@@ -233,6 +256,49 @@ export function SwarmBuilder({
 
   if (!open) return null
 
+  async function attachImageFiles(files: File[]) {
+    if (files.length === 0) return
+    const remaining = 8 - attachments.length
+    if (remaining <= 0) return
+    const accepted = files.slice(0, remaining)
+
+    setAttaching(true)
+    setError(null)
+    try {
+      const saved: AttachedImage[] = await Promise.all(
+        accepted.map(async (file) => {
+          const dataUrl = await readFileAsDataUrl(file)
+          const attachment = await window.agentforge.system.saveImageAttachment({
+            dataUrl,
+            name: file.name || `clipboard-${Date.now()}.png`,
+            mimeType: file.type,
+          })
+          return {
+            id: `${attachment.filePath}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+            previewUrl: URL.createObjectURL(file),
+            attachment,
+          }
+        }),
+      )
+      setAttachments((current) => [...current, ...saved])
+    } catch (attachError) {
+      setError(attachError instanceof Error ? attachError.message : 'Failed to attach image')
+    } finally {
+      setAttaching(false)
+    }
+  }
+
+  async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const imageFiles = [...event.clipboardData.items]
+      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+
+    if (imageFiles.length === 0) return
+    event.preventDefault()
+    await attachImageFiles(imageFiles)
+  }
+
   async function handleLaunch() {
     if (!canLaunch || !projectId) return
 
@@ -247,6 +313,7 @@ export function SwarmBuilder({
         strategy,
         agents: isManaged ? [] : agents,
         maxIterations: swarmSettings?.maxReviewerIterations,
+        imageAttachments: attachments.length > 0 ? attachments.map((a) => a.attachment) : undefined,
       })
       onSwarmStarted?.(result.swarmId, result)
       onClose()
@@ -295,13 +362,48 @@ export function SwarmBuilder({
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
           <div className="grid gap-4">
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              className="h-28 resize-none rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
-              placeholder="Describe the swarm task..."
-              aria-label="Swarm prompt"
-            />
+            <div className="rounded-md border border-zinc-800 bg-zinc-900 focus-within:border-zinc-600">
+              {attachments.length > 0 || attaching ? (
+                <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
+                  {attachments.map((image) => (
+                    <div
+                      key={image.id}
+                      className="group relative h-12 w-12 shrink-0 overflow-hidden rounded border border-zinc-700"
+                      title={image.attachment.name}
+                    >
+                      <img
+                        src={image.previewUrl}
+                        alt={image.attachment.name ?? 'Attached image'}
+                        className="h-full w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAttachments((current) =>
+                            current.filter((a) => a.id !== image.id),
+                          )
+                        }
+                        className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white group-hover:flex"
+                        aria-label={`Remove ${image.attachment.name ?? 'image'}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {attaching ? (
+                    <span className="text-xs text-zinc-500">Attaching…</span>
+                  ) : null}
+                </div>
+              ) : null}
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                onPaste={(event) => void handlePaste(event)}
+                className="h-28 w-full resize-none bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+                placeholder="Describe the swarm task…"
+                aria-label="Swarm prompt"
+              />
+            </div>
 
             <div className="flex flex-wrap gap-2">
               {templates.map((template) => (
@@ -414,11 +516,18 @@ export function SwarmBuilder({
             </button>
             <button
               type="button"
-              className="rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void handleLaunch()}
               disabled={!canLaunch}
             >
-              {launching ? 'Launching...' : 'Launch Swarm Cmd+Shift+Enter'}
+              {launching ? (
+                <>
+                  <Spinner size={12} className="text-zinc-600" />
+                  Launching agents…
+                </>
+              ) : (
+                'Launch Swarm ⌘⇧↵'
+              )}
             </button>
           </div>
         </footer>

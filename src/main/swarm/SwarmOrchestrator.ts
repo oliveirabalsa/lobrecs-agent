@@ -3,6 +3,7 @@ import {
   SWARM_STRATEGIES,
   type AgentActivity,
   type AppSettings,
+  type ImageAttachment,
   type Project,
   type RoutingDecision,
   type SessionStatus,
@@ -40,7 +41,7 @@ export interface SwarmDispatchInput {
   agentId: SupportedAgentId
   model: string
   repoPath: string
-  imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
+  imageAttachments?: ImageAttachment[]
 }
 
 export interface SwarmDispatchResult {
@@ -256,6 +257,7 @@ export class SwarmOrchestrator {
           repoPath,
           swarmId,
           threadId,
+          imageAttachments: config.imageAttachments,
         }),
       ),
     )
@@ -278,6 +280,7 @@ export class SwarmOrchestrator {
       repoPath,
       swarmId,
       threadId,
+      imageAttachments: config.imageAttachments,
     })
 
     void this.continueSequentialSwarm({
@@ -329,6 +332,7 @@ export class SwarmOrchestrator {
       repoPath,
       swarmId,
       threadId,
+      imageAttachments: config.imageAttachments,
     })
 
     sessions.push(managerSession)
@@ -539,7 +543,7 @@ export class SwarmOrchestrator {
     previousOutput?: string
     contextLabel?: string
     extraInstruction?: string
-    imageAttachments?: Array<{ id: string; name?: string; mimeType: string; dataUrl: string; size: number }>
+    imageAttachments?: ImageAttachment[]
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
     const provisionalSessionId = randomUUID()

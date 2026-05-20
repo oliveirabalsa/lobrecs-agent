@@ -1,4 +1,4 @@
-import type { ModelTier, SupportedAgentId } from './agents'
+import type { ImageAttachment, ModelTier, SupportedAgentId } from './agents'
 import type { SessionStatus } from './sessions'
 
 export const SWARM_STRATEGIES = ['parallel', 'sequential', 'fan-out', 'managed'] as const
@@ -32,6 +32,7 @@ export interface SwarmConfig {
    * Defaults to 3 when omitted.
    */
   maxIterations?: number
+  imageAttachments?: ImageAttachment[]
 }
 
 export interface SwarmResult {
