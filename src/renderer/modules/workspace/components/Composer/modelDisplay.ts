@@ -9,7 +9,7 @@ export function formatModelLabel(agentId: SupportedAgentId, modelId: string): st
   if (agentId === 'claude-code') return formatClaude(modelId)
   if (agentId === 'codex') return formatCodex(modelId)
   if (agentId === 'opencode') return formatOpenCode(modelId)
-  if (agentId === 'gemini') return formatGemini(modelId)
+  if (agentId === 'antigravity') return formatAntigravity(modelId)
   return modelId
 }
 
@@ -34,12 +34,18 @@ function formatOpenCode(modelId: string): string {
   return trimmed.replace(/^MiniMax-/i, 'MiniMax ')
 }
 
-function formatGemini(modelId: string): string {
-  if (modelId === 'flash-lite') return 'Gemini Flash Lite'
-  if (modelId === 'flash') return 'Gemini Flash'
-  if (modelId === 'pro') return 'Gemini Pro'
-  if (modelId === 'auto') return 'Gemini Auto'
-  return modelId.replace(/^gemini-/i, 'Gemini ')
+function formatAntigravity(modelId: string): string {
+  if (modelId === 'flash-lite') return 'Gemini 1.5 Flash Lite'
+  if (modelId === 'flash') return 'Gemini 1.5 Flash'
+  if (modelId === 'pro') return 'Gemini 1.5 Pro'
+  if (modelId === 'auto') return 'Gemini 2.0 Flash'
+
+  return modelId
+    .replace(/^(gemini|antigravity)-/i, (match) => match.charAt(0).toUpperCase() + match.slice(1, -1).toLowerCase() + ' ')
+    .replace(/-flash-lite$/i, ' Flash Lite')
+    .replace(/-flash$/i, ' Flash')
+    .replace(/-pro$/i, ' Pro')
+    .replace(/-/g, ' ')
 }
 
 export const TIER_LABEL: Record<ModelTier, string> = {
@@ -60,7 +66,7 @@ export const AGENT_SHORT: Record<SupportedAgentId, string> = {
   'claude-code': 'Claude',
   codex: 'Codex',
   opencode: 'OpenCode',
-  gemini: 'Gemini',
+  antigravity: 'Antigravity',
 }
 
 /** Advanced + Frontier tiers expose a thinking-depth control. */

@@ -8,8 +8,8 @@ import {
 } from './agentSelection'
 
 describe('SwarmBuilder agent selection', () => {
-  it('includes Gemini in the fallback agent set', () => {
-    expect(DEFAULT_SWARM_AGENT_IDS).toContain('gemini')
+  it('includes Antigravity in the fallback agent set', () => {
+    expect(DEFAULT_SWARM_AGENT_IDS).toContain('antigravity')
   })
 
   it('builds default roles across distinct discovered agents', () => {

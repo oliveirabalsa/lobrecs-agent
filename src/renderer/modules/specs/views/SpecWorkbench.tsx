@@ -698,18 +698,20 @@ function toggleAgent(
 }
 
 function fallbackCapabilities(agentId: SupportedAgentId): AdapterCapability[] {
+  const isAntigravity = agentId === 'antigravity'
+
   return [
     {
       agentId,
       name: AGENT_LABELS[agentId],
       installed: true,
-      supportsStreamingJson: true,
+      supportsStreamingJson: !isAntigravity,
       supportsResume: false,
       supportsFileAttachments: false,
-      supportsCustomAgents: false,
-      supportsMcp: false,
+      supportsCustomAgents: isAntigravity,
+      supportsMcp: isAntigravity,
       supportsApprovalMode: true,
-      supportsModelListing: true,
+      supportsModelListing: !isAntigravity,
     },
   ]
 }

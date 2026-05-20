@@ -100,7 +100,7 @@ const TEMPLATES: Array<{
       { role: 'approach a', agentId: 'claude-code' },
       { role: 'approach b', agentId: 'codex' },
       { role: 'approach c', agentId: 'opencode' },
-      { role: 'approach d', agentId: 'gemini' },
+      { role: 'approach d', agentId: 'antigravity' },
     ],
   },
 ]
