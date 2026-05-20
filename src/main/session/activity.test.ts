@@ -190,6 +190,43 @@ describe('agent activity normalization', () => {
     ])
   })
 
+  it('preserves nested Codex function-call tool names and inputs', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.completed',
+        item: {
+          type: 'function_call',
+          call_id: 'call-apply-patch',
+          function: {
+            name: 'functions.apply_patch',
+            arguments: JSON.stringify({
+              patch: [
+                '*** Begin Patch',
+                '*** Update File: src/example.ts',
+                '@@',
+                '-old line',
+                '+new line',
+                '*** End Patch',
+              ].join('\n'),
+            }),
+          },
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'functions.apply_patch',
+        input: expect.stringContaining('*** Begin Patch'),
+        status: 'done',
+      }),
+    ])
+  })
+
   it('turns Codex AskUserQuestion tool calls into structured question prompts', () => {
     const activities = deriveActivityEvents({
       type: 'stdout',

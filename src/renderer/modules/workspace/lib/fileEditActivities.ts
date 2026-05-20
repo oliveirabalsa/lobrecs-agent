@@ -67,7 +67,13 @@ const NEW_KEYS = [
 ]
 
 export function isEditToolName(name: string): boolean {
-  return EDIT_TOOL_NAMES.has(name.trim().toLowerCase())
+  const normalized = name.trim().toLowerCase()
+  if (!normalized) return false
+  if (EDIT_TOOL_NAMES.has(normalized)) return true
+
+  const parts = normalized.split(/[.:/]/).filter(Boolean)
+  const tail = parts.at(-1)
+  return tail ? EDIT_TOOL_NAMES.has(tail) : false
 }
 
 /**
@@ -174,10 +180,16 @@ export function transformFileEditActivities(
 function fileChangesFromInput(input: unknown): FileChange[] {
   // Codex `apply_patch` hands the whole patch text as the input.
   if (typeof input === 'string') {
-    return fileChangesFromPatchText(input)
+    const structured = parseStructuredInput(input)
+    return structured ? fileChangesFromInput(structured) : fileChangesFromPatchText(input)
   }
 
   if (!isRecord(input)) return []
+
+  const patch = pickString(input, ['patch', 'diff', 'content'])
+  if (patch && looksLikePatchText(patch)) {
+    return fileChangesFromPatchText(patch)
+  }
 
   const filePath = pickString(input, PATH_KEYS)
   if (!filePath) return []
@@ -273,6 +285,22 @@ function pickString(record: Record<string, unknown>, keys: string[]): string | u
     if (typeof value === 'string') return value
   }
   return undefined
+}
+
+function parseStructuredInput(input: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(input) as unknown
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function looksLikePatchText(value: string): boolean {
+  return (
+    value.includes('*** Begin Patch') ||
+    /^\s*(?:diff --git|\+\+\+ |\*\*\* (?:Add|Update|Delete) File:)/m.test(value)
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

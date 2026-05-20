@@ -484,6 +484,43 @@ describe('groupTurns', () => {
       expect(turn.streamItems[0].kind).toBe('file-change')
     })
 
+    it('renders namespaced patch tool calls as edited files instead of tools', () => {
+      const activities: AgentActivity[] = [
+        {
+          kind: 'tool-call',
+          name: 'functions.apply_patch',
+          status: 'done',
+          input: JSON.stringify({
+            patch: [
+              '*** Begin Patch',
+              '*** Update File: src/example.ts',
+              '@@',
+              '-old line',
+              '+new line',
+              '*** End Patch',
+            ].join('\n'),
+          }),
+        },
+        {
+          kind: 'tool-result',
+          name: 'functions.apply_patch',
+          status: 'done',
+          output: 'Done!',
+        },
+      ]
+
+      const [turn] = groupTurns(activities)
+
+      expect(turn.streamItems).toEqual([
+        expect.objectContaining({
+          kind: 'file-change',
+          filePath: 'src/example.ts',
+          additions: 1,
+          deletions: 1,
+        }),
+      ])
+    })
+
     it('interleaves singletons + groups in order when activities mix kinds', () => {
       const activities: AgentActivity[] = [
         { kind: 'message', role: 'assistant', text: 'starting' },

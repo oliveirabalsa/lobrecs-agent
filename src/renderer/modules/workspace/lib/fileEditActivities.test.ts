@@ -16,6 +16,12 @@ describe('isEditToolName', () => {
     }
   })
 
+  it('recognizes namespaced edit tool names', () => {
+    for (const name of ['functions.apply_patch', 'tools/Edit', 'mcp:write_file']) {
+      expect(isEditToolName(name)).toBe(true)
+    }
+  })
+
   it('rejects non-editing tools', () => {
     for (const name of ['Read', 'bash', 'Grep', 'AskUserQuestion']) {
       expect(isEditToolName(name)).toBe(false)
@@ -141,6 +147,35 @@ describe('fileChangesFromEditToolCall', () => {
         filePath: 'src/a.ts',
         changeType: 'modified',
         additions: 2,
+        deletions: 1,
+        status: 'applied',
+      },
+    ])
+  })
+
+  it('parses a namespaced Codex apply_patch call with JSON-wrapped patch text', () => {
+    const call: ToolCall = {
+      kind: 'tool-call',
+      name: 'functions.apply_patch',
+      status: 'done',
+      input: JSON.stringify({
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: src/nested.ts',
+          '@@',
+          '-old line',
+          '+new line',
+          '*** End Patch',
+        ].join('\n'),
+      }),
+    }
+
+    expect(fileChangesFromEditToolCall(call)).toEqual([
+      {
+        kind: 'file-change',
+        filePath: 'src/nested.ts',
+        changeType: 'modified',
+        additions: 1,
         deletions: 1,
         status: 'applied',
       },

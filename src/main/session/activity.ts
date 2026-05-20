@@ -678,7 +678,14 @@ function toolNameFromItem(
   item: Record<string, unknown>,
   itemType: string,
 ): string | undefined {
-  const directName = stringField(item, 'name') ?? stringField(item, 'tool')
+  const nestedFunction = isRecord(item.function) ? item.function : undefined
+  const directName =
+    stringField(item, 'name') ??
+    stringField(item, 'tool') ??
+    stringField(item, 'tool_name') ??
+    stringField(item, 'functionName') ??
+    stringField(item, 'function_name') ??
+    stringField(nestedFunction ?? {}, 'name')
   if (directName) return directName
 
   if (
@@ -696,7 +703,18 @@ function toolNameFromItem(
 }
 
 function toolInputFromItem(item: Record<string, unknown>): unknown {
-  return item.input ?? item.arguments ?? stringField(item, 'command')
+  const nestedFunction = isRecord(item.function) ? item.function : undefined
+  return (
+    item.input ??
+    item.arguments ??
+    item.args ??
+    item.params ??
+    item.parameters ??
+    nestedFunction?.arguments ??
+    nestedFunction?.input ??
+    nestedFunction?.parameters ??
+    stringField(item, 'command')
+  )
 }
 
 function commandOutputFromItem(item: Record<string, unknown>): string | undefined {
