@@ -51,17 +51,17 @@ describe('ModelRouter', () => {
     expect(decision.model).toBe('gpt-5.3-codex-spark')
   })
 
-  it('routes installed Gemini preferences through the Gemini model map', async () => {
+  it('routes installed Antigravity preferences through the Antigravity model map', async () => {
     const router = new ModelRouter({
-      adapterRegistry: createRegistry({ gemini: true, 'claude-code': true }),
+      adapterRegistry: createRegistry({ antigravity: true, 'claude-code': true }),
     })
     const decision = await router.route({
       prompt: 'fix typo in README',
-      preferredAgentId: 'gemini',
+      preferredAgentId: 'antigravity',
     })
 
-    expect(decision.agentId).toBe('gemini')
-    expect(decision.model).toBe('flash-lite')
+    expect(decision.agentId).toBe('antigravity')
+    expect(decision.model).toBe('gemini-2.0-flash-lite')
   })
 
   it('uses live Codex catalog models instead of stale static fallbacks', async () => {

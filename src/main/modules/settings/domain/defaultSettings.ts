@@ -89,7 +89,7 @@ export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
       { role: 'approach a', agentId: 'claude-code' },
       { role: 'approach b', agentId: 'codex' },
       { role: 'approach c', agentId: 'opencode' },
-      { role: 'approach d', agentId: 'gemini' },
+      { role: 'approach d', agentId: 'antigravity' },
     ],
   },
 ]
@@ -126,7 +126,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
         permissionMode: 'dangerous',
         extraArgs: [],
       },
-      gemini: {
+      antigravity: {
         enabled: true,
         command: '',
         permissionMode: 'dangerous',
@@ -137,7 +137,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       'claude-code': { ...MODEL_MAP['claude-code'] },
       codex: { ...MODEL_MAP.codex },
       opencode: { ...MODEL_MAP.opencode },
-      gemini: { ...MODEL_MAP.gemini },
+      antigravity: { ...MODEL_MAP.antigravity },
     },
     imageAttachments: {
       maxCount: 8,
@@ -208,10 +208,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       'minimax-coding-plan/MiniMax-M2': { inputPer1M: 0.1, outputPer1M: 0.3 },
       'minimax-coding-plan/MiniMax-M2.5': { inputPer1M: 0.1, outputPer1M: 0.3 },
       'minimax-coding-plan/MiniMax-M2.7': { inputPer1M: 0.1, outputPer1M: 0.3 },
-      'flash-lite': { inputPer1M: 0, outputPer1M: 0 },
-      flash: { inputPer1M: 0, outputPer1M: 0 },
-      pro: { inputPer1M: 0, outputPer1M: 0 },
-      auto: { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-2.0-flash-lite': { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-2.5-flash': { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-3.0-pro': { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-3.5-pro': { inputPer1M: 0, outputPer1M: 0 },
     },
   },
   ui: {

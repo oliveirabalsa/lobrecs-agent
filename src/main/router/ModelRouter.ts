@@ -306,7 +306,7 @@ function fallbackSettings(): AppSettings {
           permissionMode: 'dangerous',
           extraArgs: [],
         },
-        gemini: {
+        antigravity: {
           enabled: true,
           command: '',
           permissionMode: 'dangerous',
@@ -317,7 +317,7 @@ function fallbackSettings(): AppSettings {
         'claude-code': { ...MODEL_MAP['claude-code'] },
         codex: { ...MODEL_MAP.codex },
         opencode: { ...MODEL_MAP.opencode },
-        gemini: { ...MODEL_MAP.gemini },
+        antigravity: { ...MODEL_MAP.antigravity },
       },
       imageAttachments: { maxCount: 8, maxSizeMb: 20 },
     },
