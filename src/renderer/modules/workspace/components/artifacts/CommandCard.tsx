@@ -12,6 +12,8 @@ import {
 export interface CommandCardProps {
   row: RanCommandRow
   running?: boolean
+  /** Row mode: no outer card border; rendered as a list item inside CommandsGroup. */
+  compact?: boolean
 }
 
 type RanCommandStatus = RanCommandRow['status']
@@ -27,11 +29,13 @@ interface CommandDisplay {
 }
 
 /**
- * CommandCard — one command/tool invocation rendered as a single seamless
- * card. The header is the trigger; output (when present) unfolds as an inset
- * region divided by a hairline, so the card never reads as two stacked boxes.
+ * CommandCard — one command/tool invocation.
+ *
+ * compact=false (default): standalone card with border, used in RanCommandsPill.
+ * compact=true: borderless list row used inside CommandsGroup; the group's
+ * outer card provides the container so each row needs no extra nesting.
  */
-export function CommandCard({ row, running = false }: CommandCardProps) {
+export function CommandCard({ row, running = false, compact = false }: CommandCardProps) {
   const display = describeRow(row)
   const [expanded, setExpanded] = useState(display.meta.showOutputByDefault)
 
@@ -43,6 +47,62 @@ export function CommandCard({ row, running = false }: CommandCardProps) {
   const unresolved = status === 'running' || status === 'pending'
   const showSpinner = running && unresolved && !hasOutput
   const failed = status === 'error'
+
+  if (compact) {
+    return (
+      <div className="flex w-full flex-col">
+        <button
+          type="button"
+          onClick={hasOutput ? () => setExpanded((v) => !v) : undefined}
+          disabled={!hasOutput}
+          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+            hasOutput ? 'cursor-pointer hover:bg-card/60' : 'cursor-default'
+          } ${failed ? 'text-accent-del' : ''}`}
+          title={
+            display.secondary
+              ? `${display.primary} ${display.secondary}`
+              : display.primary
+          }
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-secondary" aria-hidden="true">
+            {getIcon(display.meta.icon)}
+          </span>
+
+          <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+            {display.namespace ? (
+              <span className="shrink-0 rounded bg-canvas px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                {display.namespace}
+              </span>
+            ) : null}
+            <span className="shrink-0 font-mono text-[11px] text-primary">
+              {display.primary}
+            </span>
+            {display.secondary ? (
+              <span className="min-w-0 truncate font-mono text-[10px] text-muted">
+                {display.secondary}
+              </span>
+            ) : null}
+          </span>
+
+          {showSpinner ? (
+            <Spinner size={12} />
+          ) : (
+            <StatusIndicator status={status} running={running} />
+          )}
+
+          {hasOutput ? <Chevron open={isOpen} /> : null}
+        </button>
+
+        {isOpen && output ? (
+          <div className="motion-expand-down-in ml-8 mr-3 mb-1.5 rounded border-l-2 border-hairline bg-canvas/70 px-2.5 py-1.5">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-[1.55] text-secondary">
+              {truncate(output, 2000)}
+            </pre>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div

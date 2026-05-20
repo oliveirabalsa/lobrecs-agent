@@ -137,6 +137,12 @@ function upsertToolCallRow(
     return
   }
 
+  // A resolved lifecycle event (done/error) with no matching open row is a late-arriving
+  // duplicate for an already-closed invocation. Skip it to avoid phantom cards.
+  // A new unresolved event (running/pending) always starts a fresh invocation even when
+  // a prior resolved row with identical input exists (e.g. reading the same file twice).
+  if (!isUnresolvedStatus(item.status)) return
+
   rows.push({
     id: `${matchKey}:${rows.length}`,
     label: 'call',

@@ -97,9 +97,9 @@ export function CommandsGroup({
       </button>
 
       {!collapsed ? (
-        <div className="motion-expand-down-in flex flex-col gap-1.5 border-t border-hairline bg-canvas/60 p-2">
+        <div className="motion-expand-down-in divide-y divide-hairline border-t border-hairline py-0.5">
           {rows.map((row) => (
-            <CommandCard key={row.id} row={row} running={hasRunning} />
+            <CommandCard key={row.id} row={row} running={hasRunning} compact />
           ))}
         </div>
       ) : null}

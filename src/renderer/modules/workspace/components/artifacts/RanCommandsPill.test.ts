@@ -80,6 +80,46 @@ describe('deriveRanCommandRows', () => {
       'shell rtk npm run build',
     ])
   })
+
+  it('renders two separate rows when the same tool is called twice with identical input', () => {
+    const items: RanCommandItem[] = [
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'running' },
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'done' },
+      { kind: 'tool-result', name: 'read', output: 'content 1', status: 'done' },
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'running' },
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'done' },
+      { kind: 'tool-result', name: 'read', output: 'content 2', status: 'done' },
+    ]
+
+    const rows = deriveRanCommandRows(items)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toMatchObject({ output: 'content 1', status: 'done' })
+    expect(rows[1]).toMatchObject({ output: 'content 2', status: 'done' })
+  })
+
+  it('ignores a late tool-call done event that arrives after the row is already resolved', () => {
+    const items: RanCommandItem[] = [
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'running' },
+      { kind: 'tool-result', name: 'read', output: 'content', status: 'done' },
+      { kind: 'tool-call', name: 'read', input: 'file.ts', status: 'done' },
+    ]
+
+    const rows = deriveRanCommandRows(items)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ output: 'content', status: 'done' })
+  })
+
+  it('does not produce an orphan result row when a matching call row exists', () => {
+    const items: RanCommandItem[] = [
+      { kind: 'tool-call', name: 'glob', input: '**/*.ts', status: 'running' },
+      { kind: 'tool-result', name: 'glob', output: 'src/index.ts', status: 'done' },
+    ]
+
+    const rows = deriveRanCommandRows(items)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].label).toBe('call')
+    expect(rows[0].output).toBe('src/index.ts')
+  })
 })
 
 describe('deriveCommandsGroupDisplayState', () => {
