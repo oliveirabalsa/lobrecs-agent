@@ -282,7 +282,7 @@ export function RunWorkspace({
       className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-5 sm:px-4"
     >
       {sessionId ? (
-        <div className="mx-auto flex min-h-full w-full max-w-[820px] flex-col gap-4">
+        <div className="mx-auto flex min-h-full w-full max-w-conversation flex-col gap-4">
           <RunSummary
             prompt={prompt}
             status={effectiveStatus}

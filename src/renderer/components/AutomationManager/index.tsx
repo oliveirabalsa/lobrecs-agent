@@ -56,7 +56,7 @@ function sortAutomations(automations: Automation[]): Automation[] {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-md border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-500">
+    <div className="rounded-md border border-dashed border-hairline px-4 py-8 text-center text-sm text-muted">
       {message}
     </div>
   )
@@ -224,11 +224,11 @@ export function AutomationManager({ project }: AutomationManagerProps) {
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-zinc-950 text-zinc-100">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
+    <section className="flex h-full min-h-0 flex-col bg-canvas text-primary">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-zinc-100">Automation Manager</h2>
-          <div className="mt-1 truncate text-xs text-zinc-500">
+          <h2 className="text-base font-semibold text-primary">Automation Manager</h2>
+          <div className="mt-1 truncate text-xs text-muted">
             {project ? project.name : 'No project selected'}
           </div>
         </div>
@@ -236,7 +236,7 @@ export function AutomationManager({ project }: AutomationManagerProps) {
           type="button"
           onClick={() => void loadAutomations()}
           disabled={!project || loading}
-          className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-hairline px-3 py-2 text-xs font-medium text-secondary transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Refresh
         </button>
@@ -251,34 +251,34 @@ export function AutomationManager({ project }: AutomationManagerProps) {
           <>
             <form
               onSubmit={(event) => void createAutomation(event)}
-              className="h-fit rounded-md border border-zinc-800 bg-zinc-900/60 p-4"
+              className="h-fit rounded-md border border-hairline bg-card/60 p-4"
             >
-              <h3 className="text-sm font-semibold text-zinc-100">New Automation</h3>
+              <h3 className="text-sm font-semibold text-primary">New Automation</h3>
 
-              <label className="mt-4 block text-xs font-medium text-zinc-400">
+              <label className="mt-4 block text-xs font-medium text-muted">
                 Name
                 <input
                   value={draft.name}
                   onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                  className="mt-1 h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-500"
+                  className="mt-1 h-9 w-full rounded-md border border-hairline bg-canvas px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary"
                   placeholder="Daily review"
                 />
               </label>
 
-              <label className="mt-3 block text-xs font-medium text-zinc-400">
+              <label className="mt-3 block text-xs font-medium text-muted">
                 Prompt
                 <textarea
                   value={draft.prompt}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, prompt: event.target.value }))
                   }
-                  className="mt-1 h-28 w-full resize-none rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-500"
+                  className="mt-1 h-28 w-full resize-none rounded-md border border-hairline bg-canvas px-3 py-2 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary"
                   placeholder="Review open work and report risks."
                 />
               </label>
 
               <div className="mt-3">
-                <div className="mb-2 text-xs font-medium text-zinc-400">Schedule</div>
+                <div className="mb-2 text-xs font-medium text-muted">Schedule</div>
                 <div className="grid grid-cols-3 gap-2">
                   {schedulePresets.map((preset) => (
                     <button
@@ -287,8 +287,8 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                       onClick={() => setDraft((current) => ({ ...current, schedule: preset.value }))}
                       className={`rounded-md border px-2 py-2 text-xs font-medium transition ${
                         draft.schedule === preset.value
-                          ? 'border-cyan-400 bg-cyan-400 text-zinc-950'
-                          : 'border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                          ? 'border-accent-primary bg-accent-primary text-canvas'
+                          : 'border-hairline text-muted hover:bg-white/5 hover:text-primary'
                       }`}
                     >
                       {preset.label}
@@ -300,12 +300,12 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, schedule: event.target.value }))
                   }
-                  className="mt-2 h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-500"
+                  className="mt-2 h-9 w-full rounded-md border border-hairline bg-canvas px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary"
                   placeholder="0 9 * * 1-5"
                 />
               </div>
 
-              <label className="mt-3 block text-xs font-medium text-zinc-400">
+              <label className="mt-3 block text-xs font-medium text-muted">
                 Agent
                 <select
                   value={draft.agentId}
@@ -315,7 +315,7 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                       agentId: event.target.value as SupportedAgentId,
                     }))
                   }
-                  className="mt-1 h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-cyan-500"
+                  className="mt-1 h-9 w-full rounded-md border border-hairline bg-canvas px-3 text-sm text-primary outline-none focus:border-accent-primary"
                 >
                   {agentOptions.map((agent) => (
                     <option key={agent.value} value={agent.value}>
@@ -328,7 +328,7 @@ export function AutomationManager({ project }: AutomationManagerProps) {
               <button
                 type="submit"
                 disabled={saving || !draft.name.trim() || !draft.prompt.trim() || !draft.schedule.trim()}
-                className="mt-4 h-9 w-full rounded-md bg-cyan-400 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-4 h-9 w-full rounded-md bg-accent-primary px-3 text-sm font-semibold text-canvas transition hover:bg-accent-primary/80 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Create'}
               </button>
@@ -336,20 +336,20 @@ export function AutomationManager({ project }: AutomationManagerProps) {
 
             <div className="min-w-0 space-y-5">
               {error ? (
-                <div className="rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+                <div className="rounded-md border border-accent-del/40 bg-accent-del/10 px-4 py-3 text-sm text-accent-del">
                   {error}
                 </div>
               ) : null}
               {notice ? (
-                <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+                <div className="rounded-md border border-accent-add/40 bg-accent-add/10 px-4 py-3 text-sm text-accent-add">
                   {notice}
                 </div>
               ) : null}
 
-              <section className="rounded-md border border-zinc-800 bg-zinc-900/60">
-                <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-zinc-100">Automations</h3>
-                  <span className="text-xs text-zinc-500">{automations.length} total</span>
+              <section className="rounded-md border border-hairline bg-card/60">
+                <div className="flex items-center justify-between gap-3 border-b border-hairline px-4 py-3">
+                  <h3 className="text-sm font-semibold text-primary">Automations</h3>
+                  <span className="text-xs text-muted">{automations.length} total</span>
                 </div>
 
                 {loading ? (
@@ -357,35 +357,35 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                     <EmptyState message="Loading automations..." />
                   </div>
                 ) : automations.length > 0 ? (
-                  <div className="divide-y divide-zinc-800">
+                  <div className="divide-y divide-hairline">
                     {automations.map((automation) => (
                       <article
                         key={automation.id}
                         className={`grid cursor-pointer gap-3 px-4 py-4 lg:grid-cols-[1fr_auto] ${
-                          selectedAutomation?.id === automation.id ? 'bg-zinc-800/50' : 'hover:bg-zinc-900/50'
+                          selectedAutomation?.id === automation.id ? 'bg-white/5' : 'hover:bg-card/50'
                         }`}
                         onClick={() => setSelectedAutomationId(automation.id)}
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="truncate text-sm font-semibold text-zinc-100">
+                            <h4 className="truncate text-sm font-semibold text-primary">
                               {automation.name}
                             </h4>
                             <span
                               className={`rounded px-2 py-0.5 text-[11px] font-medium ${
                                 automation.enabled
-                                  ? 'bg-emerald-400/15 text-emerald-300'
-                                  : 'bg-zinc-800 text-zinc-400'
+                                  ? 'bg-accent-add/15 text-accent-add'
+                                  : 'bg-card-raised text-muted'
                               }`}
                             >
                               {automation.enabled ? 'Enabled' : 'Disabled'}
                             </span>
                           </div>
-                          <div className="mt-1 text-xs text-zinc-500">
+                          <div className="mt-1 text-xs text-muted">
                             {automation.schedule} · {automation.agentId} · Last run{' '}
                             {formatDate(automation.lastRunAt)}
                           </div>
-                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-400">
+                          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted">
                             {automation.prompt}
                           </p>
                         </div>
@@ -394,7 +394,7 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                           <button
                             type="button"
                             onClick={() => void toggleAutomation(automation)}
-                            className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800"
+                            className="rounded-md border border-hairline px-3 py-2 text-xs font-medium text-secondary transition hover:bg-white/5"
                           >
                             {automation.enabled ? 'Disable' : 'Enable'}
                           </button>
@@ -402,14 +402,14 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                             type="button"
                             onClick={() => void runAutomation(automation)}
                             disabled={runningId === automation.id}
-                            className="rounded-md border border-cyan-800 bg-cyan-950/40 px-3 py-2 text-xs font-medium text-cyan-200 transition hover:bg-cyan-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-md border border-accent-primary/40 bg-accent-primary/10 px-3 py-2 text-xs font-medium text-accent-primary transition hover:bg-accent-primary/15 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {runningId === automation.id ? 'Running...' : 'Run now'}
                           </button>
                           <button
                             type="button"
                             onClick={() => void deleteAutomation(automation)}
-                            className="rounded-md border border-red-900/70 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-950/50"
+                            className="rounded-md border border-accent-del/40 px-3 py-2 text-xs font-medium text-accent-del transition hover:bg-accent-del/15"
                           >
                             Delete
                           </button>
@@ -424,51 +424,51 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                 )}
               </section>
 
-              <section className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4">
+              <section className="rounded-md border border-hairline bg-card/60 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-zinc-100">Automation Detail</h3>
-                  <span className="text-xs text-zinc-500">
+                  <h3 className="text-sm font-semibold text-primary">Automation Detail</h3>
+                  <span className="text-xs text-muted">
                     {selectedAutomation ? 'selected' : 'none'}
                   </span>
                 </div>
                 {selectedAutomation ? (
                   <div className="space-y-4">
                     <div>
-                      <div className="text-[11px] font-medium uppercase text-zinc-500">Prompt</div>
-                      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
+                      <div className="text-[11px] font-medium uppercase text-muted">Prompt</div>
+                      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-secondary">
                         {selectedAutomation.prompt}
                       </p>
                     </div>
                     <div className="grid gap-3 text-sm sm:grid-cols-3">
-                      <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <div className="text-[11px] uppercase text-zinc-500">Schedule</div>
-                        <div className="mt-1 font-mono text-xs text-zinc-200">{selectedAutomation.schedule}</div>
+                      <div className="rounded-md border border-hairline bg-canvas px-3 py-2">
+                        <div className="text-[11px] uppercase text-muted">Schedule</div>
+                        <div className="mt-1 font-mono text-xs text-secondary">{selectedAutomation.schedule}</div>
                       </div>
-                      <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <div className="text-[11px] uppercase text-zinc-500">Agent</div>
-                        <div className="mt-1 text-xs text-zinc-200">{selectedAutomation.agentId}</div>
+                      <div className="rounded-md border border-hairline bg-canvas px-3 py-2">
+                        <div className="text-[11px] uppercase text-muted">Agent</div>
+                        <div className="mt-1 text-xs text-secondary">{selectedAutomation.agentId}</div>
                       </div>
-                      <div className="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
-                        <div className="text-[11px] uppercase text-zinc-500">Last run</div>
-                        <div className="mt-1 text-xs text-zinc-200">{formatDate(selectedAutomation.lastRunAt)}</div>
+                      <div className="rounded-md border border-hairline bg-canvas px-3 py-2">
+                        <div className="text-[11px] uppercase text-muted">Last run</div>
+                        <div className="mt-1 text-xs text-secondary">{formatDate(selectedAutomation.lastRunAt)}</div>
                       </div>
                     </div>
                     {recentRuns.length > 0 ? (
                       <div>
-                        <div className="mb-2 text-[11px] font-medium uppercase text-zinc-500">
+                        <div className="mb-2 text-[11px] font-medium uppercase text-muted">
                           Recent runs
                         </div>
-                        <div className="divide-y divide-zinc-800">
+                        <div className="divide-y divide-hairline">
                           {recentRuns.map((automation) => (
                             <div
                               key={`${automation.id}-${automation.lastRunAt}`}
                               className="flex items-center justify-between gap-3 py-2"
                             >
                               <div className="min-w-0">
-                                <div className="truncate text-sm text-zinc-200">{automation.name}</div>
-                                <div className="text-xs text-zinc-500">{automation.agentId}</div>
+                                <div className="truncate text-sm text-secondary">{automation.name}</div>
+                                <div className="text-xs text-muted">{automation.agentId}</div>
                               </div>
-                              <div className="shrink-0 text-xs tabular-nums text-zinc-400">
+                              <div className="shrink-0 text-xs tabular-nums text-muted">
                                 {formatDate(automation.lastRunAt)}
                               </div>
                             </div>

@@ -156,8 +156,8 @@ export function CliEditorTerminalOverlay({
         : 'Starting'
 
   return (
-    <div className="absolute inset-0 z-40 flex min-w-0 flex-col bg-zinc-950 text-primary">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-zinc-800 bg-zinc-950 px-3">
+    <div className="absolute inset-0 z-40 flex min-w-0 flex-col bg-canvas text-primary">
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline bg-canvas px-3">
         <button
           type="button"
           onClick={onClose}
@@ -190,7 +190,7 @@ export function CliEditorTerminalOverlay({
         </div>
       </div>
 
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden bg-zinc-950 p-2" />
+      <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden bg-canvas p-2" />
     </div>
   )
 }

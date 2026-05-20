@@ -7,24 +7,27 @@ import {
 } from './MessageStream'
 
 describe('shouldPinMessageStream', () => {
-  it('forces pinning while a run is active even if the user was not sticky', () => {
+  it('does not force pinning while a run is active when the user has scrolled up', () => {
     expect(
       shouldPinMessageStream({ loading: false, running: true, sticky: false }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  it('forces pinning while the initial stream is loading', () => {
+  it('does not force pinning during initial load when the user has scrolled up', () => {
     expect(
       shouldPinMessageStream({ loading: true, running: false, sticky: false }),
-    ).toBe(true)
+    ).toBe(false)
   })
 
-  it('keeps historical views respectful of the current sticky state', () => {
+  it('pins only when the user is already at the bottom (sticky=true)', () => {
     expect(
       shouldPinMessageStream({ loading: false, running: false, sticky: false }),
     ).toBe(false)
     expect(
       shouldPinMessageStream({ loading: false, running: false, sticky: true }),
+    ).toBe(true)
+    expect(
+      shouldPinMessageStream({ loading: true, running: true, sticky: true }),
     ).toBe(true)
   })
 })

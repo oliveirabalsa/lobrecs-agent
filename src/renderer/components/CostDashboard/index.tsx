@@ -111,41 +111,41 @@ function CostBar({ label, sessions, value, max }: {
   return (
     <div className="grid grid-cols-[minmax(7rem,12rem)_1fr_5rem] items-center gap-3 py-2">
       <div className="min-w-0">
-        <div className="truncate text-xs font-medium text-zinc-200">{label}</div>
-        <div className="text-[11px] text-zinc-500">{formatInteger(sessions)} sessions</div>
+        <div className="truncate text-xs font-medium text-secondary">{label}</div>
+        <div className="text-[11px] text-muted">{formatInteger(sessions)} sessions</div>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+      <div className="h-2 overflow-hidden rounded-full bg-card-raised">
         <div
-          className="h-2 rounded-full bg-cyan-400 transition-all"
+          className="h-2 rounded-full bg-accent-primary transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="text-right text-xs tabular-nums text-zinc-300">{formatCurrency(value)}</div>
+      <div className="text-right text-xs tabular-nums text-secondary">{formatCurrency(value)}</div>
     </div>
   )
 }
 
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3">
-      <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-2 text-lg font-semibold tabular-nums text-zinc-100">{value}</div>
+    <div className="rounded-md border border-hairline bg-sidebar px-4 py-3">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-2 text-lg font-semibold tabular-nums text-primary">{value}</div>
     </div>
   )
 }
 
 function SummarySkeleton() {
   return (
-    <div className="rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3">
-      <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
-      <div className="mt-3 h-6 w-28 animate-pulse rounded bg-zinc-800" />
+    <div className="rounded-md border border-hairline bg-sidebar px-4 py-3">
+      <div className="h-3 w-24 animate-pulse rounded bg-card-raised" />
+      <div className="mt-3 h-6 w-28 animate-pulse rounded bg-card-raised" />
     </div>
   )
 }
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-md border border-dashed border-zinc-800 px-4 py-8 text-center text-sm text-zinc-500">
+    <div className="rounded-md border border-dashed border-hairline px-4 py-8 text-center text-sm text-muted">
       {message}
     </div>
   )
@@ -212,18 +212,18 @@ export function CostDashboard({ project }: CostDashboardProps) {
   const hasRows = rows.length > 0
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-zinc-950 text-zinc-100">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
+    <section className="flex h-full min-h-0 flex-col bg-canvas text-primary">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-zinc-100">Cost Dashboard</h2>
-          <div className="mt-1 truncate text-xs text-zinc-500">
+          <h2 className="text-base font-semibold text-primary">Cost Dashboard</h2>
+          <div className="mt-1 truncate text-xs text-muted">
             {project ? project.name : 'No project selected'}
-            {loading ? <span className="ml-2 text-cyan-300">Refreshing</span> : null}
+            {loading ? <span className="ml-2 text-accent-primary">Refreshing</span> : null}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-md border border-zinc-800 bg-zinc-900 p-1">
+          <div className="flex rounded-md border border-hairline bg-sidebar p-1">
             {PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
@@ -231,8 +231,8 @@ export function CostDashboard({ project }: CostDashboardProps) {
                 onClick={() => setPeriod(option)}
                 className={`rounded px-3 py-1.5 text-xs font-medium transition ${
                   period === option
-                    ? 'bg-cyan-400 text-zinc-950'
-                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+                    ? 'bg-accent-primary text-canvas'
+                    : 'text-muted hover:bg-white/5 hover:text-primary'
                 }`}
               >
                 {option}d
@@ -243,7 +243,7 @@ export function CostDashboard({ project }: CostDashboardProps) {
             type="button"
             disabled={!hasRows}
             onClick={() => exportCsv(rows, period)}
-            className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md border border-hairline px-3 py-2 text-xs font-medium text-secondary transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Export CSV
           </button>
@@ -256,7 +256,7 @@ export function CostDashboard({ project }: CostDashboardProps) {
         ) : (
           <div className="space-y-5">
             {error ? (
-              <div className="rounded-md border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+              <div className="rounded-md border border-accent-del/40 bg-accent-del/10 px-4 py-3 text-sm text-accent-del">
                 {error}
               </div>
             ) : null}
@@ -276,15 +276,15 @@ export function CostDashboard({ project }: CostDashboardProps) {
             )}
 
             <div className="grid gap-5 xl:grid-cols-2">
-              <section className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4">
+              <section className="rounded-md border border-hairline bg-card/60 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-zinc-100">By Project</h3>
-                  <span className="text-xs text-zinc-500">{period} days</span>
+                  <h3 className="text-sm font-semibold text-primary">By Project</h3>
+                  <span className="text-xs text-muted">{period} days</span>
                 </div>
                 {loading ? (
                   <EmptyState message="Loading project costs..." />
                 ) : projectRows.length > 0 ? (
-                  <div className="divide-y divide-zinc-800/80">
+                  <div className="divide-y divide-hairline">
                     {projectRows.map((row) => (
                       <CostBar
                         key={row.label}
@@ -300,15 +300,15 @@ export function CostDashboard({ project }: CostDashboardProps) {
                 )}
               </section>
 
-              <section className="rounded-md border border-zinc-800 bg-zinc-900/60 p-4">
+              <section className="rounded-md border border-hairline bg-card/60 p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-zinc-100">By Model</h3>
-                  <span className="text-xs text-zinc-500">{period} days</span>
+                  <h3 className="text-sm font-semibold text-primary">By Model</h3>
+                  <span className="text-xs text-muted">{period} days</span>
                 </div>
                 {loading ? (
                   <EmptyState message="Loading model costs..." />
                 ) : modelRows.length > 0 ? (
-                  <div className="divide-y divide-zinc-800/80">
+                  <div className="divide-y divide-hairline">
                     {modelRows.map((row) => (
                       <CostBar
                         key={row.label}

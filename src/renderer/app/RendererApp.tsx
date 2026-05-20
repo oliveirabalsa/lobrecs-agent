@@ -9,6 +9,8 @@ import { useWorkspaceHistory } from '../modules/workspace/hooks/useWorkspaceHist
 import { WorkspaceView } from '../modules/workspace/views/WorkspaceView'
 
 const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+const SIDEBAR_MIN_WIDTH = 220
+const SIDEBAR_MAX_WIDTH = 420
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
@@ -57,7 +59,7 @@ export function RendererApp() {
 
       function handlePointerMove(moveEvent: PointerEvent) {
         const delta = moveEvent.clientX - startX
-        setSidebarWidth(clamp(startWidth + delta, 220, 360))
+        setSidebarWidth(clamp(startWidth + delta, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
         setSidebarWidthTouched(true)
       }
 
@@ -80,7 +82,7 @@ export function RendererApp() {
     if (sidebarWidthTouched) return
     const width = globalSettings?.ui.sidebarDefaultWidth
     if (!width) return
-    setSidebarWidth(clamp(width, 220, 420))
+    setSidebarWidth(clamp(width, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH))
   }, [globalSettings?.ui.sidebarDefaultWidth, sidebarWidthTouched])
 
   const handleSelectThread = useCallback(

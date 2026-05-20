@@ -95,6 +95,12 @@ interface WorkspaceViewProps {
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
+const RIGHT_PANEL_FULLSCREEN_CLASS =
+  'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
+const RIGHT_PANEL_DOCKED_CLASS =
+  'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas ' +
+  'shadow-2xl shadow-black/40 sm:w-[420px] lg:relative lg:inset-auto lg:z-auto lg:w-[420px] ' +
+  'lg:min-w-[320px] lg:max-w-[720px] lg:shrink-0 lg:shadow-none 2xl:w-[520px]'
 
 function safeStorage(): Storage | null {
   try {
@@ -274,6 +280,16 @@ export function WorkspaceView({
     }
   }, [activeThreadId, rightPanelMode, rightPanelOpen])
 
+  // The swarm graph is cramped in the docked panel width, so expand to
+  // fullscreen whenever the Swarm tab opens. This intentionally omits
+  // `rightPanelFullscreen` from the deps: if the user manually exits
+  // fullscreen while staying on the Swarm tab, we don't fight them.
+  useEffect(() => {
+    if (rightPanelMode === 'swarm' && rightPanelOpen) {
+      setRightPanelFullscreen(true)
+    }
+  }, [rightPanelMode, rightPanelOpen])
+
   const handleToggleRightPanel = useCallback(
     (mode: RightPanelMode) => {
       setRightPanelOpenState((prev) => {
@@ -441,7 +457,7 @@ export function WorkspaceView({
               onOpenCliEditor={handleOpenCliEditor}
             />
 
-            <div className="flex min-h-10 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-canvas px-3 py-1.5">
+            <div className="flex h-9 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-canvas px-3 py-1.5">
               {MAIN_VIEWS.map((view) => (
                 <button
                   key={view}
@@ -474,126 +490,121 @@ export function WorkspaceView({
 
             <div className="relative flex min-h-0 flex-1 overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {mainView === 'workspace' ? (
-                  <>
-                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                      {activeSessionId ? (
-                        <RunWorkspace
-                          project={selectedProject}
-                          sessionId={activeSessionId}
-                          threadId={activeSession?.threadId ?? null}
-                          prompt={activeSession?.prompt ?? ''}
-                          imageAttachments={activeSession?.imageAttachments}
-                          status={activeSession?.status ?? null}
-                          startedAt={activeSession?.createdAt}
-                          agentId={activeSession?.agentId ?? activeSession?.routingDecision?.agentId}
-                          model={
-                            activeSession?.modelOverride ?? activeSession?.routingDecision?.model
-                          }
-                          modelOverride={
-                            activeSession?.modelOverride ?? activeSession?.routingDecision?.model
-                          }
-                          diffProposals={diffProposals}
-                          approvalRequest={approvalRequest}
-                          onApprovalRequest={onApprovalRequest}
-                          onDiffProposals={onDiffProposals}
-                          onStatusChange={onStatusChange}
-                          onApproveApproval={onApproveApproval}
-                          onRejectApproval={onRejectApproval}
-                          onSessionStarted={onSessionStarted}
-                          onReviewFile={openDiffPanel}
-                          onContextPercent={setContextPercent}
-                        />
-                      ) : (
-                        <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                          <WorkspaceEmpty projectName={selectedProject.name} />
-                        </div>
-                      )}
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    {activeSessionId ? (
+                      <RunWorkspace
+                        project={selectedProject}
+                        sessionId={activeSessionId}
+                        threadId={activeSession?.threadId ?? null}
+                        prompt={activeSession?.prompt ?? ''}
+                        imageAttachments={activeSession?.imageAttachments}
+                        status={activeSession?.status ?? null}
+                        startedAt={activeSession?.createdAt}
+                        agentId={activeSession?.agentId ?? activeSession?.routingDecision?.agentId}
+                        model={
+                          activeSession?.modelOverride ?? activeSession?.routingDecision?.model
+                        }
+                        modelOverride={
+                          activeSession?.modelOverride ?? activeSession?.routingDecision?.model
+                        }
+                        diffProposals={diffProposals}
+                        approvalRequest={approvalRequest}
+                        onApprovalRequest={onApprovalRequest}
+                        onDiffProposals={onDiffProposals}
+                        onStatusChange={onStatusChange}
+                        onApproveApproval={onApproveApproval}
+                        onRejectApproval={onRejectApproval}
+                        onSessionStarted={onSessionStarted}
+                        onReviewFile={openDiffPanel}
+                        onContextPercent={setContextPercent}
+                      />
+                    ) : (
+                      <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                        <WorkspaceEmpty projectName={selectedProject.name} />
+                      </div>
+                    )}
 
-                      {activeSession?.threadId ? (
-                        <div className="shrink-0 px-3 sm:px-4">
-                          <div className="mx-auto w-full max-w-[820px]">
-                            <QueueBanner
-                              messages={pendingQueue}
-                              onRemove={onRemoveQueueItem}
-                              onClearAll={onClearQueue}
-                            />
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div className="shrink-0 border-t border-hairline px-3 sm:px-4">
-                        <div className="mx-auto w-full max-w-[820px]">
-                          <Composer
-                            project={selectedProject}
-                            activeThreadId={activeSession?.threadId ?? null}
-                            activeSessionId={activeSessionId}
-                            activeSessionStatus={activeSession?.status ?? null}
-                            busy={busy}
-                            busyReason={busyReason}
-                            prefillPrompt={prefillPrompt}
-                            onCancelSession={onCancelSession}
-                            onSessionStarted={onSessionStarted}
-                            contextPercent={contextPercent}
-                            hasProjectContext={Boolean(selectedProject.context?.trim())}
-                            onContextClick={() => setContextDialogOpen(true)}
-                            onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
-                            onSteer={busy && activeSessionId ? onSteer : undefined}
+                    {activeSession?.threadId ? (
+                      <div className="shrink-0 px-3 sm:px-4">
+                        <div className="mx-auto w-full max-w-conversation">
+                          <QueueBanner
+                            messages={pendingQueue}
+                            onRemove={onRemoveQueueItem}
+                            onClearAll={onClearQueue}
                           />
                         </div>
                       </div>
+                    ) : null}
 
-                      <div className="shrink-0 flex items-center justify-between border-t border-hairline/50 px-3 py-1">
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (bottomPanelOpen && bottomPanelInitialTab) {
-                                setBottomPanelOpen(false)
-                              } else {
-                                handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
-                              }
-                            }}
-                            className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
-                              bottomPanelOpen
-                                ? 'bg-white/10 text-secondary'
-                                : 'text-muted hover:bg-white/5 hover:text-secondary'
-                            }`}
-                            title="Toggle terminal"
-                          >
-                            <QuickTerminalIcon />
-                            <span>Terminal</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
-                            className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
-                            title="Open Vim"
-                          >
-                            <QuickVimIcon />
-                            <span>Vim</span>
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setCommitDialogOpen(true)}
-                          className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
-                          title="Commit and push all changes"
-                        >
-                          <QuickCommitIcon />
-                          <span>Commit & Push</span>
-                        </button>
+                    <div className="shrink-0 border-t border-hairline px-3 sm:px-4">
+                      <div className="mx-auto w-full max-w-conversation">
+                        <Composer
+                          project={selectedProject}
+                          activeThreadId={activeSession?.threadId ?? null}
+                          activeSessionId={activeSessionId}
+                          activeSessionStatus={activeSession?.status ?? null}
+                          busy={busy}
+                          busyReason={busyReason}
+                          prefillPrompt={prefillPrompt}
+                          onCancelSession={onCancelSession}
+                          onSessionStarted={onSessionStarted}
+                          contextPercent={contextPercent}
+                          hasProjectContext={Boolean(selectedProject.context?.trim())}
+                          onContextClick={() => setContextDialogOpen(true)}
+                          onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
+                          onSteer={busy && activeSessionId ? onSteer : undefined}
+                        />
                       </div>
                     </div>
-                  </>
+
+                    <div className="flex shrink-0 items-center justify-between border-t border-hairline/50 px-3 py-1">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (bottomPanelOpen && bottomPanelInitialTab) {
+                              setBottomPanelOpen(false)
+                            } else {
+                              handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
+                            }
+                          }}
+                          className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
+                            bottomPanelOpen
+                              ? 'bg-white/10 text-secondary'
+                              : 'text-muted hover:bg-white/5 hover:text-secondary'
+                          }`}
+                          title="Toggle terminal"
+                        >
+                          <QuickTerminalIcon />
+                          <span>Terminal</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
+                          className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
+                          title="Open Vim"
+                        >
+                          <QuickVimIcon />
+                          <span>Vim</span>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCommitDialogOpen(true)}
+                        className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
+                        title="Commit and push all changes"
+                      >
+                        <QuickCommitIcon />
+                        <span>Commit & Push</span>
+                      </button>
+                    </div>
+                  </div>
                 ) : mainView === 'costs' ? (
                   <CostDashboard project={selectedProject} />
                 ) : (
                   <AutomationManager project={selectedProject} />
                 )}
-
-                </div>
 
                 {bottomPanelInitialTab ? (
                   <BottomTerminalPanel
@@ -640,8 +651,8 @@ export function WorkspaceView({
                   data-state={rightPanelOpen ? 'open' : 'closed'}
                   className={
                     rightPanelFullscreen
-                      ? 'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
-                      : 'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/40 sm:w-[420px] xl:relative xl:inset-auto xl:z-auto xl:w-[420px] xl:min-w-[320px] xl:max-w-[720px] xl:shrink-0 xl:shadow-none 2xl:w-[520px]'
+                      ? RIGHT_PANEL_FULLSCREEN_CLASS
+                      : RIGHT_PANEL_DOCKED_CLASS
                   }
                   onAnimationEnd={(event) => {
                     if (event.target !== event.currentTarget) return

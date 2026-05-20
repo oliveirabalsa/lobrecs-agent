@@ -151,8 +151,8 @@ export function BottomTerminalPanel({
   const effectiveVisible = visible && mounted
 
   const panelClassName = fullscreen
-    ? 'absolute inset-0 z-40 flex min-h-0 flex-col bg-zinc-950'
-    : 'relative flex min-h-0 shrink-0 flex-col bg-zinc-950'
+    ? 'absolute inset-0 z-40 flex min-h-0 flex-col bg-canvas'
+    : 'relative flex min-h-0 shrink-0 flex-col bg-canvas'
 
   return (
     <div
@@ -171,7 +171,7 @@ export function BottomTerminalPanel({
     >
       {fullscreen ? null : <ResizeHandle onResize={onHeightChange} currentHeight={height} />}
 
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-zinc-800 bg-zinc-900 px-2">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline bg-sidebar px-2">
         {tabs.map((tab) => (
           <TerminalTabButton
             key={tab.id}
@@ -296,7 +296,7 @@ function ResizeHandle({
   return (
     <div
       onPointerDown={onPointerDown}
-      className="group h-1 w-full shrink-0 cursor-row-resize bg-zinc-800 transition-colors hover:bg-accent-primary/40 active:bg-accent-primary/60"
+      className="group h-1 w-full shrink-0 cursor-row-resize bg-card-raised transition-colors hover:bg-accent-primary/40 active:bg-accent-primary/60"
     />
   )
 }
@@ -317,7 +317,7 @@ function TerminalTabButton({
   return (
     <div
       className={`group flex h-7 max-w-[160px] cursor-pointer items-center gap-1.5 rounded px-2 text-[11px] font-medium transition-colors ${
-        active ? 'bg-zinc-700 text-primary' : 'text-muted hover:bg-zinc-800 hover:text-secondary'
+        active ? 'bg-white/10 text-primary' : 'text-muted hover:bg-white/5 hover:text-secondary'
       }`}
       onClick={onActivate}
     >
@@ -575,7 +575,7 @@ function TerminalInstance({
 
   return (
     <div
-      className="absolute inset-0 overflow-hidden bg-zinc-950"
+      className="absolute inset-0 overflow-hidden bg-canvas"
       style={{ display: visible ? 'block' : 'none' }}
     >
       <div ref={containerRef} className="absolute inset-0 overflow-hidden p-2" />
@@ -584,7 +584,7 @@ function TerminalInstance({
           type="button"
           onClick={handleFixWithAgent}
           disabled={remediationPending}
-          className="absolute right-3 top-3 z-10 rounded border border-red-400/40 bg-red-500/15 px-2.5 py-1 text-[11px] font-semibold text-red-100 shadow-lg shadow-black/30 transition-colors hover:bg-red-500/25 disabled:cursor-wait disabled:opacity-70"
+          className="absolute right-3 top-3 z-10 rounded border border-accent-del/40 bg-accent-del/15 px-2.5 py-1 text-[11px] font-semibold text-accent-del shadow-lg shadow-black/30 transition-colors hover:bg-accent-del/25 disabled:cursor-wait disabled:opacity-70"
           title="Start an agent with this terminal failure as context"
         >
           {remediationPending ? 'Starting...' : 'Fix with Agent'}

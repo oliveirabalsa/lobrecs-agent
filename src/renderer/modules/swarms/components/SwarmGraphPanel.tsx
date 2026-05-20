@@ -179,7 +179,7 @@ export function SwarmGraphPanel({
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
       <header className="shrink-0 border-b border-hairline px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-primary">Swarm Graph</div>
             <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
@@ -195,30 +195,32 @@ export function SwarmGraphPanel({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {graph.nodes.length === 0 ? (
-          <div className="rounded-card border border-dashed border-hairline px-4 py-8 text-center text-[12px] text-muted">
-            No sessions in this thread yet.
-          </div>
-        ) : (
-          <div className="grid gap-0">
-            {graph.nodes.map((node, index) => (
-              <GraphNodeRow
-                key={node.id}
-                node={node}
-                selected={node.id === selectedNode?.id}
-                active={node.id === activeSessionId}
-                edge={index > 0 ? graph.edges[index - 1] : null}
-                onSelect={() => setSelectedNodeId(node.id)}
-              />
-            ))}
-          </div>
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3">
+        <div className="mx-auto w-full max-w-3xl">
+          {graph.nodes.length === 0 ? (
+            <div className="rounded-card border border-dashed border-hairline px-4 py-8 text-center text-[12px] text-muted">
+              No sessions in this thread yet.
+            </div>
+          ) : (
+            <div className="grid min-w-0 gap-0">
+              {graph.nodes.map((node, index) => (
+                <GraphNodeRow
+                  key={node.id}
+                  node={node}
+                  selected={node.id === selectedNode?.id}
+                  active={node.id === activeSessionId}
+                  edge={index > 0 ? graph.edges[index - 1] : null}
+                  onSelect={() => setSelectedNodeId(node.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <section className="shrink-0 border-t border-hairline bg-card/40 px-3 py-3">
         {selectedNode ? (
-          <div className="grid gap-3">
+          <div className="mx-auto grid w-full max-w-3xl gap-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="truncate text-[12px] font-semibold text-primary">
@@ -267,7 +269,9 @@ export function SwarmGraphPanel({
             </div>
           </div>
         ) : (
-          <div className="text-[12px] text-muted">Select an agent node.</div>
+          <div className="mx-auto w-full max-w-3xl text-[12px] text-muted">
+            Select an agent node.
+          </div>
         )}
       </section>
     </div>
@@ -288,7 +292,7 @@ function GraphNodeRow({
   onSelect: () => void
 }) {
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       {edge ? (
         <div className="ml-[18px] flex min-h-8 items-center gap-2 border-l border-hairline pl-4">
           <span className="h-px w-5 shrink-0 bg-hairline" />
@@ -330,7 +334,7 @@ function GraphNodeRow({
             {node.agentLabel} / {node.model}
           </div>
           {node.outputPreview || node.inputPreview ? (
-            <div className="mt-2 line-clamp-2 text-[11px] leading-4 text-secondary">
+            <div className="mt-2 line-clamp-2 break-words text-[11px] leading-4 text-secondary">
               {node.outputPreview || node.inputPreview}
             </div>
           ) : null}

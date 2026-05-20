@@ -60,15 +60,15 @@ export function DiffViewer({ proposals, focusFilePath }: Props) {
 
   if (!current) {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-950 text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center bg-canvas text-sm text-muted">
         No code changes to review.
       </div>
     )
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col border-t border-zinc-800 bg-zinc-900">
-      <div className="flex min-h-10 items-center border-b border-zinc-800">
+    <div className="flex h-full min-h-0 flex-col border-t border-hairline bg-sidebar">
+      <div className="flex min-h-10 items-center border-b border-hairline">
         <div className="flex min-w-0 flex-1 overflow-x-auto">
           {proposals.map((proposal, index) => (
             <button
@@ -77,8 +77,8 @@ export function DiffViewer({ proposals, focusFilePath }: Props) {
               onClick={() => setSelected(index)}
               className={`min-w-0 shrink-0 border-b-2 px-3 py-2 text-xs ${
                 index === selected
-                  ? 'border-blue-500 text-zinc-100'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-200'
+                  ? 'border-accent-primary text-primary'
+                  : 'border-transparent text-muted hover:text-secondary'
               }`}
               title={proposal.filePath}
             >
@@ -90,20 +90,20 @@ export function DiffViewer({ proposals, focusFilePath }: Props) {
           <span
             className={`rounded-pill border px-2 py-0.5 text-[11px] capitalize ${
               current.status === 'conflict'
-                ? 'border-red-700/70 bg-red-950/40 text-red-200'
-                : 'border-emerald-700/70 bg-emerald-950/30 text-emerald-200'
+                ? 'border-accent-del/40 bg-accent-del/10 text-accent-del'
+                : 'border-accent-add/40 bg-accent-add/10 text-accent-add'
             }`}
           >
             {current.status}
           </span>
         ) : null}
-        <span className="px-3 text-xs text-zinc-500">
+        <span className="px-3 text-xs text-muted">
           {selected + 1} / {proposals.length} files
         </span>
       </div>
 
       {current.description ? (
-        <div className="border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
+        <div className="border-b border-hairline px-3 py-2 text-xs text-muted">
           {current.description}
         </div>
       ) : null}

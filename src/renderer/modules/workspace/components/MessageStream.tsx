@@ -38,11 +38,11 @@ interface AutoPinState {
 type CodeChangeFallback = NonNullable<EditedFilesCardProps['fallbackFiles']>[number]
 
 export function shouldPinMessageStream({
-  loading,
-  running,
+  loading: _loading,
+  running: _running,
   sticky,
 }: AutoPinState): boolean {
-  return sticky || loading || running
+  return sticky
 }
 
 function getScrollElement(container: HTMLDivElement | null): HTMLElement | null {
@@ -219,7 +219,7 @@ export function MessageStream({
   return (
     <div
       ref={containerRef}
-      className="motion-fade-in mx-auto flex w-full max-w-[820px] flex-col gap-4"
+      className="motion-fade-in mx-auto flex w-full max-w-conversation flex-col gap-4"
     >
       {turns.map((turn, index) => {
         const isLastTurn = index === turns.length - 1
@@ -443,7 +443,7 @@ function isCodeChangeItem(item: StreamItem): boolean {
 
 function StreamSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-3">
+    <div className="mx-auto flex w-full max-w-conversation flex-col gap-3">
       {[0, 1, 2].map((item) => (
         <div
           key={item}
