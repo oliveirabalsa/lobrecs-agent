@@ -125,6 +125,18 @@ describe('createElectronBuilderEnv', () => {
       GH_TOKEN: 'github-token',
     })
   })
+
+  it('rejects malformed base64 App Store Connect keys before electron-builder runs', () => {
+    expect(() =>
+      createElectronBuilderEnv(
+        {
+          GITHUB_TOKEN: 'github-token',
+          APPLE_API_KEY_BASE64: 'not-a-private-key',
+        },
+        vi.fn(),
+      ),
+    ).toThrowError(/APPLE_API_KEY_BASE64/)
+  })
 })
 
 describe('validateMacPublishEnvironment', () => {
@@ -159,6 +171,20 @@ describe('validateMacPublishEnvironment', () => {
         { platform: 'linux' },
       ),
     ).not.toThrow()
+  })
+
+  it('rejects malformed base64 API key notarization credentials before version bumps', () => {
+    expect(() =>
+      validateMacPublishEnvironment(
+        {
+          APPLE_API_KEY_BASE64: 'not-a-private-key',
+          APPLE_API_KEY_ID: 'key-id',
+          APPLE_API_ISSUER: 'issuer-id',
+          CSC_LINK: '/tmp/developer-id.p12',
+        },
+        { platform: 'linux' },
+      ),
+    ).toThrowError(/APPLE_API_KEY_BASE64/)
   })
 
   it('accepts Apple ID notarization credentials with a named signing identity', () => {

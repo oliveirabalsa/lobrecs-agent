@@ -21,6 +21,10 @@ const CODE_SIGNING_HELP =
   'macOS publish builds must be signed with a Developer ID Application certificate. Set CSC_LINK/CSC_KEY_PASSWORD, set CSC_NAME for an installed certificate, or install a Developer ID Application identity in the macOS keychain.'
 const UNSIGNED_PUBLISH_HELP =
   'Unsigned macOS builds cannot be published to the auto-update feed. Build unsigned artifacts locally with `npm run build:mac` and publish only Developer ID signed and notarized macOS releases.'
+const APPLE_API_KEY_HELP =
+  'APPLE_API_KEY must be a .p8 file path, raw .p8 private key contents, or base64-encoded .p8 private key contents.'
+const APPLE_API_KEY_BASE64_HELP =
+  'APPLE_API_KEY_BASE64 must contain base64-encoded .p8 private key contents.'
 const APPLE_API_KEY_FILENAME = 'AuthKey.p8'
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
@@ -150,22 +154,43 @@ export function resolvePublishToken(env = process.env, getGhToken = getGhCliToke
 }
 
 function resolveNotarizationProfile(env) {
-  const apiKey =
-    normalizeToken(env.APPLE_API_KEY) ?? normalizeToken(env.APPLE_API_KEY_BASE64)
+  const apiKeyProfile = resolveApiKeyNotarizationProfile(env)
+  if (apiKeyProfile) {
+    return apiKeyProfile
+  }
+
   const profiles = [
     ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID'],
     ['APPLE_KEYCHAIN_PROFILE'],
   ]
 
-  if (
-    apiKey &&
-    normalizeToken(env.APPLE_API_KEY_ID) &&
-    normalizeToken(env.APPLE_API_ISSUER)
-  ) {
+  return profiles.find(profile => profile.every(name => normalizeToken(env[name])))
+}
+
+function resolveApiKeyNotarizationProfile(env) {
+  if (!normalizeToken(env.APPLE_API_KEY_ID) || !normalizeToken(env.APPLE_API_ISSUER)) {
+    return null
+  }
+
+  const apiKey = normalizeToken(env.APPLE_API_KEY)
+  if (apiKey) {
+    if (!isAppleApiKeyPath(apiKey) && !normalizeAppleApiKeyContents(apiKey)) {
+      throw new Error(APPLE_API_KEY_HELP)
+    }
+
     return ['APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
   }
 
-  return profiles.find(profile => profile.every(name => normalizeToken(env[name])))
+  const base64ApiKey = normalizeToken(env.APPLE_API_KEY_BASE64)
+  if (base64ApiKey) {
+    if (!normalizeAppleApiKeyContents(base64ApiKey)) {
+      throw new Error(APPLE_API_KEY_BASE64_HELP)
+    }
+
+    return ['APPLE_API_KEY_BASE64', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
+  }
+
+  return null
 }
 
 function hasCodeSigningMaterial(env, platform, hasLocalDeveloperIdApplicationIdentity) {
@@ -198,6 +223,8 @@ function prepareAppleApiKeyForElectronBuilder(
         removeDir,
       })
     }
+
+    throw new Error(APPLE_API_KEY_HELP)
   }
 
   const base64ApiKey = normalizeToken(env.APPLE_API_KEY_BASE64)
@@ -207,7 +234,7 @@ function prepareAppleApiKeyForElectronBuilder(
 
   const rawPrivateKey = normalizeAppleApiKeyContents(base64ApiKey)
   if (!rawPrivateKey) {
-    return null
+    throw new Error(APPLE_API_KEY_BASE64_HELP)
   }
 
   return writeAppleApiKeyFile(rawPrivateKey, {
