@@ -96,7 +96,11 @@ describe('CliEditorTerminalService', () => {
     })
     expect(spawnPty).toHaveBeenCalledWith(
       '/bin/zsh',
-      ['-i', '-c', 'vim .'],
+      [
+        '-i',
+        '-c',
+        'vim --cmd \'let &t_SI="\\e[6 q" | let &t_SR="\\e[4 q" | let &t_EI="\\e[1 q"\' .',
+      ],
       expect.objectContaining({
         name: 'xterm-256color',
         cols: 132,
@@ -131,6 +135,43 @@ describe('CliEditorTerminalService', () => {
       signal: undefined,
     })
     expect(service.has('terminal-1')).toBe(false)
+  })
+
+  it('leaves non-vim cli editor commands untouched', async () => {
+    vi.stubEnv('SHELL', '/bin/zsh')
+
+    const pty = new FakePty()
+    const spawnPty = vi.fn(
+      (_command: string, _args: string[], _options: PtySpawnOptions) => pty,
+    )
+    const service = new CliEditorTerminalService({
+      spawnPty,
+      detectEditors: async () => [
+        {
+          id: 'nvim',
+          name: 'Neovim',
+          kind: 'cli',
+          target: 'nvim',
+          binPath: '/opt/homebrew/bin/nvim',
+        },
+      ],
+    })
+
+    const session = await service.start(
+      {
+        sessionId: 'terminal-nvim',
+        editorId: 'nvim',
+        repoPath: '/tmp/repo',
+      },
+      vi.fn(),
+    )
+
+    expect(session.command).toBe('nvim .')
+    expect(spawnPty).toHaveBeenCalledWith(
+      '/bin/zsh',
+      ['-i', '-c', 'nvim .'],
+      expect.any(Object),
+    )
   })
 
   it('spawns the user shell when editorId is the shell sentinel', async () => {

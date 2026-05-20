@@ -13,8 +13,11 @@ import {
 import {
   applyCliEditorCursorState,
   createCliEditorCursorTracker,
+  DEFAULT_CLI_EDITOR_CURSOR_STATE,
+  type CliEditorCursorState,
   writeTerminalWithCursorState,
 } from './cliEditorCursorState'
+import { CliEditorCursorBadge } from './CliEditorCursorBadge'
 
 export interface TerminalTab {
   id: string
@@ -51,10 +54,17 @@ export function BottomTerminalPanel({
 }: BottomTerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([initialTab])
   const [activeTabId, setActiveTabId] = useState(initialTab.id)
+  const [cursorStates, setCursorStates] = useState<Record<string, CliEditorCursorState>>({
+    [initialTab.id]: DEFAULT_CLI_EDITOR_CURSOR_STATE,
+  })
   const emptiedRef = useRef(false)
 
   const addTab = useCallback((tab: TerminalTab) => {
     setTabs((prev) => [...prev, tab])
+    setCursorStates((prev) => ({
+      ...prev,
+      [tab.id]: DEFAULT_CLI_EDITOR_CURSOR_STATE,
+    }))
     setActiveTabId(tab.id)
   }, [])
 
@@ -68,6 +78,10 @@ export function BottomTerminalPanel({
 
   const closeTab = useCallback(
     (tabId: string) => {
+      setCursorStates((prev) => {
+        const { [tabId]: _closed, ...next } = prev
+        return next
+      })
       setTabs((prev) => {
         const next = prev.filter((t) => t.id !== tabId)
         if (next.length === 0) {
@@ -80,6 +94,21 @@ export function BottomTerminalPanel({
           return next[Math.max(0, idx - 1)]?.id ?? next[0]?.id ?? ''
         })
         return next
+      })
+    },
+    [],
+  )
+
+  const handleCursorStateChange = useCallback(
+    (tabId: string, nextState: CliEditorCursorState) => {
+      setCursorStates((prev) => {
+        const current = prev[tabId]
+        if (current && sameCursorDisplayState(current, nextState)) return prev
+
+        return {
+          ...prev,
+          [tabId]: nextState,
+        }
       })
     },
     [],
@@ -147,6 +176,12 @@ export function BottomTerminalPanel({
 
         <div className="flex-1" />
 
+        {activeTabId ? (
+          <CliEditorCursorBadge
+            cursorState={cursorStates[activeTabId] ?? DEFAULT_CLI_EDITOR_CURSOR_STATE}
+          />
+        ) : null}
+
         <button
           type="button"
           onClick={() => onFullscreenChange(!fullscreen)}
@@ -176,6 +211,7 @@ export function BottomTerminalPanel({
             visible={tab.id === activeTabId}
             panelVisible={visible}
             panelFullscreen={fullscreen}
+            onCursorStateChange={handleCursorStateChange}
           />
         ))}
       </div>
@@ -288,11 +324,13 @@ function TerminalInstance({
   visible,
   panelVisible,
   panelFullscreen,
+  onCursorStateChange,
 }: {
   tab: TerminalTab
   visible: boolean
   panelVisible: boolean
   panelFullscreen: boolean
+  onCursorStateChange: (tabId: string, cursorState: CliEditorCursorState) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const exitedRef = useRef(false)
@@ -362,7 +400,9 @@ function TerminalInstance({
 
     const offData = window.agentforge.system.onCliEditorTerminalData((event) => {
       if (event.sessionId !== sessionId) return
-      writeTerminalWithCursorState(term, cursorTracker, event.data)
+      writeTerminalWithCursorState(term, cursorTracker, event.data, (nextState) => {
+        onCursorStateChange(tab.id, nextState)
+      })
     })
 
     const offExit = window.agentforge.system.onCliEditorTerminalExit((event) => {
@@ -421,7 +461,7 @@ function TerminalInstance({
     }
     // tab.id is stable (UUID created once); the other tab fields don't change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.id])
+  }, [onCursorStateChange, tab.id])
 
   void session
   void error
@@ -437,6 +477,13 @@ function TerminalInstance({
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function sameCursorDisplayState(
+  left: CliEditorCursorState,
+  right: CliEditorCursorState,
+): boolean {
+  return left.mode === right.mode && left.shape === right.shape && left.blink === right.blink
+}
 
 function createTerminalSessionId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`

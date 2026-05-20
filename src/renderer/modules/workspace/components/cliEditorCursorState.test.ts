@@ -50,7 +50,10 @@ describe('cliEditorCursorState', () => {
   })
 
   it('enables blink so xterm.js keeps repainting the block cursor in vim normal mode', () => {
-    expect(cursorStyleForState(DEFAULT_CLI_EDITOR_CURSOR_STATE)).toEqual({
+    expect(cursorStyleForState({
+      ...DEFAULT_CLI_EDITOR_CURSOR_STATE,
+      blink: false,
+    })).toEqual({
       cursorStyle: 'block',
       cursorBlink: true,
     })
@@ -90,7 +93,7 @@ describe('cliEditorCursorState', () => {
     })
 
     expect(term.options.cursorStyle).toBe('block')
-    expect(term.options.cursorBlink).toBe(false)
+    expect(term.options.cursorBlink).toBe(true)
     expect(refresh).toHaveBeenCalledWith(7, 7)
     expect(tracker.state).toEqual({
       mode: 'normal',

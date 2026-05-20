@@ -17,6 +17,7 @@ import {
   type CliEditorCursorState,
   writeTerminalWithCursorState,
 } from './cliEditorCursorState'
+import { CliEditorCursorBadge } from './CliEditorCursorBadge'
 
 interface CliEditorTerminalOverlayProps {
   editorId: string
@@ -174,9 +175,7 @@ export function CliEditorTerminalOverlay({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <div className={cursorBadgeClass(cursorState)}>
-            {cursorState.label} cursor
-          </div>
+          <CliEditorCursorBadge cursorState={cursorState} />
           <div
             className={`rounded px-2 py-0.5 text-[10px] font-medium ${
               error
@@ -201,18 +200,6 @@ function createTerminalSessionId(): string {
   if (randomId) return randomId
 
   return `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-function cursorBadgeClass(cursorState: CliEditorCursorState): string {
-  switch (cursorState.mode) {
-    case 'insert':
-      return 'rounded border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-medium text-sky-200'
-    case 'replace':
-      return 'rounded border border-fuchsia-400/30 bg-fuchsia-400/10 px-2 py-0.5 text-[10px] font-medium text-fuchsia-200'
-    case 'normal':
-    default:
-      return 'rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-200'
-  }
 }
 
 function BackIcon() {

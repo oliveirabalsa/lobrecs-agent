@@ -21,6 +21,9 @@ const MIN_ROWS = 5
 const MAX_COLS = 500
 const MAX_ROWS = 200
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,96}$/
+// Classic Vim does not infer cursor-shape support from the embedded xterm.js PTY.
+const VIM_CURSOR_SHAPE_COMMAND =
+  'let &t_SI="\\e[6 q" | let &t_SR="\\e[4 q" | let &t_EI="\\e[1 q"'
 /**
  * Reserved editorId that spawns the user's $SHELL interactively instead of
  * looking up a detected editor. Used by the "Terminal" entry in the Open-In
@@ -191,13 +194,13 @@ export class CliEditorTerminalService {
       throw new Error(`${editor.name} is not a terminal editor`)
     }
 
-    const editorCommand = buildCliEditorCommand(editor.target)
+    const editorCommand = buildCliEditorCommand(editor)
     return {
       editorId: editor.id,
       editorName: editor.name,
       command: userShell,
-      args: ['-i', '-c', editorCommand],
-      displayCommand: editorCommand,
+      args: ['-i', '-c', editorCommand.shellCommand],
+      displayCommand: editorCommand.displayCommand,
     }
   }
 }
@@ -210,8 +213,30 @@ interface EditorLaunch {
   displayCommand?: string
 }
 
-function buildCliEditorCommand(editorTarget: string): string {
-  return `${editorTarget} .`
+interface EditorCommand {
+  shellCommand: string
+  displayCommand: string
+}
+
+function buildCliEditorCommand(editor: EditorInfo): EditorCommand {
+  const args = isClassicVimEditor(editor)
+    ? ['--cmd', VIM_CURSOR_SHAPE_COMMAND, '.']
+    : ['.']
+
+  return {
+    shellCommand: [editor.target, ...args].map(shellQuote).join(' '),
+    displayCommand: [editor.target, '.'].map(shellQuote).join(' '),
+  }
+}
+
+function isClassicVimEditor(editor: EditorInfo): boolean {
+  return editor.id === 'vim' || path.basename(editor.target) === 'vim'
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value
+
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
 function normalizeSessionId(sessionId: string | undefined): string {

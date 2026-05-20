@@ -75,7 +75,7 @@ export function cursorStyleForState(
 } {
   return {
     cursorStyle: state.shape,
-    cursorBlink: state.blink ?? true,
+    cursorBlink: state.mode === 'normal' ? true : state.blink ?? true,
   }
 }
 
