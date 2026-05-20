@@ -38,6 +38,7 @@
   --color-accent-warn: #f59e0b;
   --color-accent-primary: #3b82f6;
   --color-accent-loader: #ef4444;
+  --color-accent-loader-glow: rgba(239, 68, 68, 0.45);
 
   --radius-bubble: 12px;
   --radius-card: 8px;
@@ -102,6 +103,7 @@
 
   --color-accent-primary: #e0463c;
   --color-accent-loader: #f0524a;
+  --color-accent-loader-glow: rgba(240, 82, 74, 0.45);
 
   --gradient-app: radial-gradient(
     135% 115% at 50% -15%,
@@ -111,6 +113,58 @@
   );
   --gradient-sidebar: linear-gradient(180deg, #1a0f11 0%, #130c0e 46%, #0d080a 100%);
   --color-glow: rgba(224, 70, 60, 0.22);
+}
+
+/* Aurora Nebula — "glowing space vibe": deep purple surfaces with a bright
+ * emerald green glow and cyan accents. */
+:root[data-theme='aurora-nebula'] {
+  --color-canvas: #090610;
+  --color-sidebar: #0f0b1a;
+  --color-bubble-user: #1f1430;
+  --color-card: #150f24;
+  --color-card-raised: #1d1433;
+  --color-hairline: rgba(220, 200, 255, 0.07);
+  --color-hairline-strong: rgba(220, 200, 255, 0.13);
+
+  --color-text-primary: rgba(245, 240, 255, 0.94);
+  --color-text-secondary: rgba(230, 220, 255, 0.62);
+  --color-text-muted: rgba(230, 220, 255, 0.42);
+
+  --color-accent-primary: #10b981; /* Emerald */
+  --color-accent-loader: #06b6d4;  /* Cyan */
+  --color-accent-loader-glow: rgba(6, 182, 212, 0.55);
+
+  --gradient-app: radial-gradient(
+    135% 115% at 50% -15%,
+    #25123e 0%,
+    #0f0b1a 46%,
+    #050308 100%
+  );
+  --gradient-sidebar: linear-gradient(180deg, #180f28 0%, #0f0b1a 46%, #090611 100%);
+  --color-glow: rgba(16, 185, 129, 0.18);
+}
+
+/* Smooth theme-aware transitions for elements that adapt to custom variables */
+html,
+body,
+.app-shell,
+aside,
+main,
+section,
+.bg-sidebar-surface,
+.bg-card,
+.bg-card-raised,
+.bg-bubble-user,
+.border-hairline,
+.border-hairline-strong,
+.text-primary,
+.text-secondary,
+.text-muted {
+  transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.15s ease-out,
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.25s ease-in-out;
 }
 
 /* Theme-aware surface utility. Unlayered, so it overrides Tailwind's bg-*
@@ -376,4 +430,18 @@ input {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Animated loader glowing container animation */
+@keyframes loader-container-glow {
+  0%, 100% {
+    box-shadow: 0 0 12px -6px var(--color-accent-loader-glow), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  }
+  50% {
+    box-shadow: 0 0 20px -2px var(--color-accent-loader-glow), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  }
+}
+
+.animate-loader-glow {
+  animation: loader-container-glow 3s ease-in-out infinite;
 }

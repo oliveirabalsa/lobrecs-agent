@@ -10,7 +10,7 @@ import type { ReactNode } from 'react'
  * which would force coordinated edits across four files and a load-time race.
  */
 
-export const THEME_IDS = ['midnight', 'lobrecs-wolf'] as const
+export const THEME_IDS = ['midnight', 'lobrecs-wolf', 'aurora-nebula'] as const
 export type ThemeId = (typeof THEME_IDS)[number]
 
 export const DEFAULT_THEME: ThemeId = 'midnight'
@@ -37,6 +37,11 @@ export const THEME_META: Record<
     label: 'Lobrecs Wolf',
     description: 'Near-black surfaces with a dark-red wolf glow and red accents.',
     swatches: ['#0c0708', '#1e1316', '#e0463c', '#fafafa'],
+  },
+  'aurora-nebula': {
+    label: 'Aurora Nebula',
+    description: 'Vibrant neon purple and green theme with deep indigo surfaces and emerald accents.',
+    swatches: ['#090610', '#150f24', '#10b981', '#f5f0ff'],
   },
 }
 

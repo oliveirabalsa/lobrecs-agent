@@ -15,8 +15,28 @@ export function FileChangeRow({
   deletions,
   onClick,
 }: FileChangeRowProps) {
+  const addCount = additions ?? 0
+  const delCount = deletions ?? 0
+  const total = addCount + delCount
+
   const stats = (
-    <span className="shrink-0 font-mono text-xs">
+    <span className="flex items-center shrink-0 font-mono text-xs">
+      {total > 0 ? (
+        <span className="hidden sm:inline-flex h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-white/10 mx-2">
+          {addCount > 0 ? (
+            <span 
+              className="bg-accent-add h-full" 
+              style={{ width: `${(addCount / total) * 100}%` }} 
+            />
+          ) : null}
+          {delCount > 0 ? (
+            <span 
+              className="bg-accent-del h-full" 
+              style={{ width: `${(delCount / total) * 100}%` }} 
+            />
+          ) : null}
+        </span>
+      ) : null}
       {typeof additions === 'number' ? (
         <span className="text-accent-add">+{additions}</span>
       ) : null}

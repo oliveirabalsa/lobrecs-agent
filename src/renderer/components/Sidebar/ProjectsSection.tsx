@@ -125,7 +125,7 @@ export function ProjectsSection({
 
       {contextMenu ? (
         <div
-          className="fixed z-50 w-36 overflow-hidden rounded-card border border-hairline bg-card-raised py-1 shadow-xl shadow-black/40"
+          className="fixed z-50 w-36 overflow-hidden rounded-card border border-hairline bg-card-raised/75 backdrop-blur-lg py-1 shadow-xl shadow-black/40"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >

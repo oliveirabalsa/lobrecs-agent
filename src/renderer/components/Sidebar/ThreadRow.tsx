@@ -37,9 +37,15 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
   return (
     <button
       type="button"
-      className={`${baseClasses} ${stateClasses}`}
+      className={`relative ${baseClasses} ${stateClasses}`}
       onClick={() => onSelect(thread)}
     >
+      {active ? (
+        <span
+          className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
+          aria-hidden="true"
+        />
+      ) : null}
       <div
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
         aria-current={active ? 'page' : undefined}

@@ -60,7 +60,7 @@ export function Modal({
           style={{ maxWidth }}
           className={cx(
             'fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
-            'w-[calc(100vw-32px)] bg-card rounded-card border border-hairline shadow-2xl',
+            'w-[calc(100vw-32px)] bg-card/70 rounded-card border border-hairline shadow-2xl shadow-black/50 backdrop-blur-md',
             'p-5 font-ui text-primary outline-none',
           )}
         >
