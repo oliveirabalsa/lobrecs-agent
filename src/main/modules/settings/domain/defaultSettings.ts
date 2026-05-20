@@ -43,6 +43,12 @@ export const DEFAULT_SWARM_ROLE_PROMPTS: Record<string, string> = {
 
 export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
   {
+    id: 'managed-autopilot',
+    label: 'Managed',
+    strategy: 'managed',
+    agents: [],
+  },
+  {
     id: 'security-quality',
     label: 'Security + Quality Review',
     strategy: 'parallel',
@@ -164,7 +170,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     sessionOutputRetentionDays: 30,
   },
   swarms: {
-    defaultStrategy: 'parallel',
+    defaultStrategy: 'managed',
     maxAgents: 8,
     maxReviewerIterations: 3,
     defaultAgents: [

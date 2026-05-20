@@ -1,7 +1,7 @@
 import type { ImageAttachment, ModelTier, SupportedAgentId } from './agents'
 import type { SessionStatus } from './sessions'
 
-export const SWARM_STRATEGIES = ['parallel', 'sequential', 'fan-out', 'managed'] as const
+export const SWARM_STRATEGIES = ['managed', 'parallel', 'sequential', 'fan-out'] as const
 
 export type SwarmStrategy = (typeof SWARM_STRATEGIES)[number]
 

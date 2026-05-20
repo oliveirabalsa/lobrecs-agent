@@ -74,6 +74,12 @@ const TEMPLATES: Array<{
   agents: SwarmAgentConfig[]
 }> = [
   {
+    id: 'managed-autopilot',
+    label: 'Managed',
+    strategy: 'managed',
+    agents: [],
+  },
+  {
     id: 'security-quality',
     label: 'Security + Quality Review',
     strategy: 'parallel',
@@ -125,6 +131,8 @@ const TEMPLATES: Array<{
   },
 ]
 
+const STRATEGY_OPTIONS: Strategy[] = ['managed', 'parallel', 'sequential', 'fan-out']
+
 export function SwarmBuilder({
   open,
   projectId,
@@ -134,7 +142,7 @@ export function SwarmBuilder({
   onClose,
   onSwarmStarted,
 }: Props) {
-  const [strategy, setStrategy] = useState<Strategy>('parallel')
+  const [strategy, setStrategy] = useState<Strategy>('managed')
   const [prompt, setPrompt] = useState(initialPrompt)
   const [agents, setAgents] = useState<SwarmAgentConfig[]>(() =>
     buildDefaultSwarmAgents(installedAgents),
@@ -337,7 +345,7 @@ export function SwarmBuilder({
             Swarm Builder
           </h2>
           <fieldset className="flex items-center gap-1">
-            {(['parallel', 'sequential', 'fan-out', 'managed'] as Strategy[]).map((nextStrategy) => (
+            {STRATEGY_OPTIONS.map((nextStrategy) => (
               <label
                 key={nextStrategy}
                 className={`cursor-pointer rounded px-3 py-1.5 text-xs ${

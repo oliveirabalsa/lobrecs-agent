@@ -21,6 +21,7 @@ import { UserMessage } from '../components/UserMessage'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import type { StartedSessionSummary } from '../../sessions/types'
+import { Button, Modal } from '../../../../components/ui'
 
 interface RunWorkspaceProps {
   project: Project
@@ -302,7 +303,7 @@ export function RunWorkspace({
             seedUserMessage={seedUserMessage}
             streamHandlers={streamHandlers}
           />
-          {approvalRequest ? (
+          {approvalRequest && approvalRequest.risk !== 'high' ? (
             <ApprovalCallout
               request={approvalRequest}
               onApprove={onApproveApproval}
@@ -337,6 +338,71 @@ export function RunWorkspace({
           onOpenChange={closeUserQuestion}
           onSubmit={handleUserQuestionSubmit}
         />
+      ) : null}
+      {approvalRequest && approvalRequest.risk === 'high' ? (
+        <Modal
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) void onRejectApproval()
+          }}
+          title="High-Risk Action Required"
+          maxWidth={500}
+        >
+          <div className="flex flex-col gap-4">
+            <div className="text-sm text-secondary">
+              An agent is requesting approval to perform a high-risk operation.
+            </div>
+
+            <div className="rounded-card border border-accent-del/40 bg-accent-del/10 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-accent-del">
+                  {approvalRequest.description}
+                </span>
+                <span className="inline-flex items-center rounded-pill border border-accent-del/40 bg-accent-del/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent-del">
+                  High Risk
+                </span>
+              </div>
+              {approvalRequest.details ? (
+                <div className="mt-2 text-xs text-secondary whitespace-pre-wrap break-words leading-relaxed">
+                  {approvalRequest.details}
+                </div>
+              ) : null}
+            </div>
+
+            {approvalRequest.command ? (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Command</span>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded border border-hairline bg-canvas px-3 py-2 font-mono text-[11px] text-secondary leading-relaxed">
+                  {approvalRequest.command}
+                </pre>
+              </div>
+            ) : null}
+
+            {approvalRequest.cwd ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">Working Directory</span>
+                <div className="font-mono text-xs text-secondary truncate">{approvalRequest.cwd}</div>
+              </div>
+            ) : null}
+
+            <div className="mt-2 flex items-center justify-end gap-3 border-t border-hairline pt-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void onRejectApproval()}
+              >
+                Reject
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void onApproveApproval()}
+              >
+                Approve
+              </Button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

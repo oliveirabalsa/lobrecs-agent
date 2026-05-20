@@ -144,7 +144,7 @@ describe('SwarmOrchestrator', () => {
   })
 
   it('runs a frontier manager agent before spawning planned parallel agents', async () => {
-    const { orchestrator, dispatched, completions } = createManagedHarness()
+    const { orchestrator, dispatched, completions, waitedSessionIds } = createManagedHarness()
 
     const spawnPromise = orchestrator.spawn(managedConfig())
 
@@ -197,6 +197,7 @@ describe('SwarmOrchestrator', () => {
       'planner',
       'implementer',
     ])
+    expect(waitedSessionIds).toEqual([dispatched[0].sessionId])
     expect(dispatched[1].prompt).toContain('[Role: planner]')
     expect(dispatched[1].prompt).toContain('Identify the files')
     expect(dispatched[2].model).toBe('gpt-5.3-codex')
@@ -584,6 +585,7 @@ function managedConfig(): SwarmConfig {
 function createManagedHarness() {
   const worktrees = createFakeWorktrees()
   const dispatched: SwarmDispatchInput[] = []
+  const waitedSessionIds: string[] = []
   const completions = new Map<
     string,
     Deferred<{ status: 'done' | 'error'; output: string }>
@@ -600,11 +602,14 @@ function createManagedHarness() {
       completions.set(input.sessionId, deferred<{ status: 'done' | 'error'; output: string }>())
       return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
     },
-    waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+    waitForSessionCompletion: (sessionId) => {
+      waitedSessionIds.push(sessionId)
+      return completions.get(sessionId)!.promise
+    },
     worktrees,
   })
 
-  return { orchestrator, dispatched, completions, worktrees }
+  return { orchestrator, dispatched, completions, waitedSessionIds, worktrees }
 }
 
 function createFakeWorktrees() {

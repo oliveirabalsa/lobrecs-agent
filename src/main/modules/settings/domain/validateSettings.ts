@@ -133,7 +133,7 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
       ),
     },
     swarms: {
-      defaultStrategy: swarmStrategyOr(cloned.swarms.defaultStrategy, 'parallel'),
+      defaultStrategy: swarmStrategyOr(cloned.swarms.defaultStrategy, 'managed'),
       maxAgents: clampInteger(cloned.swarms.maxAgents, 1, 16, 8),
       maxReviewerIterations: clampInteger(cloned.swarms.maxReviewerIterations, 1, 10, 3),
       defaultAgents: normalizeTemplateAgents(cloned.swarms.defaultAgents).slice(
@@ -257,7 +257,7 @@ function normalizeTemplates(templates: unknown): SwarmTemplate[] {
       const record = objectLike(template)
       const id = stringOr(record.id, `template-${index + 1}`).trim()
       const label = stringOr(record.label, id).trim()
-      const strategy = swarmStrategyOr(record.strategy, 'parallel')
+      const strategy = swarmStrategyOr(record.strategy, 'managed')
       const agents = normalizeTemplateAgents(record.agents)
 
       if (!id || !label || (strategy !== 'managed' && agents.length === 0)) return null

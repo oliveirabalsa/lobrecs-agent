@@ -337,7 +337,7 @@ function fallbackSettings(): AppSettings {
       sessionOutputRetentionDays: 30,
     },
     swarms: {
-      defaultStrategy: 'parallel',
+      defaultStrategy: 'managed',
       maxAgents: 8,
       maxReviewerIterations: 3,
       defaultAgents: [],

@@ -479,10 +479,10 @@ export function SettingsView({
                 <SelectInput
                   value={draft.swarms.defaultStrategy}
                   options={[
+                    { value: 'managed', label: 'managed' },
                     { value: 'parallel', label: 'parallel' },
                     { value: 'sequential', label: 'sequential' },
                     { value: 'fan-out', label: 'fan-out' },
-                    { value: 'managed', label: 'managed' },
                   ]}
                   onChange={(defaultStrategy) =>
                     update('swarms', { ...draft.swarms, defaultStrategy })

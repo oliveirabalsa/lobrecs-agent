@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { normalizeSettings, normalizeSettingsPatch } from './validateSettings'
 
 describe('settings validation', () => {
+  it('uses managed swarms as the default strategy and first template', () => {
+    const settings = normalizeSettings({})
+
+    expect(settings.swarms.defaultStrategy).toBe('managed')
+    expect(settings.swarms.templates[0]).toMatchObject({
+      id: 'managed-autopilot',
+      strategy: 'managed',
+      agents: [],
+    })
+  })
+
   it('clamps risky limits and falls back to supported agents', () => {
     const settings = normalizeSettings({
       agents: {
