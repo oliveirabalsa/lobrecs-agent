@@ -1,11 +1,12 @@
 import type { ImageAttachment } from '../../../../shared/types'
 import { parseSwarmRolePrompt } from '../lib/swarmMessage'
-import { MarkdownContent } from './MarkdownContent'
+import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
 import { SwarmRoleMessage } from './SwarmRoleMessage'
 
 export interface UserMessageProps {
   text: string
   attachments?: ImageAttachment[]
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
 }
 
 /**
@@ -18,7 +19,7 @@ export interface UserMessageProps {
  * those render through `SwarmRoleMessage` instead so the machine-generated
  * handoff reads as a labelled card rather than raw plumbing text.
  */
-export function UserMessage({ text, attachments }: UserMessageProps) {
+export function UserMessage({ text, attachments, onOpenMarkdown }: UserMessageProps) {
   const swarmRole = parseSwarmRolePrompt(text)
   if (swarmRole) {
     return (
@@ -26,6 +27,7 @@ export function UserMessage({ text, attachments }: UserMessageProps) {
         role={swarmRole.role}
         body={swarmRole.body}
         attachments={attachments}
+        onOpenMarkdown={onOpenMarkdown}
       />
     )
   }
@@ -39,7 +41,7 @@ export function UserMessage({ text, attachments }: UserMessageProps) {
           ))}
         </div>
       ) : null}
-      <MarkdownContent text={text} variant="compact" />
+      <MarkdownContent text={text} variant="compact" onOpenMarkdown={onOpenMarkdown} />
     </div>
   )
 }

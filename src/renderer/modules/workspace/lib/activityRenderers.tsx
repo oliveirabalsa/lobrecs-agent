@@ -5,6 +5,8 @@ import type {
   DiffProposal,
 } from '../../../../shared/types'
 import { AssistantMessage } from '../components/AssistantMessage'
+import type { MarkdownLinkRequest } from '../components/MarkdownContent'
+import type { MarkdownPreviewDocument } from '../components/MarkdownPreviewer'
 import {
   ApprovalRequestPill,
   Callout,
@@ -38,6 +40,8 @@ export interface RendererContext {
   onApproveApproval?: () => void | Promise<void>
   onRejectApproval?: () => void | Promise<void>
   onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
 }
 
 const EMPTY_CONTEXT: RendererContext = {
@@ -62,7 +66,14 @@ export function renderStreamItem(
   switch (item.kind) {
     case 'message': {
       if (item.role === 'assistant') {
-        return <AssistantMessage key={key} text={item.text} />
+        return (
+          <AssistantMessage
+            key={key}
+            text={item.text}
+            onOpenMarkdown={ctx.onOpenMarkdown}
+            onPreviewMarkdown={ctx.onPreviewMarkdown}
+          />
+        )
       }
       // System messages: route to Callout when they look like warnings.
       const text = item.text ?? ''

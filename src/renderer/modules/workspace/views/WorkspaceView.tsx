@@ -23,6 +23,12 @@ import {
   createTerminalTab,
   type TerminalTab,
 } from '../components/BottomTerminalPanel'
+import type { MarkdownLinkRequest } from '../components/MarkdownContent'
+import {
+  MarkdownPreviewer,
+  type MarkdownPreviewDocument,
+  type MarkdownPreviewState,
+} from '../components/MarkdownPreviewer'
 import { resolveBottomTerminalOpenAction } from '../components/bottomTerminalPanelState'
 import { CommitAndPushDialog } from '../components/CommitAndPushDialog'
 import { Composer } from '../components/Composer'
@@ -212,6 +218,7 @@ export function WorkspaceView({
   const [bottomPanelHeight, setBottomPanelHeight] = useState(
     () => globalSettings?.ui.terminalDefaultHeight ?? 260,
   )
+  const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewState | null>(null)
   const terminalCountRef = useRef(0)
   const bottomPanelAddTabRef = useRef<((tab: TerminalTab) => void) | null>(null)
   const [bottomPanelInitialTab, setBottomPanelInitialTab] = useState<TerminalTab | null>(null)
@@ -315,6 +322,42 @@ export function WorkspaceView({
     setRightPanelModeState('diff')
     setFocusFilePath(filePath ?? null)
   }, [])
+
+  const openMarkdownDocument = useCallback((document: MarkdownPreviewDocument) => {
+    setMarkdownPreview({ kind: 'ready', document })
+  }, [])
+
+  const openMarkdownLink = useCallback(
+    (request: MarkdownLinkRequest) => {
+      const title = request.title ?? request.label ?? 'Markdown preview'
+      setMarkdownPreview({ kind: 'loading', title })
+
+      void window.agentforge.system
+        .readMarkdownDocument({
+          href: request.href,
+          repoPath: selectedProject?.repoPath,
+        })
+        .then((document) => {
+          setMarkdownPreview({
+            kind: 'ready',
+            document: {
+              title: request.title ?? document.title,
+              content: document.content,
+              sourceLabel: document.sourcePath ?? document.sourceUrl ?? request.href,
+              suggestedFileName: document.suggestedFileName,
+            },
+          })
+        })
+        .catch((error: unknown) => {
+          setMarkdownPreview({
+            kind: 'error',
+            title,
+            message: error instanceof Error ? error.message : 'Failed to load Markdown preview.',
+          })
+        })
+    },
+    [selectedProject?.repoPath],
+  )
 
   useEffect(() => {
     setBottomPanelOpen(false)
@@ -523,6 +566,8 @@ export function WorkspaceView({
                         onRejectApproval={onRejectApproval}
                         onSessionStarted={onSessionStarted}
                         onReviewFile={openDiffPanel}
+                        onOpenMarkdown={openMarkdownLink}
+                        onPreviewMarkdown={openMarkdownDocument}
                         onContextPercent={setContextPercent}
                       />
                     ) : (
@@ -760,6 +805,13 @@ export function WorkspaceView({
               project={selectedProject}
               open={commitDialogOpen}
               onOpenChange={setCommitDialogOpen}
+            />
+            <MarkdownPreviewer
+              state={markdownPreview}
+              onOpenChange={(open) => {
+                if (!open) setMarkdownPreview(null)
+              }}
+              onOpenMarkdown={openMarkdownLink}
             />
           </>
         ) : (

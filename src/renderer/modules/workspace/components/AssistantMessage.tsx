@@ -1,6 +1,7 @@
 import { useCallback, type ReactNode } from 'react'
 import { parseSwarmPlan } from '../lib/swarmMessage'
-import { MarkdownContent } from './MarkdownContent'
+import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
+import type { MarkdownPreviewDocument } from './MarkdownPreviewer'
 import { SwarmPlanCard } from './SwarmPlanCard'
 
 export interface AssistantMessageProps {
@@ -11,6 +12,8 @@ export interface AssistantMessageProps {
   onThumbsUp?: () => void
   onThumbsDown?: () => void
   onShare?: () => void
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
 }
 
 /**
@@ -28,6 +31,8 @@ export function AssistantMessage({
   onThumbsUp,
   onThumbsDown,
   onShare,
+  onOpenMarkdown,
+  onPreviewMarkdown,
 }: AssistantMessageProps) {
   const handleCopy = useCallback(() => {
     if (onCopy) {
@@ -45,7 +50,11 @@ export function AssistantMessage({
 
   return (
     <div className="flex flex-col gap-2">
-      {swarmPlan ? <SwarmPlanCard plan={swarmPlan} /> : <MarkdownContent text={text} />}
+      {swarmPlan ? (
+        <SwarmPlanCard plan={swarmPlan} onPreviewMarkdown={onPreviewMarkdown} />
+      ) : (
+        <MarkdownContent text={text} onOpenMarkdown={onOpenMarkdown} />
+      )}
       {showActions ? (
         <div className="flex items-center gap-1">
           <ActionButton label="Copy" onClick={handleCopy}>

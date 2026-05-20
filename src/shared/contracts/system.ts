@@ -9,6 +9,20 @@ export interface SaveImageAttachmentInput {
   mimeType?: string
 }
 
+export interface ReadMarkdownDocumentInput {
+  href: string
+  repoPath?: string
+}
+
+export interface MarkdownDocument {
+  title: string
+  content: string
+  suggestedFileName: string
+  size: number
+  sourcePath?: string
+  sourceUrl?: string
+}
+
 export type EditorKind = 'gui' | 'cli'
 
 export interface EditorInfo {

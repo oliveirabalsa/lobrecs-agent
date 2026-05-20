@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { ImageAttachment } from '../../../../shared/types'
-import { MarkdownContent } from './MarkdownContent'
+import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
 import { SwarmRoleBadge } from './SwarmRoleBadge'
 
 export interface SwarmRoleMessageProps {
@@ -9,6 +9,7 @@ export interface SwarmRoleMessageProps {
   /** Prompt body with the role header already stripped. */
   body: string
   attachments?: ImageAttachment[]
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
 }
 
 /**
@@ -19,7 +20,12 @@ export interface SwarmRoleMessageProps {
  * instructions) is collapsed by default — the role badge and a short preview
  * are enough to scan the timeline.
  */
-export function SwarmRoleMessage({ role, body, attachments }: SwarmRoleMessageProps) {
+export function SwarmRoleMessage({
+  role,
+  body,
+  attachments,
+  onOpenMarkdown,
+}: SwarmRoleMessageProps) {
   const [expanded, setExpanded] = useState(false)
   const collapsible = body.length > 0
 
@@ -44,7 +50,7 @@ export function SwarmRoleMessage({ role, body, attachments }: SwarmRoleMessagePr
         {!collapsible ? (
           <p className="text-sm leading-6 text-muted">No prompt details.</p>
         ) : expanded ? (
-          <MarkdownContent text={body} variant="compact" />
+          <MarkdownContent text={body} variant="compact" onOpenMarkdown={onOpenMarkdown} />
         ) : (
           <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-6 text-secondary">
             {body}

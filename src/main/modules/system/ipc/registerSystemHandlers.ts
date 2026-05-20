@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { listAgentModelCatalogs } from '../../agents/application/listAgentModelCatalogs'
 import { isSupportedAgentId } from '../../agents/domain/isSupportedAgentId'
+import { readMarkdownDocument } from '../application/markdownDocument'
 import {
   CLI_EDITOR_TERMINAL_DATA_CHANNEL,
   CLI_EDITOR_TERMINAL_EXIT_CHANNEL,
@@ -22,7 +23,9 @@ import type {
   CliEditorTerminalWriteInput,
   EditorInfo,
   ImageAttachment,
+  MarkdownDocument,
   OpenInEditorInput,
+  ReadMarkdownDocumentInput,
   SaveImageAttachmentInput,
   SupportedAgentId,
 } from '../../../../shared/types'
@@ -38,6 +41,11 @@ export function registerSystemHandlers(context: MainIpcContext): void {
   ipcMain.handle('system:open-editor', async (_event, filePath: string) => {
     await shell.openPath(filePath)
   })
+  ipcMain.handle(
+    'system:read-markdown-document',
+    async (_event, input: ReadMarkdownDocumentInput): Promise<MarkdownDocument> =>
+      readMarkdownDocument(input),
+  )
   ipcMain.handle('system:select-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return result.canceled ? null : result.filePaths[0]

@@ -10,7 +10,9 @@ import type {
   CliEditorTerminalWriteInput,
   EditorInfo,
   ImageAttachment,
+  MarkdownDocument,
   OpenInEditorInput,
+  ReadMarkdownDocumentInput,
   SaveImageAttachmentInput,
   SelectedDirectoryPath,
   VerificationRecipe,
@@ -19,6 +21,7 @@ import type { IpcInvoker, IpcSubscriber } from './ipc'
 
 export interface SystemApi {
   openInEditor(filePath: string): Promise<void>
+  readMarkdownDocument(input: ReadMarkdownDocumentInput): Promise<MarkdownDocument>
   selectDirectory(): Promise<SelectedDirectoryPath>
   checkAgentInstalled(agentId: string): Promise<boolean>
   listAgentModels(): Promise<AgentModelCatalog[]>
@@ -38,6 +41,8 @@ export interface SystemApi {
 export function createSystemApi(ipcRenderer: IpcInvoker & IpcSubscriber): SystemApi {
   return {
     openInEditor: (filePath) => ipcRenderer.invoke('system:open-editor', filePath),
+    readMarkdownDocument: (input) =>
+      ipcRenderer.invoke('system:read-markdown-document', input),
     selectDirectory: () => ipcRenderer.invoke('system:select-directory'),
     checkAgentInstalled: (agentId) => ipcRenderer.invoke('system:check-agent', agentId),
     listAgentModels: () => ipcRenderer.invoke('system:list-agent-models'),

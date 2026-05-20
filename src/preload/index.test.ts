@@ -443,6 +443,20 @@ describe('preload api shape', () => {
         expected: ['system:open-editor', '/tmp/file.ts'],
       },
       {
+        call: (agentforge) =>
+          agentforge.system.readMarkdownDocument({
+            href: 'docs/PLAN.md',
+            repoPath: '/tmp/repo',
+          }),
+        expected: [
+          'system:read-markdown-document',
+          {
+            href: 'docs/PLAN.md',
+            repoPath: '/tmp/repo',
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.system.selectDirectory(),
         expected: ['system:select-directory'],
       },

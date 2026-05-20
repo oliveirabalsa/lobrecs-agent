@@ -1,4 +1,5 @@
 import type { SwarmPlanAgentView, SwarmPlanView } from '../lib/swarmMessage'
+import type { MarkdownPreviewDocument } from './MarkdownPreviewer'
 import { SwarmRoleBadge } from './SwarmRoleBadge'
 
 /**
@@ -6,7 +7,13 @@ import { SwarmRoleBadge } from './SwarmRoleBadge'
  * emits as raw JSON. Rendered in place of the JSON blob inside the chat
  * stream (see `AssistantMessage`).
  */
-export function SwarmPlanCard({ plan }: { plan: SwarmPlanView }) {
+export function SwarmPlanCard({
+  plan,
+  onPreviewMarkdown,
+}: {
+  plan: SwarmPlanView
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
+}) {
   const sequential = plan.strategy === 'sequential'
   const agentCount = plan.agents.length
 
@@ -24,6 +31,18 @@ export function SwarmPlanCard({ plan }: { plan: SwarmPlanView }) {
             {sequential ? ' run in order' : ' run together'}
           </div>
         </div>
+        <div className="flex-1" />
+        {onPreviewMarkdown ? (
+          <button
+            type="button"
+            onClick={() => onPreviewMarkdown(toMarkdownPreviewDocument(plan))}
+            aria-label="Preview plan as Markdown"
+            title="Preview plan as Markdown"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+          >
+            {iconDocument}
+          </button>
+        ) : null}
       </header>
 
       <ol className="flex flex-col">
@@ -39,6 +58,31 @@ export function SwarmPlanCard({ plan }: { plan: SwarmPlanView }) {
       </ol>
     </div>
   )
+}
+
+function toMarkdownPreviewDocument(plan: SwarmPlanView): MarkdownPreviewDocument {
+  const sequential = plan.strategy === 'sequential'
+  const lines = [
+    '# Swarm plan',
+    '',
+    `Strategy: **${sequential ? 'Sequential' : 'Parallel'}**`,
+    '',
+    ...plan.agents.flatMap((agent, index) => [
+      `## ${index + 1}. ${agent.role}`,
+      '',
+      `- Agent: \`${agent.agentLabel}\``,
+      ...(agent.modelOverride ? [`- Model: \`${agent.modelOverride}\``] : []),
+      ...(agent.promptSuffix ? ['', agent.promptSuffix] : []),
+      '',
+    ]),
+  ]
+
+  return {
+    title: 'Swarm plan.md',
+    content: lines.join('\n').trimEnd(),
+    sourceLabel: 'Agent plan',
+    suggestedFileName: 'swarm-plan.md',
+  }
 }
 
 function PlanStep({
@@ -90,5 +134,13 @@ const iconSwarm = (
     <circle cx="3.4" cy="11" r="1.9" />
     <circle cx="12.6" cy="11" r="1.9" />
     <path d="M8 5.1v3.2M6.6 9.4 4.6 10.4M9.4 9.4l2 1" strokeLinecap="round" />
+  </svg>
+)
+
+const iconDocument = (
+  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4">
+    <path d="M4 2.5h5l3 3V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z" />
+    <path d="M9 2.5V5a1 1 0 0 0 1 1h2" />
+    <path d="M5 8.5h6M5 11h4" strokeLinecap="round" />
   </svg>
 )
