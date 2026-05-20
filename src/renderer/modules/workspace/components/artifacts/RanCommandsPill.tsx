@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AgentActivity } from '../../../../../shared/types'
 import { Pill, Spinner } from '../../../../components/ui'
+import { CommandCard } from './CommandCard'
 
 export type RanCommandItem = Extract<
   AgentActivity,
@@ -62,27 +63,10 @@ export function RanCommandsPill({ items, running = false }: RanCommandsPillProps
       </Pill>
 
       {expanded ? (
-        <div className="max-w-full overflow-hidden rounded-card border border-hairline bg-card text-xs">
-          <ul className="divide-y divide-hairline">
-            {rows.map((row) => (
-              <li key={row.id} className="min-w-0 px-3 py-2">
-                <div className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-start gap-2 text-secondary">
-                  <span className="mt-0.5 text-[10px] font-medium uppercase text-muted">
-                    {row.label}
-                  </span>
-                  <span className="min-w-0 break-all font-mono text-primary">
-                    {row.title}
-                  </span>
-                  <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${dotClass(row.status)}`} />
-                </div>
-                {row.output ? (
-                  <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded border border-hairline bg-canvas px-2 py-1 font-mono text-[11px] text-secondary">
-                    {truncate(row.output, 200)}
-                  </pre>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+        <div className="motion-expand-down-in flex flex-col gap-1.5 rounded-card border border-hairline bg-canvas/60 p-2">
+          {rows.map((row) => (
+            <CommandCard key={row.id} row={row} running={state.active} />
+          ))}
         </div>
       ) : null}
     </div>
@@ -216,8 +200,11 @@ function isUnresolvedStatus(status: RanCommandStatus): boolean {
 }
 
 function displayToolCall(item: Extract<RanCommandItem, { kind: 'tool-call' }>): string {
-  const input = formatInput(item.input)
-  return input ? `${item.name} ${input}` : item.name
+  if (typeof item.input === 'string') {
+    const trimmed = item.input.trim()
+    return trimmed ? `${item.name} ${trimmed}` : item.name
+  }
+  return item.name
 }
 
 function inputSignature(input: unknown): string {
@@ -233,18 +220,6 @@ function formatInput(input: unknown): string | undefined {
   } catch {
     return String(input)
   }
-}
-
-function dotClass(status: RanCommandStatus): string {
-  if (status === 'running') return 'bg-accent-primary animate-pulse'
-  if (status === 'pending') return 'bg-text-muted'
-  if (status === 'error') return 'bg-accent-del'
-  return 'bg-accent-add'
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text
-  return `${text.slice(0, max)}…`
 }
 
 const iconTerminal = (

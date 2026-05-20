@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Spinner } from '../../../../components/ui'
 import { CommandCard } from './CommandCard'
 import {
+  deriveRanCommandRows,
   deriveRanCommandsState,
   type RanCommandItem,
 } from './RanCommandsPill'
@@ -48,38 +49,57 @@ export function CommandsGroup({
   running = false,
 }: CommandsGroupProps) {
   const [collapsed, setCollapsed] = useState(true)
-  const { count, hasErrors, hasRunning, label } = deriveCommandsGroupDisplayState(
+  const { count, hasErrors, hasRunning } = deriveCommandsGroupDisplayState(
     type,
     items,
     running,
   )
   const groupLabel = getCommandTypeGroup(type)
+  const rows = deriveRanCommandRows(items)
 
   return (
-    <div className="flex w-full flex-col gap-2 self-start">
+    <div
+      className={`flex w-full flex-col self-start overflow-hidden rounded-card border transition-colors ${
+        hasErrors ? 'border-accent-del/35' : 'border-hairline'
+      }`}
+    >
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
-        className={`inline-flex max-w-full items-center gap-2 self-start rounded-pill border px-3 py-1.5 text-xs font-medium transition-colors ${
+        className={`flex w-full items-center gap-2.5 bg-card-raised px-2.5 py-2 text-xs font-medium transition-colors ${
           hasErrors
-            ? 'border-accent-del bg-accent-del/5 text-accent-del hover:bg-accent-del/10'
-            : 'border-hairline bg-card-raised hover:bg-card'
+            ? 'text-accent-del hover:bg-accent-del/[0.06]'
+            : 'text-secondary hover:bg-card'
         }`}
         title={`${count} ${groupLabel.toLowerCase()}`}
       >
-        <span className="text-secondary">{getGroupIcon(type)}</span>
-        <span>{label}</span>
+        <span
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-hairline bg-card ${
+            hasErrors ? 'text-accent-del' : 'text-secondary'
+          }`}
+          aria-hidden="true"
+        >
+          {getGroupIcon(type)}
+        </span>
+        <span className="flex-1 truncate text-left text-primary">
+          {groupLabel}
+        </span>
+        <span
+          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
+            hasErrors
+              ? 'bg-accent-del/15 text-accent-del'
+              : 'bg-card text-muted'
+          }`}
+        >
+          {count}
+        </span>
         {hasRunning ? <Spinner size={12} /> : iconChevron(collapsed)}
       </button>
 
       {!collapsed ? (
-        <div className="flex flex-col gap-2 pl-2">
-          {items.map((item, idx) => (
-            <CommandCard
-              key={`${type}-${idx}`}
-              item={item}
-              running={hasRunning}
-            />
+        <div className="motion-expand-down-in flex flex-col gap-1.5 border-t border-hairline bg-canvas/60 p-2">
+          {rows.map((row) => (
+            <CommandCard key={row.id} row={row} running={hasRunning} />
           ))}
         </div>
       ) : null}
