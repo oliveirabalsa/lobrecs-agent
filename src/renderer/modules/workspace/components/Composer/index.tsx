@@ -448,7 +448,7 @@ export function Composer({
     : 'border-hairline focus-within:border-white/15'
   // Soft accent glow breathing behind the bar while the agent runs a turn.
   // Suppressed in steer mode, whose amber border owns the composer's color.
-  const wrapperGlowClass = running && !steerMode ? 'animate-composer-pulse' : ''
+  const wrapperGlowClass = ''
 
   return (
     <form onSubmit={handleSubmit} className="w-full pb-1 pt-2">

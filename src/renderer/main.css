@@ -448,20 +448,6 @@ input {
   }
 }
 
-/* Animated loader glowing container animation */
-@keyframes loader-container-glow {
-  0%, 100% {
-    box-shadow: 0 0 12px -6px var(--color-accent-loader-glow), inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
-  }
-  50% {
-    box-shadow: 0 0 20px -2px var(--color-accent-loader-glow), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
-  }
-}
-
-.animate-loader-glow {
-  animation: loader-container-glow 3s ease-in-out infinite;
-}
-
 /* Approval breathing glow — draws the eye to a pending approval with a slow
  * amber pulse rather than a hard blink. */
 @keyframes approval-breathe {
@@ -477,18 +463,6 @@ input {
 
 .animate-approval-breathe {
   animation: approval-breathe 2.6s ease-in-out infinite;
-}
-
-/* Composer execution pulse — a soft accent glow that breathes behind the
- * input while the agent is actively running a turn. Mirrors the loader-glow
- * approach for visual consistency with the WorkingState indicator. */
-@keyframes composer-pulse {
-  0%, 100% { box-shadow: 0 0 16px -10px var(--color-accent-loader-glow); }
-  50% { box-shadow: 0 0 30px -6px var(--color-accent-loader-glow); }
-}
-
-.animate-composer-pulse {
-  animation: composer-pulse 2.8s ease-in-out infinite;
 }
 
 /* Sidebar active-row accent line — glides in from the left edge when a row

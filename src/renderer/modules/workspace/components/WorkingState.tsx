@@ -83,7 +83,7 @@ function AgentRunIndicator({ phrase, duration }: AgentRunIndicatorProps) {
       role="status"
       aria-live="polite"
       aria-label={`${phrase} for ${duration}`}
-      className="motion-fade-up-in animate-loader-glow relative flex items-center gap-3 self-stretch overflow-hidden rounded-card border border-hairline bg-card-raised px-3.5 py-3"
+      className="motion-fade-up-in relative flex items-center gap-3 self-stretch overflow-hidden px-3.5 py-3"
     >
       <AgentGlyph />
       <div className="flex min-w-0 flex-1 items-baseline gap-2 font-mono">
