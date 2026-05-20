@@ -3,25 +3,16 @@ import type {
   SupportedAgentId,
   SwarmAgentConfig,
 } from '../../../shared/types'
-
-const AGENT_NAMES: Record<SupportedAgentId, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'OpenAI Codex',
-  opencode: 'OpenCode',
-}
+import { AGENT_LABELS, SUPPORTED_AGENT_IDS } from '../../../shared/types'
 
 const DEFAULT_SWARM_ROLES = ['implementer', 'reviewer'] as const
 
-export const DEFAULT_SWARM_AGENT_IDS: SupportedAgentId[] = [
-  'claude-code',
-  'codex',
-  'opencode',
-]
+export const DEFAULT_SWARM_AGENT_IDS: SupportedAgentId[] = [...SUPPORTED_AGENT_IDS]
 
 export const DEFAULT_SWARM_MODEL_CATALOGS: AgentModelCatalog[] =
   DEFAULT_SWARM_AGENT_IDS.map((agentId) => ({
     agentId,
-    name: AGENT_NAMES[agentId],
+    name: AGENT_LABELS[agentId],
     installed: true,
     models: [],
   }))

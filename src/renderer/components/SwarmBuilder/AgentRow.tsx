@@ -3,6 +3,7 @@ import type {
   SupportedAgentId,
   SwarmAgentConfig,
 } from '../../../shared/types'
+import { AGENT_LABELS } from '../../../shared/types'
 
 interface Props {
   index: number
@@ -55,7 +56,7 @@ export function AgentRow({
         >
           {installedAgents.map((agentId) => (
             <option key={agentId} value={agentId}>
-              {agentId}
+              {AGENT_LABELS[agentId]}
             </option>
           ))}
         </select>

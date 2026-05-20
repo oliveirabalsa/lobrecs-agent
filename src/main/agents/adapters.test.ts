@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter'
 import { CodexAdapter } from './CodexAdapter'
+import { GeminiAdapter } from './GeminiAdapter'
 import { OpenCodeAdapter } from './OpenCodeAdapter'
 import { adapterRegistry } from './index'
 import { processPool } from '../process/ProcessPool'
@@ -10,15 +11,18 @@ import type { AgentEvent } from '../../shared/types'
 
 const claudeMock = fileURLToPath(new URL('./__mocks__/claude-mock.cjs', import.meta.url))
 const codexMock = fileURLToPath(new URL('./__mocks__/codex-mock.cjs', import.meta.url))
+const geminiMock = fileURLToPath(new URL('./__mocks__/gemini-mock.cjs', import.meta.url))
 const opencodeMock = fileURLToPath(new URL('./__mocks__/opencode-mock.cjs', import.meta.url))
 
 describe('agent adapters', () => {
   afterEach(() => {
     delete process.env.CLAUDE_COMMAND
     delete process.env.CLAUDE_MOCK_RESULT_MODE
+    delete process.env.CLAUDE_MOCK_DUPLICATE_TEXT
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
     delete process.env.CODEX_COMMAND
+    delete process.env.GEMINI_COMMAND
     delete process.env.OPENCODE_COMMAND
     delete process.env.OPENCODE_MOCK_IMMEDIATE
     delete process.env.OPENCODE_MOCK_STEP_FINISH
@@ -29,6 +33,7 @@ describe('agent adapters', () => {
     expect(adapterRegistry.get('claude-code')).toBeInstanceOf(ClaudeCodeAdapter)
     expect(adapterRegistry.get('codex')).toBeInstanceOf(CodexAdapter)
     expect(adapterRegistry.get('opencode')).toBeInstanceOf(OpenCodeAdapter)
+    expect(adapterRegistry.get('gemini')).toBeInstanceOf(GeminiAdapter)
   })
 
   it('dispatches Claude Code with JSONL parsing and command override support', async () => {
@@ -82,6 +87,28 @@ describe('agent adapters', () => {
     expect(toolResult).toMatchObject({ type: 'activity' })
     expect(rawLine?.type).toBe('stdout')
     expect(events.some((event) => event.type === 'stderr')).toBe(true)
+    expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+  })
+
+  it('does not echo duplicate Claude text from assistant and result records', async () => {
+    process.env.CLAUDE_COMMAND = claudeMock
+    process.env.CLAUDE_MOCK_DUPLICATE_TEXT = '1'
+    const adapter = new ClaudeCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'claude-duplicate-session',
+      prompt: 'Avoid duplicate text',
+      repoPath: process.cwd(),
+      model: 'sonnet',
+    })
+    const events = await collectEvents(session)
+    const visibleTexts = events
+      .filter((event) => event.type === 'stdout')
+      .map((event) => payloadField(event, 'text'))
+      .filter((text): text is string => typeof text === 'string')
+      .filter((text) => text.trim() === 'Duplicated Claude response')
+
+    expect(visibleTexts).toEqual(['Duplicated Claude response'])
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 
@@ -301,6 +328,73 @@ describe('agent adapters', () => {
     expect(textIndex).toBeGreaterThan(stepFinishIndex)
     expect(events.filter((event) => event.type === 'session-complete')).toHaveLength(1)
   })
+
+  it('dispatches Gemini with stream JSON args and normalizes result usage', async () => {
+    process.env.GEMINI_COMMAND = geminiMock
+    const adapter = new GeminiAdapter()
+
+    expect(await adapter.isInstalled()).toBe(true)
+
+    const session = await adapter.dispatch({
+      sessionId: 'gemini-session',
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'flash',
+      context: 'Always use rtk.',
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = argvFromEvent(argvEvent)
+    const stderr = events.find((event) => event.type === 'stderr')
+    const complete = events.find((event) => event.type === 'session-complete')
+
+    expect(argv).toEqual(
+      expect.arrayContaining([
+        '--model',
+        'flash',
+        '--output-format',
+        'stream-json',
+        '--skip-trust',
+        '--approval-mode',
+        'yolo',
+      ]),
+    )
+    expect(argValue(argv, '--prompt')).toContain('Repository instructions:\nAlways use rtk.')
+    expect(argValue(argv, '--prompt')).toContain('Task:\nSummarize this repo')
+    expect(events.some((event) => payloadField(event, 'content') === 'Hello from Gemini mock')).toBe(true)
+    expect(events.some((event) => payloadField(event, 'tool_name') === 'shell')).toBe(true)
+    expect(payloadField(stderr, 'message')).toBe('gemini warning')
+    expect(payloadField(complete, 'usage')).toMatchObject({
+      input_tokens: 11,
+      output_tokens: 10,
+      total_tokens: 21,
+    })
+  })
+
+  it.each([
+    ['read-only' as const, 'plan'],
+    ['ask-for-approval' as const, 'default'],
+  ])('maps Gemini %s permission mode to approval-mode %s', async (permissionMode, approvalMode) => {
+    const adapter = new GeminiAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: `gemini-${permissionMode}-session`,
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'flash',
+      runtimeSettings: {
+        enabled: true,
+        command: geminiMock,
+        permissionMode,
+        extraArgs: [],
+      },
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = argvFromEvent(argvEvent)
+
+    expect(argValue(argv, '--approval-mode')).toBe(approvalMode)
+  })
 })
 
 async function collectEvents(session: AgentSession): Promise<AgentEvent[]> {
@@ -331,6 +425,16 @@ function payloadText(event: AgentEvent | undefined): unknown {
   }
 
   return payloadField(event, 'text')
+}
+
+function argvFromEvent(event: AgentEvent | undefined): string[] {
+  const argv = payloadField(event, 'argv')
+  return Array.isArray(argv) && argv.every((item) => typeof item === 'string') ? argv : []
+}
+
+function argValue(argv: string[], flag: string): string | undefined {
+  const index = argv.indexOf(flag)
+  return index >= 0 ? argv[index + 1] : undefined
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {

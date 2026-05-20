@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { Project } from '../../../shared/types'
+import type { Project, SupportedAgentId } from '../../../shared/types'
 import { SidebarActions } from './SidebarActions'
 import { SidebarFooter } from './SidebarFooter'
 import { SidebarTopZone } from './SidebarTopZone'
@@ -42,7 +42,7 @@ interface SidebarProps {
 interface DraftProject {
   name: string
   repoPath: string
-  agentId: 'claude-code' | 'codex' | 'opencode'
+  agentId: SupportedAgentId
   modelTier: Project['modelTier']
 }
 

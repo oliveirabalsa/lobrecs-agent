@@ -1,4 +1,4 @@
-import { MODEL_MAP } from '../../shared/types'
+import { MODEL_MAP, SUPPORTED_AGENT_IDS } from '../../shared/types'
 import { inferModelTier, pickModelForTier } from '../agents/modelDiscovery'
 import { scoreComplexity } from './ComplexityScorer'
 import type {
@@ -36,7 +36,6 @@ export interface RouteParams {
   recentFailures?: ScoringContext['recentFailures']
 }
 
-const SUPPORTED_AGENT_IDS = Object.keys(MODEL_MAP) as SupportedAgentId[]
 const TIER_PRIORITY: ModelTier[] = ['frontier', 'advanced', 'balanced', 'lightweight']
 
 export class ModelRouter {
@@ -307,11 +306,18 @@ function fallbackSettings(): AppSettings {
           permissionMode: 'dangerous',
           extraArgs: [],
         },
+        gemini: {
+          enabled: true,
+          command: '',
+          permissionMode: 'dangerous',
+          extraArgs: [],
+        },
       },
       modelMap: {
         'claude-code': { ...MODEL_MAP['claude-code'] },
         codex: { ...MODEL_MAP.codex },
         opencode: { ...MODEL_MAP.opencode },
+        gemini: { ...MODEL_MAP.gemini },
       },
       imageAttachments: { maxCount: 8, maxSizeMb: 20 },
     },

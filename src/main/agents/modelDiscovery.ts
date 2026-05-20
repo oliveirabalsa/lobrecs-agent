@@ -139,10 +139,44 @@ export function pickModelForTier(
 }
 
 export function inferModelTier(id: string, label = ''): ModelTier {
-  const normalized = `${id} ${label}`.toLowerCase()
+  const normalized = `${id} ${label}`.trim().toLowerCase()
+
+  if (normalized === 'auto') {
+    return 'frontier'
+  }
 
   if (normalized.includes('gpt-5.5') || normalized.includes('opus')) {
     return 'frontier'
+  }
+
+  if (normalized.includes('gemini-3')) {
+    return 'frontier'
+  }
+
+  if (normalized.includes('flash-lite')) {
+    return 'lightweight'
+  }
+
+  if (
+    normalized.includes('gemini-2.5-pro') ||
+    normalized.includes('gemini-pro') ||
+    normalized === 'pro'
+  ) {
+    return 'advanced'
+  }
+
+  if (
+    normalized.includes('gemini-2.5-flash') ||
+    normalized.includes('gemini-flash') ||
+    normalized === 'flash'
+  ) {
+    return 'balanced'
+  }
+
+  for (const tiers of Object.values(MODEL_MAP) as Array<Record<ModelTier, string>>) {
+    for (const tier of TIER_ORDER) {
+      if (tiers[tier] === id) return tier
+    }
   }
 
   if (normalized.includes('spark')) {
@@ -151,12 +185,6 @@ export function inferModelTier(id: string, label = ''): ModelTier {
 
   if (normalized.includes('m2.7')) {
     return 'advanced'
-  }
-
-  for (const tiers of Object.values(MODEL_MAP) as Array<Record<ModelTier, string>>) {
-    for (const tier of TIER_ORDER) {
-      if (tiers[tier] === id) return tier
-    }
   }
 
   if (

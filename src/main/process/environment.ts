@@ -10,6 +10,7 @@ const DEFAULT_EXECUTABLE_PATHS = [
   path.join(homedir(), '.claude', 'local', 'bin'),
   path.join(homedir(), '.npm-global', 'bin'),
   path.join(homedir(), '.opencode', 'bin'),
+  path.join(homedir(), '.gemini', 'bin'),
   path.join(homedir(), '.bun', 'bin'),
   path.join(homedir(), '.cargo', 'bin'),
   path.join(homedir(), '.asdf', 'shims'),

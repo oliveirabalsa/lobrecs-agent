@@ -47,6 +47,7 @@ const MAX_UNTRACKED_FILE_CHARS = 20_000
 
 const ANALYSIS_CANDIDATES: ReadonlyArray<{ agentId: SupportedAgentId; tier: ModelTier }> = [
   { agentId: 'codex', tier: 'lightweight' },
+  { agentId: 'gemini', tier: 'lightweight' },
   { agentId: 'opencode', tier: 'advanced' },
   { agentId: 'opencode', tier: 'balanced' },
   { agentId: 'claude-code', tier: 'lightweight' },
@@ -408,7 +409,7 @@ async function selectAnalysisAgent(
     }
   }
 
-  throw new Error('No lightweight analysis model is available. Enable Codex or OpenCode first.')
+  throw new Error('No lightweight analysis model is available. Enable Codex, Gemini, or OpenCode first.')
 }
 
 async function runCommitPlannerAgent(

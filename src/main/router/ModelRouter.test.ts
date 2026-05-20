@@ -51,6 +51,19 @@ describe('ModelRouter', () => {
     expect(decision.model).toBe('gpt-5.3-codex-spark')
   })
 
+  it('routes installed Gemini preferences through the Gemini model map', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ gemini: true, 'claude-code': true }),
+    })
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'gemini',
+    })
+
+    expect(decision.agentId).toBe('gemini')
+    expect(decision.model).toBe('flash-lite')
+  })
+
   it('uses live Codex catalog models instead of stale static fallbacks', async () => {
     const router = new ModelRouter({
       adapterRegistry: {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
-import type { Project, Session } from '../../../shared/types'
+import type { Project, Session, SupportedAgentId } from '../../../shared/types'
 import { NewProjectModal } from './NewProjectModal'
 import { ProjectItem } from './ProjectItem'
 
@@ -20,7 +20,7 @@ interface ContextMenuState {
 interface DraftProject {
   name: string
   repoPath: string
-  agentId: 'claude-code' | 'codex' | 'opencode'
+  agentId: SupportedAgentId
   modelTier: Project['modelTier']
 }
 

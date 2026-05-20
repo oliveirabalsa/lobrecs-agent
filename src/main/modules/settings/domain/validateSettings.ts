@@ -1,5 +1,6 @@
 import {
   SETTINGS_SCHEMA_VERSION,
+  SUPPORTED_AGENT_IDS,
   type AgentPermissionMode,
   type AppSettings,
   type AppSettingsPatch,
@@ -13,11 +14,9 @@ import {
 import { cloneSettings, mergeSettings } from './mergeSettings'
 import { DEFAULT_APP_SETTINGS } from './defaultSettings'
 
-const SUPPORTED_AGENT_IDS: readonly SupportedAgentId[] = [
-  'claude-code',
-  'codex',
-  'opencode',
-]
+const LEGACY_DEFAULT_AGENT_IDS = SUPPORTED_AGENT_IDS.filter(
+  (agentId) => agentId !== 'gemini',
+)
 const MODEL_TIERS: readonly ModelTier[] = [
   'lightweight',
   'balanced',
@@ -60,7 +59,7 @@ export function normalizeProjectOverrides(
 
 export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
   const cloned = cloneSettings(settings)
-  const enabledAgentIds = uniqueSupportedAgents(cloned.agents.enabledAgentIds)
+  const enabledAgentIds = normalizeEnabledAgents(cloned.agents.enabledAgentIds)
   const defaultAgentId = supportedAgentOr(
     cloned.agents.defaultAgentId,
     enabledAgentIds[0] ?? DEFAULT_APP_SETTINGS.agents.defaultAgentId,
@@ -83,16 +82,8 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
       defaultAgentId,
       fallbackAgentId,
       enabledAgentIds: enabledAgentIds.length > 0 ? enabledAgentIds : [defaultAgentId],
-      runtimes: {
-        'claude-code': normalizeRuntime(cloned.agents.runtimes['claude-code']),
-        codex: normalizeRuntime(cloned.agents.runtimes.codex),
-        opencode: normalizeRuntime(cloned.agents.runtimes.opencode),
-      },
-      modelMap: {
-        'claude-code': normalizeModelMap('claude-code', cloned.agents.modelMap['claude-code']),
-        codex: normalizeModelMap('codex', cloned.agents.modelMap.codex),
-        opencode: normalizeModelMap('opencode', cloned.agents.modelMap.opencode),
-      },
+      runtimes: normalizeAgentRuntimes(cloned.agents.runtimes),
+      modelMap: normalizeAgentModelMap(cloned.agents.modelMap),
       imageAttachments: {
         maxCount: clampInteger(cloned.agents.imageAttachments.maxCount, 0, 20, 8),
         maxSizeMb: clampNumber(cloned.agents.imageAttachments.maxSizeMb, 1, 100, 20),
@@ -201,6 +192,25 @@ function normalizeRuntime(runtime: unknown): AppSettings['agents']['runtimes'][S
   }
 }
 
+function normalizeAgentRuntimes(runtimes: unknown): AppSettings['agents']['runtimes'] {
+  const source = objectLike(runtimes)
+
+  return Object.fromEntries(
+    SUPPORTED_AGENT_IDS.map((agentId) => [agentId, normalizeRuntime(source[agentId])]),
+  ) as AppSettings['agents']['runtimes']
+}
+
+function normalizeAgentModelMap(modelMap: unknown): AppSettings['agents']['modelMap'] {
+  const source = objectLike(modelMap)
+
+  return Object.fromEntries(
+    SUPPORTED_AGENT_IDS.map((agentId) => [
+      agentId,
+      normalizeModelMap(agentId, source[agentId]),
+    ]),
+  ) as AppSettings['agents']['modelMap']
+}
+
 function normalizeModelMap(
   agentId: SupportedAgentId,
   map: unknown,
@@ -296,7 +306,7 @@ function normalizeVerificationRecipes(recipes: unknown): VerificationRecipe[] {
 
 function normalizePricing(pricing: unknown): AppSettings['costs']['pricing'] {
   const record = objectLike(pricing)
-  const next: AppSettings['costs']['pricing'] = {}
+  const next: AppSettings['costs']['pricing'] = { ...DEFAULT_APP_SETTINGS.costs.pricing }
 
   for (const [model, value] of Object.entries(record)) {
     const row = objectLike(value)
@@ -306,7 +316,7 @@ function normalizePricing(pricing: unknown): AppSettings['costs']['pricing'] {
     next[model] = { inputPer1M, outputPer1M }
   }
 
-  return Object.keys(next).length > 0 ? next : { ...DEFAULT_APP_SETTINGS.costs.pricing }
+  return next
 }
 
 function normalizeStringRecord(value: unknown): Record<string, string> {
@@ -337,6 +347,19 @@ function pickPatchShape(patch: unknown, normalized: unknown): unknown {
 function uniqueSupportedAgents(values: unknown): SupportedAgentId[] {
   const source = Array.isArray(values) ? values : DEFAULT_APP_SETTINGS.agents.enabledAgentIds
   return [...new Set(source.filter(isSupportedAgentId))]
+}
+
+function normalizeEnabledAgents(values: unknown): SupportedAgentId[] {
+  const enabled = uniqueSupportedAgents(values)
+  if (enabled.length === 0) return []
+
+  const isLegacyDefault =
+    LEGACY_DEFAULT_AGENT_IDS.every((agentId) => enabled.includes(agentId)) &&
+    !enabled.includes('gemini')
+
+  return isLegacyDefault
+    ? [...new Set([...enabled, ...DEFAULT_APP_SETTINGS.agents.enabledAgentIds])]
+    : enabled
 }
 
 function supportedAgentOr(value: unknown, fallback: SupportedAgentId): SupportedAgentId {

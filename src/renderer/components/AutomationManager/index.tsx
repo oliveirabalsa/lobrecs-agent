@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AgentId, Automation, Project } from '../../../shared/types'
+import { AGENT_LABELS, SUPPORTED_AGENT_IDS } from '../../../shared/types'
+import type { Automation, Project, SupportedAgentId } from '../../../shared/types'
 
 type AutomationManagerProps = {
   project: Pick<Project, 'id' | 'name'> | null
@@ -9,14 +10,14 @@ type AutomationDraft = {
   name: string
   prompt: string
   schedule: string
-  agentId: AgentId
+  agentId: SupportedAgentId
 }
 
-const agentOptions: Array<{ label: string; value: AgentId }> = [
-  { label: 'Claude Code', value: 'claude-code' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'OpenCode', value: 'opencode' },
-]
+const agentOptions: Array<{ label: string; value: SupportedAgentId }> =
+  SUPPORTED_AGENT_IDS.map((agentId) => ({
+    label: AGENT_LABELS[agentId],
+    value: agentId,
+  }))
 
 const schedulePresets = [
   { label: 'Hourly', value: '0 * * * *' },
@@ -311,7 +312,7 @@ export function AutomationManager({ project }: AutomationManagerProps) {
                   onChange={(event) =>
                     setDraft((current) => ({
                       ...current,
-                      agentId: event.target.value as AgentId,
+                      agentId: event.target.value as SupportedAgentId,
                     }))
                   }
                   className="mt-1 h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-cyan-500"

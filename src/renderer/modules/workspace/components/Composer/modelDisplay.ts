@@ -9,6 +9,7 @@ export function formatModelLabel(agentId: SupportedAgentId, modelId: string): st
   if (agentId === 'claude-code') return formatClaude(modelId)
   if (agentId === 'codex') return formatCodex(modelId)
   if (agentId === 'opencode') return formatOpenCode(modelId)
+  if (agentId === 'gemini') return formatGemini(modelId)
   return modelId
 }
 
@@ -33,6 +34,14 @@ function formatOpenCode(modelId: string): string {
   return trimmed.replace(/^MiniMax-/i, 'MiniMax ')
 }
 
+function formatGemini(modelId: string): string {
+  if (modelId === 'flash-lite') return 'Gemini Flash Lite'
+  if (modelId === 'flash') return 'Gemini Flash'
+  if (modelId === 'pro') return 'Gemini Pro'
+  if (modelId === 'auto') return 'Gemini Auto'
+  return modelId.replace(/^gemini-/i, 'Gemini ')
+}
+
 export const TIER_LABEL: Record<ModelTier, string> = {
   lightweight: 'Lightweight',
   balanced: 'Balanced',
@@ -51,6 +60,7 @@ export const AGENT_SHORT: Record<SupportedAgentId, string> = {
   'claude-code': 'Claude',
   codex: 'Codex',
   opencode: 'OpenCode',
+  gemini: 'Gemini',
 }
 
 /** Advanced + Frontier tiers expose a thinking-depth control. */

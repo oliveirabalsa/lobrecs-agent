@@ -1,7 +1,21 @@
-export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'cursor'
+export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'gemini' | 'cursor'
 export type SupportedAgentId = Exclude<AgentId, 'cursor'>
 
 export type ModelTier = 'lightweight' | 'balanced' | 'advanced' | 'frontier'
+
+export const SUPPORTED_AGENT_IDS = [
+  'claude-code',
+  'codex',
+  'opencode',
+  'gemini',
+] as const satisfies readonly SupportedAgentId[]
+
+export const AGENT_LABELS: Record<SupportedAgentId, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'OpenAI Codex',
+  opencode: 'OpenCode',
+  gemini: 'Gemini CLI',
+}
 
 export interface AgentModel {
   id: string
@@ -106,5 +120,11 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
     balanced: 'minimax-coding-plan/MiniMax-M2.5',
     advanced: 'minimax-coding-plan/MiniMax-M2.7',
     frontier: 'minimax-coding-plan/MiniMax-M2.7',
+  },
+  gemini: {
+    lightweight: 'flash-lite',
+    balanced: 'flash',
+    advanced: 'pro',
+    frontier: 'auto',
   },
 }

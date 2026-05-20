@@ -1,4 +1,4 @@
-import { MODEL_MAP } from '../../../../shared/types'
+import { MODEL_MAP, SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type { AppSettings, SwarmTemplate, VerificationRecipe } from '../../../../shared/types'
 
 export const DEFAULT_VERIFICATION_RECIPES: VerificationRecipe[] = [
@@ -89,6 +89,7 @@ export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
       { role: 'approach a', agentId: 'claude-code' },
       { role: 'approach b', agentId: 'codex' },
       { role: 'approach c', agentId: 'opencode' },
+      { role: 'approach d', agentId: 'gemini' },
     ],
   },
 ]
@@ -105,7 +106,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   agents: {
     defaultAgentId: 'claude-code',
     fallbackAgentId: 'claude-code',
-    enabledAgentIds: ['claude-code', 'codex', 'opencode'],
+    enabledAgentIds: [...SUPPORTED_AGENT_IDS],
     runtimes: {
       'claude-code': {
         enabled: true,
@@ -125,11 +126,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
         permissionMode: 'dangerous',
         extraArgs: [],
       },
+      gemini: {
+        enabled: true,
+        command: '',
+        permissionMode: 'dangerous',
+        extraArgs: [],
+      },
     },
     modelMap: {
       'claude-code': { ...MODEL_MAP['claude-code'] },
       codex: { ...MODEL_MAP.codex },
       opencode: { ...MODEL_MAP.opencode },
+      gemini: { ...MODEL_MAP.gemini },
     },
     imageAttachments: {
       maxCount: 8,
@@ -200,6 +208,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       'minimax-coding-plan/MiniMax-M2': { inputPer1M: 0.1, outputPer1M: 0.3 },
       'minimax-coding-plan/MiniMax-M2.5': { inputPer1M: 0.1, outputPer1M: 0.3 },
       'minimax-coding-plan/MiniMax-M2.7': { inputPer1M: 0.1, outputPer1M: 0.3 },
+      'flash-lite': { inputPer1M: 0, outputPer1M: 0 },
+      flash: { inputPer1M: 0, outputPer1M: 0 },
+      pro: { inputPer1M: 0, outputPer1M: 0 },
+      auto: { inputPer1M: 0, outputPer1M: 0 },
     },
   },
   ui: {

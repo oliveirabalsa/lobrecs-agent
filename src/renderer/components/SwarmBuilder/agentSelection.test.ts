@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest'
 import type { AgentModelCatalog, SwarmAgentConfig } from '../../../shared/types'
 import {
   buildDefaultSwarmAgents,
+  DEFAULT_SWARM_AGENT_IDS,
   normalizeSwarmAgents,
   resolveAvailableSwarmAgents,
 } from './agentSelection'
 
 describe('SwarmBuilder agent selection', () => {
+  it('includes Gemini in the fallback agent set', () => {
+    expect(DEFAULT_SWARM_AGENT_IDS).toContain('gemini')
+  })
+
   it('builds default roles across distinct discovered agents', () => {
     const agents = buildDefaultSwarmAgents(['codex', 'opencode'])
 

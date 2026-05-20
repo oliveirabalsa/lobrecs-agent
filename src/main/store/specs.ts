@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { assertSpecStatusTransition } from '../modules/specs/domain/specStatus'
+import { SUPPORTED_AGENT_IDS } from '../../shared/types'
 import type {
   AcceptanceCriterion,
   CreateSpecInput,
@@ -308,5 +309,5 @@ function readSupportedAgents(value: string): SupportedAgentId[] {
 }
 
 function isSupportedAgentId(agentId: string): agentId is SupportedAgentId {
-  return agentId === 'claude-code' || agentId === 'codex' || agentId === 'opencode'
+  return SUPPORTED_AGENT_IDS.includes(agentId as SupportedAgentId)
 }

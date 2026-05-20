@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { SUPPORTED_AGENT_IDS } from '../../../../../shared/types'
 import { useDebouncedValue } from '../../../../hooks/useDebouncedValue'
 import { formatModelLabel } from './modelDisplay'
 import type {
@@ -8,6 +9,7 @@ import type {
   ModelGroup,
   ModelOption,
   ModelSelection,
+  SupportedAgentId,
   RoutingDecision,
   ThinkingLevel,
 } from './types'
@@ -100,6 +102,41 @@ const FALLBACK_MODEL_CATALOGS: AgentModelCatalog[] = [
       },
     ],
   },
+  {
+    agentId: 'gemini',
+    name: 'Gemini CLI',
+    installed: true,
+    models: [
+      {
+        id: 'flash-lite',
+        label: 'flash-lite',
+        agentId: 'gemini',
+        tier: 'lightweight',
+        source: 'fallback',
+      },
+      {
+        id: 'flash',
+        label: 'flash',
+        agentId: 'gemini',
+        tier: 'balanced',
+        source: 'fallback',
+      },
+      {
+        id: 'pro',
+        label: 'pro',
+        agentId: 'gemini',
+        tier: 'advanced',
+        source: 'fallback',
+      },
+      {
+        id: 'auto',
+        label: 'auto',
+        agentId: 'gemini',
+        tier: 'frontier',
+        source: 'fallback',
+      },
+    ],
+  },
 ]
 
 function safeStorage(): Storage | null {
@@ -137,12 +174,13 @@ function readModelSelection(): ModelSelection {
     const thinking = parseThinking(parsed.thinking)
     if (parsed.kind === 'auto') return thinking ? { kind: 'auto', thinking } : { kind: 'auto' }
     if (parsed.kind === 'manual' && parsed.agentId && parsed.modelId) {
-      if (
-        parsed.agentId === 'claude-code' ||
-        parsed.agentId === 'codex' ||
-        parsed.agentId === 'opencode'
-      ) {
-        return { kind: 'manual', agentId: parsed.agentId, modelId: parsed.modelId, thinking }
+      if (SUPPORTED_AGENT_IDS.includes(parsed.agentId as SupportedAgentId)) {
+        return {
+          kind: 'manual',
+          agentId: parsed.agentId as SupportedAgentId,
+          modelId: parsed.modelId,
+          thinking,
+        }
       }
     }
   } catch {

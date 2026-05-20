@@ -203,6 +203,18 @@ function capabilityFlags(
     }
   }
 
+  if (agentId === 'gemini') {
+    return {
+      supportsStreamingJson: true,
+      supportsResume: false,
+      supportsFileAttachments: false,
+      supportsCustomAgents: false,
+      supportsMcp: true,
+      supportsApprovalMode: true,
+      supportsModelListing: false,
+    }
+  }
+
   return {
     supportsStreamingJson: true,
     supportsResume: false,

@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react'
+import { AGENT_LABELS } from '../../../../shared/types'
 import type {
   AdapterCapability,
   CreateSpecInput,
@@ -700,7 +701,7 @@ function fallbackCapabilities(agentId: SupportedAgentId): AdapterCapability[] {
   return [
     {
       agentId,
-      name: agentId,
+      name: AGENT_LABELS[agentId],
       installed: true,
       supportsStreamingJson: true,
       supportsResume: false,

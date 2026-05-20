@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { AGENT_LABELS, SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   AgentPermissionMode,
   AppSettings,
@@ -39,7 +40,7 @@ const sectionNav = [
   ['advanced', 'Advanced JSON'],
 ] as const
 
-const agentIds: SupportedAgentId[] = ['claude-code', 'codex', 'opencode']
+const agentIds: SupportedAgentId[] = [...SUPPORTED_AGENT_IDS]
 const modelTiers: ModelTier[] = ['lightweight', 'balanced', 'advanced', 'frontier']
 const permissionModes: AgentPermissionMode[] = [
   'dangerous',
@@ -816,9 +817,7 @@ function agentOptions() {
 }
 
 function agentLabel(agentId: SupportedAgentId): string {
-  if (agentId === 'claude-code') return 'Claude Code'
-  if (agentId === 'codex') return 'OpenAI Codex'
-  return 'OpenCode'
+  return AGENT_LABELS[agentId]
 }
 
 function MenuIcon() {

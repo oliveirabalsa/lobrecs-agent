@@ -53,6 +53,10 @@ describe('modelDiscovery', () => {
     expect(inferModelTier('claude-haiku-4-5-20251001')).toBe('lightweight')
     expect(inferModelTier('claude-opus-4-7')).toBe('frontier')
     expect(inferModelTier('minimax-coding-plan/MiniMax-M2.7')).toBe('advanced')
+    expect(inferModelTier('gemini-2.5-flash')).toBe('balanced')
+    expect(inferModelTier('gemini-2.5-flash-lite')).toBe('lightweight')
+    expect(inferModelTier('gemini-3-pro')).toBe('frontier')
+    expect(inferModelTier('auto')).toBe('frontier')
   })
 
   it('keeps Claude fallback models concrete instead of displaying short aliases', () => {
@@ -62,5 +66,14 @@ describe('modelDiscovery', () => {
     expect(ids).not.toContain('opus')
     expect(ids).not.toContain('sonnet')
     expect(ids).not.toContain('haiku')
+  })
+
+  it('provides Gemini fallback aliases from MODEL_MAP', () => {
+    expect(fallbackModelsForAgent('gemini').map((model) => model.id)).toEqual([
+      'flash-lite',
+      'flash',
+      'pro',
+      'auto',
+    ])
   })
 })

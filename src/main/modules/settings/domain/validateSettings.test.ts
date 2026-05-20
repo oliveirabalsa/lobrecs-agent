@@ -64,4 +64,34 @@ describe('settings validation', () => {
       },
     })
   })
+
+  it('merges Gemini defaults into older agent settings', () => {
+    const settings = normalizeSettings({
+      agents: {
+        enabledAgentIds: ['claude-code', 'codex', 'opencode'],
+        runtimes: {
+          'claude-code': { enabled: true },
+          codex: { enabled: true },
+          opencode: { enabled: true },
+        },
+        modelMap: {
+          'claude-code': {},
+          codex: {},
+          opencode: {},
+        },
+      },
+    })
+
+    expect(settings.agents.enabledAgentIds).toContain('gemini')
+    expect(settings.agents.runtimes.gemini).toMatchObject({
+      enabled: true,
+      permissionMode: 'dangerous',
+    })
+    expect(settings.agents.modelMap.gemini).toMatchObject({
+      lightweight: 'flash-lite',
+      balanced: 'flash',
+      advanced: 'pro',
+      frontier: 'auto',
+    })
+  })
 })

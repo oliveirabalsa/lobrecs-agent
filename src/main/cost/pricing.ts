@@ -14,6 +14,10 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "minimax-coding-plan/MiniMax-M2": { inputPer1M: 0.1, outputPer1M: 0.3 },
   "minimax-coding-plan/MiniMax-M2.5": { inputPer1M: 0.1, outputPer1M: 0.3 },
   "minimax-coding-plan/MiniMax-M2.7": { inputPer1M: 0.1, outputPer1M: 0.3 },
+  "flash-lite": { inputPer1M: 0, outputPer1M: 0 },
+  "flash": { inputPer1M: 0, outputPer1M: 0 },
+  "pro": { inputPer1M: 0, outputPer1M: 0 },
+  "auto": { inputPer1M: 0, outputPer1M: 0 },
 };
 
 export function estimateCost(

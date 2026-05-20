@@ -1,8 +1,9 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useEffect, useState } from 'react'
-import type { AgentId, ModelTier, Project } from '../../../shared/types'
+import { AGENT_LABELS, SUPPORTED_AGENT_IDS } from '../../../shared/types'
+import type { ModelTier, Project, SupportedAgentId } from '../../../shared/types'
 
-type ProjectAgentId = Extract<AgentId, 'claude-code' | 'codex' | 'opencode'>
+type ProjectAgentId = SupportedAgentId
 
 interface DraftProject {
   name: string
@@ -20,7 +21,7 @@ interface Props {
   onCreate: (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => void
 }
 
-const AGENTS: ProjectAgentId[] = ['claude-code', 'codex', 'opencode']
+const AGENTS: ProjectAgentId[] = [...SUPPORTED_AGENT_IDS]
 const TIERS: ModelTier[] = ['lightweight', 'balanced', 'advanced', 'frontier']
 
 export function NewProjectModal({
@@ -97,7 +98,7 @@ export function NewProjectModal({
                 >
                   {AGENTS.map((agentId) => (
                     <option key={agentId} value={agentId}>
-                      {agentId}
+                      {AGENT_LABELS[agentId]}
                     </option>
                   ))}
                 </select>
