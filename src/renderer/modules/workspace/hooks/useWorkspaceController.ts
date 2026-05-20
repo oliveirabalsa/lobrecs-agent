@@ -629,6 +629,10 @@ export function useWorkspaceController() {
     setMainView('workspace')
   }
 
+  function handleWorkspaceError(message: string) {
+    setBannerError(message)
+  }
+
   return {
     tabs,
     selectedProject,
@@ -672,5 +676,6 @@ export function useWorkspaceController() {
     handleFeedback,
     handleNewTab,
     handleNewChatForProject,
+    handleWorkspaceError,
   }
 }

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { buildProcessEnvironment, getUserShell } from '../../../process/environment'
 import { detectEditors, type EditorInfo } from './detectEditors'
@@ -9,6 +11,10 @@ import type {
   CliEditorTerminalSession,
   CliEditorTerminalStartInput,
   CliEditorTerminalWriteInput,
+} from '../../../../shared/types'
+import {
+  TERMINAL_COMMAND_STATUS_PREFIX,
+  TERMINAL_COMMAND_STATUS_SUFFIX,
 } from '../../../../shared/types'
 
 export const CLI_EDITOR_TERMINAL_DATA_CHANNEL = 'system:cli-editor-terminal:data'
@@ -73,6 +79,7 @@ interface CliEditorTerminalServiceOptions {
 interface ManagedCliEditorTerminal {
   session: CliEditorTerminalSession
   pty: PtyProcessLike
+  integrationDir?: string
   dataSubscription?: DisposableLike
   exitSubscription?: DisposableLike
 }
@@ -103,19 +110,21 @@ export class CliEditorTerminalService {
 
     const launch =
       input.editorId === SHELL_TERMINAL_EDITOR_ID
-        ? { editorId: SHELL_TERMINAL_EDITOR_ID, editorName: SHELL_TERMINAL_NAME, command: userShell, args: ['-i', '-l'] }
+        ? await this.buildShellLaunch(userShell)
         : await this.resolveEditorLaunch(input.editorId, userShell)
 
+    const env = buildProcessEnvironment({
+      SHELL: userShell,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+      ...launch.env,
+    })
     const pty = this.spawnPty(launch.command, launch.args, {
       name: 'xterm-256color',
       cols,
       rows,
       cwd: repoPath,
-      env: buildProcessEnvironment({
-        SHELL: userShell,
-        TERM: 'xterm-256color',
-        COLORTERM: 'truecolor',
-      }),
+      env,
     })
 
     const session: CliEditorTerminalSession = {
@@ -126,7 +135,11 @@ export class CliEditorTerminalService {
       command: launch.displayCommand ?? launch.command,
     }
 
-    const managed: ManagedCliEditorTerminal = { session, pty }
+    const managed: ManagedCliEditorTerminal = {
+      session,
+      pty,
+      integrationDir: launch.integrationDir,
+    }
     managed.dataSubscription = pty.onData((data) => {
       emit(CLI_EDITOR_TERMINAL_DATA_CHANNEL, { sessionId, data })
     }) ?? undefined
@@ -177,6 +190,43 @@ export class CliEditorTerminalService {
     terminal.dataSubscription?.dispose()
     terminal.exitSubscription?.dispose()
     this.terminals.delete(sessionId)
+    if (terminal.integrationDir) {
+      void fs.rm(terminal.integrationDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+
+  private async buildShellLaunch(userShell: string): Promise<EditorLaunch> {
+    const shellName = path.basename(userShell)
+
+    if (shellName === 'zsh') {
+      const integrationDir = await createZshIntegrationDir()
+      return {
+        editorId: SHELL_TERMINAL_EDITOR_ID,
+        editorName: SHELL_TERMINAL_NAME,
+        command: userShell,
+        args: ['-i', '-l'],
+        env: { ZDOTDIR: integrationDir },
+        integrationDir,
+      }
+    }
+
+    if (shellName === 'bash') {
+      const integrationDir = await createBashIntegrationDir()
+      return {
+        editorId: SHELL_TERMINAL_EDITOR_ID,
+        editorName: SHELL_TERMINAL_NAME,
+        command: userShell,
+        args: ['--rcfile', path.join(integrationDir, '.bashrc'), '-i'],
+        integrationDir,
+      }
+    }
+
+    return {
+      editorId: SHELL_TERMINAL_EDITOR_ID,
+      editorName: SHELL_TERMINAL_NAME,
+      command: userShell,
+      args: ['-i', '-l'],
+    }
   }
 
   private async resolveEditorLaunch(
@@ -211,6 +261,8 @@ interface EditorLaunch {
   command: string
   args: string[]
   displayCommand?: string
+  env?: NodeJS.ProcessEnv
+  integrationDir?: string
 }
 
 interface EditorCommand {
@@ -227,6 +279,67 @@ function buildCliEditorCommand(editor: EditorInfo): EditorCommand {
     shellCommand: [editor.target, ...args].map(shellQuote).join(' '),
     displayCommand: [editor.target, '.'].map(shellQuote).join(' '),
   }
+}
+
+async function createZshIntegrationDir(): Promise<string> {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'lobrecs-agent-zsh-'))
+  const home = homedir()
+
+  await fs.writeFile(
+    path.join(directory, '.zprofile'),
+    sourceIfReadable(path.join(home, '.zprofile')),
+  )
+  await fs.writeFile(
+    path.join(directory, '.zshrc'),
+    [
+      sourceIfReadable(path.join(home, '.zshrc')),
+      '',
+      'autoload -Uz add-zsh-hook',
+      '__lobrecs_agent_precmd() {',
+      '  local __lobrecs_status="$?"',
+      `  printf '${shellEscapedStatusMarker()}' "$__lobrecs_status"`,
+      '}',
+      'add-zsh-hook precmd __lobrecs_agent_precmd',
+      '',
+    ].join('\n'),
+  )
+
+  return directory
+}
+
+async function createBashIntegrationDir(): Promise<string> {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), 'lobrecs-agent-bash-'))
+  const home = homedir()
+
+  await fs.writeFile(
+    path.join(directory, '.bashrc'),
+    [
+      sourceIfReadable(path.join(home, '.bashrc')),
+      '',
+      '__lobrecs_agent_prompt_command() {',
+      '  local __lobrecs_status="$?"',
+      `  printf '${shellEscapedStatusMarker()}' "$__lobrecs_status"`,
+      '}',
+      'if [[ -n "${PROMPT_COMMAND:-}" ]]; then',
+      '  PROMPT_COMMAND="__lobrecs_agent_prompt_command; ${PROMPT_COMMAND}"',
+      'else',
+      '  PROMPT_COMMAND="__lobrecs_agent_prompt_command"',
+      'fi',
+      '',
+    ].join('\n'),
+  )
+
+  return directory
+}
+
+function sourceIfReadable(filePath: string): string {
+  return `if [[ -r ${shellQuote(filePath)} ]]; then source ${shellQuote(filePath)}; fi`
+}
+
+function shellEscapedStatusMarker(): string {
+  return `${TERMINAL_COMMAND_STATUS_PREFIX.replace('\u001b', '\\033')}`
+    + '%s'
+    + TERMINAL_COMMAND_STATUS_SUFFIX.replace('\u0007', '\\a')
 }
 
 function isClassicVimEditor(editor: EditorInfo): boolean {

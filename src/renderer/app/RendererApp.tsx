@@ -304,6 +304,7 @@ export function RendererApp() {
           bannerError={workspace.bannerError}
           busy={workspace.isBusy || Boolean(workspace.approvalRequest)}
           busyReason={workspace.busyReason}
+          onBannerError={workspace.handleWorkspaceError}
           onMainViewChange={workspace.setMainView}
           onSwarmOpenChange={workspace.setSwarmOpen}
           onCancelSession={workspace.handleCancelSession}

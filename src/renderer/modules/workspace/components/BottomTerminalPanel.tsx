@@ -5,7 +5,9 @@ import 'xterm/css/xterm.css'
 import type {
   CliEditorTerminalExitEvent,
   CliEditorTerminalSession,
+  TerminalFailureContext,
 } from '../../../../shared/types'
+import type { StartedSessionSummary } from '../../sessions/types'
 import {
   CLI_EDITOR_TERMINAL_OPTIONS,
   CLI_EDITOR_TERMINAL_THEME,
@@ -18,6 +20,13 @@ import {
   writeTerminalWithCursorState,
 } from './cliEditorCursorState'
 import { CliEditorCursorBadge } from './CliEditorCursorBadge'
+import {
+  ShellCommandTracker,
+  TerminalOutputBuffer,
+  buildTerminalFailureContext,
+  createTerminalRemediationPrompt,
+  extractTerminalCommandStatuses,
+} from './terminalFailureCapture'
 
 export interface TerminalTab {
   id: string
@@ -29,6 +38,8 @@ export interface TerminalTab {
 
 interface BottomTerminalPanelProps {
   initialTab: TerminalTab
+  projectId: string
+  activeThreadId: string | null
   visible: boolean
   fullscreen: boolean
   height: number
@@ -38,10 +49,14 @@ interface BottomTerminalPanelProps {
   onEmpty: () => void
   onNewTerminal: () => void
   addTabRef: MutableRefObject<((tab: TerminalTab) => void) | null>
+  onSessionStarted: (session: StartedSessionSummary) => void
+  onRemediationError: (message: string) => void
 }
 
 export function BottomTerminalPanel({
   initialTab,
+  projectId,
+  activeThreadId,
   visible,
   fullscreen,
   height,
@@ -51,6 +66,8 @@ export function BottomTerminalPanel({
   onEmpty,
   onNewTerminal,
   addTabRef,
+  onSessionStarted,
+  onRemediationError,
 }: BottomTerminalPanelProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([initialTab])
   const [activeTabId, setActiveTabId] = useState(initialTab.id)
@@ -208,10 +225,14 @@ export function BottomTerminalPanel({
           <TerminalInstance
             key={tab.id}
             tab={tab}
+            projectId={projectId}
+            activeThreadId={activeThreadId}
             visible={tab.id === activeTabId}
             panelVisible={visible}
             panelFullscreen={fullscreen}
             onCursorStateChange={handleCursorStateChange}
+            onSessionStarted={onSessionStarted}
+            onRemediationError={onRemediationError}
           />
         ))}
       </div>
@@ -321,16 +342,24 @@ function TerminalTabButton({
 
 function TerminalInstance({
   tab,
+  projectId,
+  activeThreadId,
   visible,
   panelVisible,
   panelFullscreen,
   onCursorStateChange,
+  onSessionStarted,
+  onRemediationError,
 }: {
   tab: TerminalTab
+  projectId: string
+  activeThreadId: string | null
   visible: boolean
   panelVisible: boolean
   panelFullscreen: boolean
   onCursorStateChange: (tabId: string, cursorState: CliEditorCursorState) => void
+  onSessionStarted: (session: StartedSessionSummary) => void
+  onRemediationError: (message: string) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const exitedRef = useRef(false)
@@ -341,6 +370,8 @@ function TerminalInstance({
   const [session, setSession] = useState<CliEditorTerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exitEvent, setExitEvent] = useState<CliEditorTerminalExitEvent | null>(null)
+  const [failureContext, setFailureContext] = useState<TerminalFailureContext | null>(null)
+  const [remediationPending, setRemediationPending] = useState(false)
 
   useEffect(() => {
     visibleRef.current = visible
@@ -357,6 +388,9 @@ function TerminalInstance({
     let disposed = false
     const sessionId = tab.id
     const cursorTracker = createCliEditorCursorTracker()
+    const outputBuffer = new TerminalOutputBuffer()
+    const commandTracker = new ShellCommandTracker()
+    const canCaptureCommandFailures = tab.editorId === 'shell'
 
     const term = new Terminal({
       ...CLI_EDITOR_TERMINAL_OPTIONS,
@@ -395,12 +429,34 @@ function TerminalInstance({
     fitAndResizeRef.current = fitAndResize
 
     const dataDisposable = term.onData((data) => {
+      if (canCaptureCommandFailures) {
+        const submitted = commandTracker.recordInput(data)
+        if (submitted) setFailureContext(null)
+      }
       void window.agentforge.system.writeCliEditorTerminal({ sessionId, data })
     })
 
     const offData = window.agentforge.system.onCliEditorTerminalData((event) => {
       if (event.sessionId !== sessionId) return
-      writeTerminalWithCursorState(term, cursorTracker, event.data, (nextState) => {
+      const extracted = canCaptureCommandFailures
+        ? extractTerminalCommandStatuses(event.data)
+        : { text: event.data, statuses: [] }
+      outputBuffer.append(extracted.text)
+      for (const status of extracted.statuses) {
+        if (status.exitCode === 0) continue
+        setFailureContext(
+          buildTerminalFailureContext({
+            terminalSessionId: sessionId,
+            repoPath: tab.repoPath,
+            editorId: tab.editorId,
+            editorName: tab.editorName,
+            command: commandTracker.lastCommand(),
+            exitCode: status.exitCode,
+            outputTail: outputBuffer.tail(),
+          }),
+        )
+      }
+      writeTerminalWithCursorState(term, cursorTracker, extracted.text, (nextState) => {
         onCursorStateChange(tab.id, nextState)
       })
     })
@@ -409,6 +465,20 @@ function TerminalInstance({
       if (event.sessionId !== sessionId) return
       exitedRef.current = true
       setExitEvent(event)
+      if (canCaptureCommandFailures && event.exitCode !== 0) {
+        setFailureContext(
+          buildTerminalFailureContext({
+            terminalSessionId: sessionId,
+            repoPath: tab.repoPath,
+            editorId: tab.editorId,
+            editorName: tab.editorName,
+            command: commandTracker.lastCommand(),
+            exitCode: event.exitCode,
+            signal: event.signal,
+            outputTail: outputBuffer.tail(),
+          }),
+        )
+      }
       term.write(`\r\n[${tab.editorName} exited with code ${event.exitCode}]\r\n`)
     })
 
@@ -467,12 +537,60 @@ function TerminalInstance({
   void error
   void exitEvent
 
+  const handleFixWithAgent = useCallback(async () => {
+    if (!failureContext || remediationPending) return
+
+    setRemediationPending(true)
+    try {
+      const prompt = createTerminalRemediationPrompt(failureContext)
+      const startedAt = Date.now()
+      const result = await window.agentforge.agent.dispatch({
+        projectId,
+        prompt,
+        threadId: activeThreadId ?? undefined,
+      })
+      onSessionStarted({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt,
+        routingDecision: null,
+        createdAt: startedAt,
+      })
+      setFailureContext(null)
+    } catch (caught: unknown) {
+      onRemediationError(
+        caught instanceof Error ? caught.message : 'Failed to start remediation agent',
+      )
+    } finally {
+      setRemediationPending(false)
+    }
+  }, [
+    activeThreadId,
+    failureContext,
+    onRemediationError,
+    onSessionStarted,
+    projectId,
+    remediationPending,
+  ])
+
   return (
     <div
-      ref={containerRef}
-      className="absolute inset-0 overflow-hidden bg-zinc-950 p-2"
+      className="absolute inset-0 overflow-hidden bg-zinc-950"
       style={{ display: visible ? 'block' : 'none' }}
-    />
+    >
+      <div ref={containerRef} className="absolute inset-0 overflow-hidden p-2" />
+      {failureContext ? (
+        <button
+          type="button"
+          onClick={handleFixWithAgent}
+          disabled={remediationPending}
+          className="absolute right-3 top-3 z-10 rounded border border-red-400/40 bg-red-500/15 px-2.5 py-1 text-[11px] font-semibold text-red-100 shadow-lg shadow-black/30 transition-colors hover:bg-red-500/25 disabled:cursor-wait disabled:opacity-70"
+          title="Start an agent with this terminal failure as context"
+        >
+          {remediationPending ? 'Starting...' : 'Fix with Agent'}
+        </button>
+      ) : null}
+    </div>
   )
 }
 

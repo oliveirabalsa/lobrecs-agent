@@ -60,5 +60,20 @@ export interface CliEditorTerminalExitEvent {
   signal?: number
 }
 
+export const TERMINAL_COMMAND_STATUS_PREFIX = '\u001b]133;D;'
+export const TERMINAL_COMMAND_STATUS_SUFFIX = '\u0007'
+
+export interface TerminalFailureContext {
+  terminalSessionId: string
+  repoPath: string
+  editorId: string
+  editorName: string
+  command?: string
+  exitCode: number
+  signal?: number
+  outputTail: string
+  capturedAt: number
+}
+
 export type { AdapterCapability, VerificationRecipe }
 export type { ImageAttachment }
