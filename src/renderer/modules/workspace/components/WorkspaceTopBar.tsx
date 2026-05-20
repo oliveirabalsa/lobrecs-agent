@@ -23,6 +23,8 @@ interface WorkspaceTopBarProps {
   /** Absolute repo path for the active project — enables the "Open in" menu. */
   repoPath?: string
   onOpenCliEditor?: (editor: EditorInfo) => void
+  sidebarCollapsed?: boolean
+  onToggleSidebar?: () => void
 }
 
 /**
@@ -48,6 +50,8 @@ export function WorkspaceTopBar({
   onOpenSidebar,
   repoPath,
   onOpenCliEditor,
+  sidebarCollapsed = false,
+  onToggleSidebar,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -87,7 +91,7 @@ export function WorkspaceTopBar({
   const termActive = rightPanelOpen && rightPanelMode === 'terminal'
   const swarmActive = rightPanelOpen && rightPanelMode === 'swarm'
   const leftInsetClass = reserveTrafficLightInset
-    ? 'pl-[70px] md:pl-4'
+    ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
     : 'pl-2 md:pl-4'
 
   return (
@@ -103,6 +107,17 @@ export function WorkspaceTopBar({
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary md:hidden"
           >
             <MenuIcon />
+          </button>
+        ) : null}
+        {onToggleSidebar ? (
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+            title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
+            className="hidden md:flex h-7 w-7 shrink-0 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+          >
+            <SidebarToggleIcon collapsed={!!sidebarCollapsed} />
           </button>
         ) : null}
         {editing ? (
@@ -379,3 +394,28 @@ function GraphIcon() {
     </svg>
   )
 }
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+      {collapsed ? (
+        <path d="M12 10l2 2-2 2" />
+      ) : (
+        <path d="M14 14l-2-2 2-2" />
+      )}
+    </svg>
+  )
+}
+

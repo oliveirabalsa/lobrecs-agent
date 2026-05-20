@@ -22,6 +22,23 @@ export function RendererApp() {
   const history = useWorkspaceHistory()
   const [sidebarWidth, setSidebarWidth] = useState(260)
   const [sidebarWidthTouched, setSidebarWidthTouched] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return window.localStorage.getItem('lobrecs.sidebar-collapsed') === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      try {
+        window.localStorage.setItem('lobrecs.sidebar-collapsed', String(next))
+      } catch {}
+      return next
+    })
+  }, [])
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -153,7 +170,7 @@ export function RendererApp() {
     [history, workspace],
   )
 
-  // Cmd+T → New chat. Cmd+W → close current workspace/thread. Cmd+K → Search.
+  // Cmd+T → New chat. Cmd+W → close current workspace/thread. Cmd+K → Search. Cmd+B → Toggle sidebar.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.metaKey || event.ctrlKey)) return
@@ -168,11 +185,14 @@ export function RendererApp() {
           event.preventDefault()
           void workspace.handleCloseTab(workspace.activeSessionId)
         }
+      } else if (event.key === 'b' || event.key === 'B') {
+        event.preventDefault()
+        toggleSidebar()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleNewChat, handleOpenSearch, workspace])
+  }, [handleNewChat, handleOpenSearch, workspace, toggleSidebar])
 
   // Ctrl+; — when in settings, switch back to workspace and signal WorkspaceView to open terminal.
   // When already in workspace, WorkspaceView handles the toggle directly via its own listener.
@@ -216,9 +236,10 @@ export function RendererApp() {
 
   return (
     <div className="app-shell flex w-full min-w-[320px] overflow-hidden bg-canvas text-primary">
-      <div className="relative hidden shrink-0 md:flex" style={{ width: sidebarWidth }}>
-        <Sidebar
-          isMac={isMac}
+      {!sidebarCollapsed && (
+        <div className="relative hidden shrink-0 md:flex" style={{ width: sidebarWidth }}>
+          <Sidebar
+            isMac={isMac}
           selectedProjectId={workspace.selectedProject?.id ?? null}
           activeThreadId={workspace.activeThreadId}
           canGoBack={history.canGoBack}
@@ -238,6 +259,7 @@ export function RendererApp() {
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
       </div>
+      )}
 
       {mobileSidebarMounted ? (
         <div
@@ -291,6 +313,8 @@ export function RendererApp() {
             isMac={isMac}
             selectedProject={workspace.selectedProject}
             onOpenSidebar={() => setMobileSidebarOpen(true)}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
           />
         ) : (
           <WorkspaceView
@@ -298,6 +322,8 @@ export function RendererApp() {
           selectedProject={workspace.selectedProject}
           activeSession={workspace.activeSession}
           activeSessionId={workspace.activeSessionId}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={toggleSidebar}
           mainView={workspace.mainView}
           swarmOpen={workspace.swarmOpen}
           diffProposals={workspace.diffProposals}

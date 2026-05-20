@@ -92,6 +92,8 @@ interface WorkspaceViewProps {
   /** When true, WorkspaceView opens the terminal as soon as it mounts (used when switching from settings view). */
   openTerminalOnMount?: boolean
   onTerminalOpened?: () => void
+  sidebarCollapsed?: boolean
+  onToggleSidebar?: () => void
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
@@ -173,6 +175,8 @@ export function WorkspaceView({
   onClearQueue,
   openTerminalOnMount,
   onTerminalOpened,
+  sidebarCollapsed = false,
+  onToggleSidebar,
 }: WorkspaceViewProps) {
   const { globalSettings } = useSettings()
   const activeThreadId = activeSession?.threadId ?? null
@@ -455,6 +459,8 @@ export function WorkspaceView({
               onOpenSidebar={onOpenSidebar}
               repoPath={selectedProject?.repoPath}
               onOpenCliEditor={handleOpenCliEditor}
+              sidebarCollapsed={sidebarCollapsed}
+              onToggleSidebar={onToggleSidebar}
             />
 
             <div className="flex h-9 shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-canvas px-3 py-1.5">

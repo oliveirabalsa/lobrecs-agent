@@ -19,11 +19,14 @@ import {
 } from '../components/SettingsControls'
 import { useSettingsDraft } from '../hooks/useSettingsDraft'
 import { AppUpdatePanel } from '../../updates'
+import { THEME_IDS, THEME_META, useTheme } from '../../../hooks/useTheme'
 
 interface SettingsViewProps {
   isMac?: boolean
   selectedProject: Project | null
   onOpenSidebar?: () => void
+  sidebarCollapsed?: boolean
+  onToggleSidebar?: () => void
 }
 
 const sectionNav = [
@@ -35,6 +38,7 @@ const sectionNav = [
   ['specs', 'Specs'],
   ['verification', 'Verification'],
   ['costs', 'Costs'],
+  ['appearance', 'Appearance'],
   ['ui', 'UI'],
   ['editor', 'Editor'],
   ['advanced', 'Advanced JSON'],
@@ -53,11 +57,15 @@ export function SettingsView({
   isMac = false,
   selectedProject,
   onOpenSidebar,
+  sidebarCollapsed = false,
+  onToggleSidebar,
 }: SettingsViewProps) {
   const settingsDraft = useSettingsDraft({ project: selectedProject })
   const draft = settingsDraft.draft
 
-  const leftInsetClass = isMac ? 'pl-[70px] md:pl-4' : 'pl-2 md:pl-4'
+  const leftInsetClass = isMac
+    ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
+    : 'pl-2 md:pl-4'
   const canUseProjectScope = Boolean(selectedProject)
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -80,6 +88,8 @@ export function SettingsView({
         <SettingsTopBar
           leftInsetClass={leftInsetClass}
           onOpenSidebar={onOpenSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={onToggleSidebar}
         />
         <div className="flex flex-1 items-center justify-center text-[13px] text-muted">
           Loading settings...
@@ -90,10 +100,15 @@ export function SettingsView({
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas text-primary">
-      <SettingsTopBar leftInsetClass={leftInsetClass} onOpenSidebar={onOpenSidebar} />
+      <SettingsTopBar
+        leftInsetClass={leftInsetClass}
+        onOpenSidebar={onOpenSidebar}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={onToggleSidebar}
+      />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="hidden w-56 shrink-0 border-r border-hairline bg-sidebar px-2 py-3 md:block">
+        <aside className="hidden w-56 shrink-0 border-r border-hairline bg-sidebar bg-sidebar-surface px-2 py-3 md:block">
           <div className="mb-3 px-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
               Settings
@@ -605,6 +620,16 @@ export function SettingsView({
               />
             </SettingsSection>
 
+            <SettingsSection id="appearance" title="Appearance">
+              <div className="grid gap-2">
+                <div className="text-[13px] font-medium text-secondary">Theme</div>
+                <div className="text-[12px] leading-5 text-muted">
+                  Applies instantly and is remembered on this device.
+                </div>
+                <ThemePicker />
+              </div>
+            </SettingsSection>
+
             <SettingsSection id="ui" title="UI">
               <FieldRow label="Compact mode">
                 <Toggle
@@ -741,15 +766,68 @@ export function SettingsView({
   )
 }
 
+function ThemePicker() {
+  const { theme, setTheme } = useTheme()
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {THEME_IDS.map((id) => {
+        const meta = THEME_META[id]
+        const selected = theme === id
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTheme(id)}
+            aria-pressed={selected}
+            className={`flex flex-col gap-3 rounded-card border p-3 text-left transition-colors ${
+              selected
+                ? 'border-accent-primary bg-card-raised'
+                : 'border-hairline bg-card hover:border-hairline-strong hover:bg-card-raised'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] font-semibold text-primary">{meta.label}</span>
+              <span
+                className={`flex h-4 w-4 items-center justify-center rounded-pill border ${
+                  selected ? 'border-accent-primary' : 'border-hairline-strong'
+                }`}
+              >
+                {selected ? (
+                  <span className="h-2 w-2 rounded-pill bg-accent-primary" />
+                ) : null}
+              </span>
+            </div>
+            <div className="flex gap-1.5">
+              {meta.swatches.map((color, index) => (
+                <span
+                  key={index}
+                  className="h-6 flex-1 rounded border border-hairline"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+            </div>
+            <span className="text-[12px] leading-5 text-muted">{meta.description}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SettingsTopBar({
   leftInsetClass,
   onOpenSidebar,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: {
   leftInsetClass: string
   onOpenSidebar?: () => void
+  sidebarCollapsed?: boolean
+  onToggleSidebar?: () => void
 }) {
   return (
-    <div className={`drag flex h-11 shrink-0 items-center border-b border-hairline bg-canvas ${leftInsetClass} pr-2`}>
+    <div className={`drag flex h-11 shrink-0 items-center border-b border-hairline bg-canvas ${leftInsetClass} pr-2 gap-1`}>
       {onOpenSidebar ? (
         <button
           type="button"
@@ -760,7 +838,42 @@ function SettingsTopBar({
           <MenuIcon />
         </button>
       ) : null}
+      {onToggleSidebar ? (
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          title={sidebarCollapsed ? 'Show sidebar (⌘B)' : 'Hide sidebar (⌘B)'}
+          className="no-drag hidden md:flex h-7 w-7 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+        >
+          <SidebarToggleIcon collapsed={!!sidebarCollapsed} />
+        </button>
+      ) : null}
     </div>
+  )
+}
+
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <line x1="9" y1="3" x2="9" y2="21" />
+      {collapsed ? (
+        <path d="M12 10l2 2-2 2" />
+      ) : (
+        <path d="M14 14l-2-2 2-2" />
+      )}
+    </svg>
   )
 }
 

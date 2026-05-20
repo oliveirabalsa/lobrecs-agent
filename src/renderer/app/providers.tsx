@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ThemeProvider } from '../hooks/useTheme'
 import { SettingsProvider } from '../modules/settings'
 import { TabsProvider } from '../modules/sessions'
 
@@ -8,8 +9,10 @@ interface AppProvidersProps {
 
 export function AppProviders({ children }: AppProvidersProps) {
   return (
-    <SettingsProvider>
-      <TabsProvider>{children}</TabsProvider>
-    </SettingsProvider>
+    <ThemeProvider>
+      <SettingsProvider>
+        <TabsProvider>{children}</TabsProvider>
+      </SettingsProvider>
+    </ThemeProvider>
   )
 }

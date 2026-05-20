@@ -212,7 +212,7 @@ export function Sidebar({
     )
 
   return (
-    <aside className="flex h-full w-full min-w-0 shrink-0 flex-col bg-sidebar font-ui">
+    <aside className="flex h-full w-full min-w-0 shrink-0 flex-col bg-sidebar bg-sidebar-surface font-ui">
       <SidebarTopZone
         isMac={isMac}
         canGoBack={canGoBack}

@@ -4,6 +4,10 @@
  * Design tokens — see docs/specs/REFACTOR_AGENT_IDE.md §2.9
  * All component colors/radii/typography reference these. Do not introduce hex literals
  * in component files; add a token here if a new shade is needed.
+ *
+ * The @theme values below are the default "Midnight" theme. Alternate themes
+ * override these custom properties at runtime under :root[data-theme] — see
+ * the "Theme system" block further down.
  */
 @theme {
   --color-canvas: #0e0e0f;
@@ -50,8 +54,70 @@
 :root {
   color-scheme: dark;
   font-family: var(--font-ui);
-  background: var(--color-canvas);
+  background: var(--gradient-app);
   color: var(--color-text-primary);
+}
+
+/*
+ * Theme system
+ * ------------
+ * Two dark themes selectable at runtime. The @theme block above defines the
+ * default ("Midnight") color tokens; the blocks below add the gradient/glow
+ * tokens (which @theme cannot express) and the alternate "Lobrecs Wolf"
+ * palette. A theme switch only swaps custom-property *values* on <html>, so
+ * no component classes change. index.html applies data-theme before React
+ * mounts to avoid a flash of the wrong theme.
+ */
+
+/* Midnight (default) — gradient/glow tokens. The bare :root selector keeps
+ * these resolvable even before data-theme is applied. */
+:root,
+:root[data-theme='midnight'] {
+  --gradient-app: radial-gradient(
+    140% 120% at 50% -20%,
+    #1a1a1d 0%,
+    #0e0e0f 52%,
+    #070708 100%
+  );
+  --gradient-sidebar: linear-gradient(180deg, #161618 0%, #141416 45%, #101012 100%);
+  --color-glow: rgba(59, 130, 246, 0.12);
+}
+
+/* Lobrecs Wolf — "dark with a red soul": near-black surfaces with only a warm
+ * shift on hairlines/text, accent red reserved for focus/active/links/loader,
+ * and a dark-red glow bleeding from the top edge. Only the base text tokens
+ * are overridden — the --color-primary/secondary/muted aliases follow them. */
+:root[data-theme='lobrecs-wolf'] {
+  --color-canvas: #0c0708;
+  --color-sidebar: #130c0e;
+  --color-bubble-user: #241619;
+  --color-card: #170e10;
+  --color-card-raised: #1e1316;
+  --color-hairline: rgba(255, 225, 220, 0.07);
+  --color-hairline-strong: rgba(255, 225, 220, 0.13);
+
+  --color-text-primary: rgba(255, 250, 249, 0.92);
+  --color-text-secondary: rgba(255, 244, 242, 0.58);
+  --color-text-muted: rgba(255, 244, 242, 0.4);
+
+  --color-accent-primary: #e0463c;
+  --color-accent-loader: #f0524a;
+
+  --gradient-app: radial-gradient(
+    135% 115% at 50% -15%,
+    #2a1013 0%,
+    #14090b 46%,
+    #060304 100%
+  );
+  --gradient-sidebar: linear-gradient(180deg, #1a0f11 0%, #130c0e 46%, #0d080a 100%);
+  --color-glow: rgba(224, 70, 60, 0.22);
+}
+
+/* Theme-aware surface utility. Unlayered, so it overrides Tailwind's bg-*
+ * utilities on the same element (e.g. .bg-sidebar-surface beats bg-sidebar).
+ * Components opt in by className. */
+.bg-sidebar-surface {
+  background: var(--gradient-sidebar);
 }
 
 html,
@@ -80,6 +146,10 @@ body {
 .app-shell {
   height: 100vh;
   height: 100dvh;
+  /* The flat bg-canvas className on the shell is overridden here so the
+   * themed app gradient shows through every transparent surface above it. */
+  background: var(--gradient-app);
+  box-shadow: inset 0 80px 100px -60px var(--color-glow);
 }
 
 button,
@@ -187,17 +257,12 @@ input {
 }
 
 /* Loader keyframes for the "agent run" indicator in WorkingState.
- * Claude Code style: a slowly-rotating, pulsing asterisk glyph and a
- * progress bar that fills edge-to-edge each cycle (no half-traversal). */
+ * Claude Code style: a slowly-rotating, pulsing asterisk glyph. */
 @keyframes loader-asterisk {
   0%, 100% { opacity: 0.55; transform: rotate(0deg) scale(0.92); }
   50% { opacity: 1; transform: rotate(180deg) scale(1.06); }
 }
 
-@keyframes loader-fill {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(0%); }
-}
 
 @keyframes loader-caret {
   0%, 49% { opacity: 1; }

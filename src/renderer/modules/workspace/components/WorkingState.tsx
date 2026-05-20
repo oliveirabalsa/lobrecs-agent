@@ -86,22 +86,19 @@ function AgentRunIndicator({ phrase, duration }: AgentRunIndicatorProps) {
       className="motion-fade-up-in relative flex items-center gap-3 self-stretch overflow-hidden rounded-card border border-hairline bg-card-raised px-3.5 py-3"
     >
       <AgentGlyph />
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex items-baseline gap-2 font-mono">
-          <span className="truncate text-[13px] font-medium tracking-tight text-accent-loader">
-            {phrase}
-            <span
-              aria-hidden="true"
-              className="ml-0.5 inline-block text-accent-loader/80"
-              style={{ animation: 'loader-caret 1.05s steps(1, end) infinite' }}
-            >
-              ▍
-            </span>
+      <div className="flex min-w-0 flex-1 items-baseline gap-2 font-mono">
+        <span className="truncate text-[13px] font-medium tracking-tight text-accent-loader">
+          {phrase}
+          <span
+            aria-hidden="true"
+            className="ml-0.5 inline-block text-accent-loader/80"
+            style={{ animation: 'loader-caret 1.05s steps(1, end) infinite' }}
+          >
+            ▍
           </span>
-          <span aria-hidden="true" className="text-muted opacity-50">·</span>
-          <span className="text-[11px] tabular-nums text-muted">{duration}</span>
-        </div>
-        <ProgressBar />
+        </span>
+        <span aria-hidden="true" className="text-muted opacity-50">·</span>
+        <span className="text-[11px] tabular-nums text-muted">{duration}</span>
       </div>
     </div>
   )
@@ -125,19 +122,6 @@ function AgentGlyph() {
     >
       ✻
     </span>
-  )
-}
-
-/** Full-width track with a red fill that travels edge-to-edge each cycle. */
-function ProgressBar() {
-  return (
-    <div className="relative h-[3px] w-full overflow-hidden rounded-full bg-hairline">
-      <span
-        aria-hidden="true"
-        className="absolute inset-0 rounded-full bg-gradient-to-r from-accent-loader/20 via-accent-loader to-accent-loader/40"
-        style={{ animation: 'loader-fill 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite' }}
-      />
-    </div>
   )
 }
 
