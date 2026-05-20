@@ -321,6 +321,50 @@ describe('SwarmOrchestrator', () => {
     ])
   })
 
+  it('continues the review loop when a reviewer omits an explicit approved verdict', async () => {
+    const dispatched: SwarmDispatchInput[] = []
+    const completions = new Map<string, Deferred<{ status: 'done'; output: string }>>()
+    const orchestrator = new SwarmOrchestrator({
+      getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'claude-sonnet-4-6' }),
+      dispatchSession: (input) => {
+        dispatched.push(input)
+        completions.set(input.sessionId, deferred<{ status: 'done'; output: string }>())
+        return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
+      },
+      waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+      worktrees: createFakeWorktrees(),
+    })
+
+    await orchestrator.spawn({
+      projectId: 'project-1',
+      prompt: 'Fix the settings panel',
+      strategy: 'sequential',
+      agents: [
+        { role: 'implementer', agentId: 'codex' },
+        { role: 'reviewer', agentId: 'claude-code' },
+      ],
+      maxIterations: 2,
+    })
+
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: 'first implementation',
+    })
+    await waitFor(() => dispatched.length === 2)
+
+    completions.get(dispatched[1].sessionId)?.resolve({
+      status: 'done',
+      output: 'Looks close, but add regression coverage before approval.',
+    })
+    await waitFor(() => dispatched.length === 3)
+
+    expect(dispatched[2].role).toBe('implementer')
+    expect(dispatched[2].prompt).toContain('Reviewer feedback to address')
+    expect(dispatched[2].prompt).toContain('add regression coverage')
+  })
+
   it('runs reviewer loop when a sequential step has reviewer in its role', async () => {
     const dispatched: SwarmDispatchInput[] = []
     const completions = new Map<string, Deferred<{ status: 'done'; output: string }>>()

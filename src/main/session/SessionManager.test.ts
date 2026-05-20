@@ -319,6 +319,67 @@ describe('SessionManager', () => {
     })
   })
 
+  it('rejects local runs from another thread while a repository chat is active', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: () => undefined,
+      worktreeIsolation: false,
+    })
+
+    const first = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'first chat',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await expect(
+      manager.dispatch({
+        projectId: project.id,
+        prompt: 'second chat',
+        agentId: 'claude-code',
+        model: 'claude-sonnet-4-6',
+        repoPath: project.repoPath,
+      }),
+    ).rejects.toThrow('Another chat is already running in this repository')
+
+    expect(manager.isActive(first.sessionId)).toBe(true)
+    expect(adapter.dispatches).toHaveLength(1)
+  })
+
+  it('allows overlapping local runs when they belong to the same chat thread', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: () => undefined,
+      worktreeIsolation: false,
+    })
+
+    const first = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'parallel implementer',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    const second = await manager.dispatch({
+      projectId: project.id,
+      threadId: first.threadId,
+      prompt: 'parallel reviewer',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    expect(second.threadId).toBe(first.threadId)
+    expect(adapter.dispatches).toHaveLength(2)
+  })
+
   it('rejects stale thread ids before starting an agent process', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()

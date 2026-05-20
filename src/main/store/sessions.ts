@@ -9,6 +9,7 @@ import type {
   ThreadTranscriptTurn,
 } from '../../shared/types'
 import { getDb } from './db'
+import { extractSessionOutput } from './sessionOutput'
 
 type SessionRow = {
   id: string
@@ -225,7 +226,9 @@ export const sessionsStore = {
         threadId,
         prompt: session.prompt,
         imageAttachments: session.imageAttachments,
-        assistantText: extractAssistantText(sessionsStore.listEvents(row.id)),
+        assistantText: extractSessionOutput(sessionsStore.listEvents(row.id), {
+          maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS,
+        }),
         status: session.status,
         createdAt: session.createdAt,
         completedAt: session.completedAt,
@@ -308,64 +311,4 @@ function normalizeTranscriptLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_THREAD_TRANSCRIPT_LIMIT
 
   return Math.min(Math.max(Math.floor(limit), 1), MAX_THREAD_TRANSCRIPT_LIMIT)
-}
-
-function extractAssistantText(events: AgentEvent[]): string | undefined {
-  const activityMessages = events.flatMap(assistantMessagesFromActivity)
-  const preferred = lastNonEmpty(activityMessages)
-  if (preferred) return truncateTranscriptText(preferred, MAX_ASSISTANT_TRANSCRIPT_CHARS)
-
-  const stdoutMessages = events
-    .filter((event) => event.type === 'stdout')
-    .map((event) => textFromPayload(event.payload))
-  const fallback = lastNonEmpty(stdoutMessages)
-
-  return fallback ? truncateTranscriptText(fallback, MAX_ASSISTANT_TRANSCRIPT_CHARS) : undefined
-}
-
-function assistantMessagesFromActivity(event: AgentEvent): string[] {
-  if (event.type !== 'activity' || !isRecord(event.payload)) return []
-
-  const payload = event.payload
-  if (
-    payload.kind === 'message' &&
-    payload.role === 'assistant' &&
-    typeof payload.text === 'string'
-  ) {
-    return [payload.text]
-  }
-
-  return []
-}
-
-function lastNonEmpty(values: string[]): string | undefined {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const text = values[index].trim()
-    if (text) return text
-  }
-
-  return undefined
-}
-
-function textFromPayload(payload: unknown): string {
-  if (typeof payload === 'string') return payload
-  if (!isRecord(payload)) return ''
-
-  for (const field of ['text', 'result', 'message', 'content', 'summary', 'output']) {
-    const value = payload[field]
-    if (typeof value === 'string') return value
-  }
-
-  return ''
-}
-
-function truncateTranscriptText(text: string, maxChars: number): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= maxChars) return trimmed
-
-  return `${trimmed.slice(0, maxChars).trimEnd()}\n[truncated]`
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

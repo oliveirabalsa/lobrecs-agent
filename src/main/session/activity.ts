@@ -4,10 +4,12 @@ import type {
   ApprovalRequest,
   DiffProposal,
   SessionStatus,
-  UserQuestionPromptOption,
-  UserQuestionPromptQuestion,
 } from '../../shared/types'
 import { isClaudeSessionEndHookWarning } from '../../shared/contracts/agentOutput'
+import {
+  shouldSuppressUserQuestionToolResult,
+  userQuestionActivityFromToolPayload,
+} from '../../shared/contracts/userQuestionPrompts'
 
 export function deriveActivityEvents(event: AgentEvent): AgentEvent[] {
   if (event.type === 'activity') return []
@@ -108,6 +110,9 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   }
 
   const type = typeof payload.type === 'string' ? payload.type : ''
+  const geminiActivity = activityFromGeminiPayload(payload, type)
+  if (geminiActivity !== undefined) return geminiActivity
+
   const openCodeActivity = activityFromOpenCodePayload(payload, type)
   if (openCodeActivity !== undefined) return openCodeActivity
 
@@ -115,7 +120,7 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   if (codexActivity !== undefined) return codexActivity
 
   if (type.includes('tool_call') || type.includes('tool-call') || type.includes('tool.use')) {
-    const userQuestion = userQuestionActivityFromToolCall(payload)
+    const userQuestion = userQuestionActivityFromToolPayload(payload)
     if (userQuestion) return userQuestion
 
     return {
@@ -129,7 +134,7 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   if (type.includes('tool_result') || type.includes('tool-result')) {
     const toolName = stringField(payload, 'name') ?? stringField(payload, 'tool')
     const output = textFromPayload(payload)
-    if (isUserQuestionToolName(toolName) || output.trim() === 'Answer questions?') {
+    if (shouldSuppressUserQuestionToolResult(toolName, output)) {
       return null
     }
 
@@ -165,6 +170,133 @@ function activityFromStdout(payload: unknown): AgentActivity | AgentActivity[] |
   }
 
   return null
+}
+
+function activityFromGeminiPayload(
+  payload: Record<string, unknown>,
+  type: string,
+): AgentActivity | AgentActivity[] | null | undefined {
+  if (type === 'init') {
+    return { kind: 'step', title: 'Gemini ready', status: 'done' }
+  }
+
+  if (type === 'message') {
+    const text = textFromPayload(payload)
+    const role = stringField(payload, 'role') === 'system' ? 'system' : 'assistant'
+    return text.trim() ? { kind: 'message', role, text, stream: true } : null
+  }
+
+  if (type === 'tool_use') {
+    const toolCall = geminiToolCallFromPayload(payload)
+    if (!toolCall) return undefined
+
+    return {
+      kind: 'tool-call',
+      name: toolCall.name,
+      input: toolCall.input,
+      status: 'running',
+    }
+  }
+
+  if (type === 'tool_result') {
+    const toolResult = geminiToolResultFromPayload(payload)
+    if (!toolResult) return undefined
+
+    return {
+      kind: 'tool-result',
+      name: toolResult.name,
+      output: toolResult.output,
+      status: toolResult.isError ? 'error' : 'done',
+    }
+  }
+
+  if (type === 'result') {
+    return null
+  }
+
+  return undefined
+}
+
+function geminiToolCallFromPayload(
+  payload: Record<string, unknown>,
+): { name: string; input: unknown } | null {
+  const part = isRecord(payload.part) ? payload.part : undefined
+  const functionCall = isRecord(part?.functionCall) ? part.functionCall : undefined
+
+  if (part && !functionCall && !hasGeminiToolFields(payload, part)) {
+    return null
+  }
+
+  const source = functionCall ?? part ?? payload
+  return {
+    name:
+      stringField(payload, 'tool_name') ??
+      stringField(source, 'tool_name') ??
+      stringField(source, 'name') ??
+      stringField(payload, 'name') ??
+      'tool',
+    input:
+      payload.parameters ??
+      payload.input ??
+      source.parameters ??
+      source.input ??
+      source.args ??
+      source.arguments,
+  }
+}
+
+function geminiToolResultFromPayload(
+  payload: Record<string, unknown>,
+): { name: string; output?: string; isError: boolean } | null {
+  const part = isRecord(payload.part) ? payload.part : undefined
+  const functionResponse = isRecord(part?.functionResponse) ? part.functionResponse : undefined
+
+  if (part && !functionResponse && !hasGeminiToolFields(payload, part)) {
+    return null
+  }
+
+  const source = functionResponse ?? part ?? payload
+  const response = isRecord(source.response) ? source.response : undefined
+  const output =
+    textFromPayload(response ?? source).trim() ||
+    textFromPayload(payload).trim() ||
+    undefined
+  const status = stringField(payload, 'status') ?? stringField(source, 'status')
+  const isError =
+    status === 'error' ||
+    payload.error === true ||
+    source.error === true ||
+    typeof payload.error === 'string' ||
+    typeof source.error === 'string'
+
+  return {
+    name:
+      stringField(payload, 'tool_name') ??
+      stringField(source, 'tool_name') ??
+      stringField(source, 'name') ??
+      stringField(payload, 'name') ??
+      'tool',
+    output,
+    isError,
+  }
+}
+
+function hasGeminiToolFields(
+  payload: Record<string, unknown>,
+  part: Record<string, unknown>,
+): boolean {
+  return Boolean(
+    stringField(payload, 'tool_name') ||
+      stringField(payload, 'name') ||
+      stringField(part, 'tool_name') ||
+      stringField(part, 'name') ||
+      payload.parameters !== undefined ||
+      payload.input !== undefined ||
+      part.parameters !== undefined ||
+      part.input !== undefined ||
+      part.args !== undefined ||
+      part.arguments !== undefined,
+  )
 }
 
 function activityFromOpenCodePayload(
@@ -257,7 +389,7 @@ function activityFromCodexPayload(
       return { kind: 'step', title: 'Thinking', status: 'running' }
     }
 
-    const userQuestion = userQuestionActivityFromToolCall(item)
+    const userQuestion = userQuestionActivityFromToolPayload(item)
     if (userQuestion) return userQuestion
 
     const toolName = toolNameFromItem(item, itemType)
@@ -274,7 +406,7 @@ function activityFromCodexPayload(
   }
 
   if (type === 'item.completed') {
-    const userQuestion = userQuestionActivityFromToolCall(item)
+    const userQuestion = userQuestionActivityFromToolPayload(item)
     if (userQuestion) return userQuestion
 
     const text = textFromPayload(item)
@@ -289,7 +421,7 @@ function activityFromCodexPayload(
 
     if (isToolResultItem(itemType)) {
       const toolName = toolNameFromItem(item, itemType)
-      if (isUserQuestionToolName(toolName) || text.trim() === 'Answer questions?') {
+      if (shouldSuppressUserQuestionToolResult(toolName, text)) {
         return null
       }
 
@@ -332,13 +464,13 @@ function activityFromCodexPayload(
     return text.trim() ? { kind: 'message', role: 'assistant', text, stream: true } : null
   }
 
-  const directUserQuestion = userQuestionActivityFromToolCall(item)
+  const directUserQuestion = userQuestionActivityFromToolPayload(item)
   if (directUserQuestion) return directUserQuestion
 
   if (isToolResultItem(itemType)) {
     const toolName = toolNameFromItem(item, itemType)
     const text = textFromPayload(item)
-    if (isUserQuestionToolName(toolName) || text.trim() === 'Answer questions?') {
+    if (shouldSuppressUserQuestionToolResult(toolName, text)) {
       return null
     }
 
@@ -365,119 +497,6 @@ function activityFromCodexPayload(
   }
 
   return undefined
-}
-
-function userQuestionActivityFromToolCall(
-  item: Record<string, unknown>,
-): Extract<AgentActivity, { kind: 'user-question' }> | null {
-  const toolName = stringField(item, 'name') ?? stringField(item, 'tool')
-  if (!isUserQuestionToolName(toolName)) return null
-
-  const input = structuredToolInput(item.arguments ?? item.input ?? item.params) ?? item
-  const rawQuestions = isRecord(input) && Array.isArray(input.questions)
-    ? input.questions
-    : []
-  const questions = rawQuestions
-    .map((question, questionIndex) => normalizeUserQuestion(question, questionIndex))
-    .filter((question): question is UserQuestionPromptQuestion => question !== null)
-
-  if (questions.length === 0) return null
-
-  const title =
-    questions.length === 1
-      ? questions[0].header ?? 'Agent question'
-      : 'Agent questions'
-
-  return {
-    kind: 'user-question',
-    promptId: userQuestionPromptId(item, questions),
-    title,
-    questions,
-  }
-}
-
-function structuredToolInput(input: unknown): Record<string, unknown> | null {
-  if (isRecord(input)) return input
-  if (typeof input !== 'string') return null
-
-  try {
-    const parsed = JSON.parse(input) as unknown
-    return isRecord(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function normalizeUserQuestion(
-  value: unknown,
-  questionIndex: number,
-): UserQuestionPromptQuestion | null {
-  if (!isRecord(value)) return null
-
-  const question = stringField(value, 'question') ?? stringField(value, 'text')
-  if (!question) return null
-
-  const options = Array.isArray(value.options)
-    ? value.options
-        .map((option, optionIndex) =>
-          normalizeUserQuestionOption(option, questionIndex, optionIndex),
-        )
-        .filter((option): option is UserQuestionPromptOption => option !== null)
-    : []
-
-  return {
-    id: stringField(value, 'id') ?? `question-${questionIndex + 1}`,
-    header: stringField(value, 'header'),
-    question,
-    multiSelect: value.multiSelect === true,
-    options,
-  }
-}
-
-function normalizeUserQuestionOption(
-  value: unknown,
-  questionIndex: number,
-  optionIndex: number,
-): UserQuestionPromptOption | null {
-  if (!isRecord(value)) return null
-
-  const label = stringField(value, 'label')
-  if (!label) return null
-
-  return {
-    id: stringField(value, 'id') ?? `question-${questionIndex + 1}-option-${optionIndex + 1}`,
-    label,
-    description: stringField(value, 'description'),
-  }
-}
-
-function userQuestionPromptId(
-  item: Record<string, unknown>,
-  questions: UserQuestionPromptQuestion[],
-): string {
-  const directId =
-    stringField(item, 'call_id') ??
-    stringField(item, 'callId') ??
-    stringField(item, 'id')
-  if (directId) return `user-question:${directId}`
-
-  return `user-question:${hashString(JSON.stringify(questions))}`
-}
-
-function isUserQuestionToolName(name: string | undefined): boolean {
-  if (!name) return false
-
-  return ['askuserquestion', 'ask_user_question', 'request_user_input'].includes(
-    name.toLowerCase(),
-  )
-}
-
-function hashString(value: string): string {
-  let hash = 0
-  for (let index = 0; index < value.length; index += 1) {
-    hash = Math.imul(31, hash) + value.charCodeAt(index)
-  }
-  return (hash >>> 0).toString(36)
 }
 
 function normalizeApproval(payload: unknown): ApprovalRequest {

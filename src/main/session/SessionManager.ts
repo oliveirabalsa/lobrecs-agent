@@ -1,6 +1,7 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import type {
   AgentActivity,
   AgentEvent,
@@ -75,8 +76,14 @@ export type AdapterResolver = (agentId: AgentId) => AgentAdapter | undefined
 
 type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   repoPath: string
+  threadId: string
   worktreePath: string | null
   localBaseline: LocalChangeBaseline | null
+}
+
+interface LocalRunReservation {
+  repoPath: string
+  threadId: string
 }
 
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
@@ -101,6 +108,7 @@ export class SessionManager {
   private readonly processWarningsBySession = new Map<string, Set<string>>()
   private readonly sessionsPausedForUserInput = new Set<string>()
   private readonly pendingQueues = new Map<string, QueuedMessage[]>()
+  private readonly activeLocalRuns = new Map<string, LocalRunReservation>()
   private estimateCost: CostEstimator
 
   constructor(options: SessionManagerOptions = {}) {
@@ -123,36 +131,49 @@ export class SessionManager {
   }
 
   async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
-    const threadId = this.resolveOrCreateThread(params)
-    const context = buildAdapterContext(
-      params.context,
-      sessionsStore.listThreadTranscript(threadId, { limit: THREAD_CONTEXT_SESSION_LIMIT }),
-    )
-
-    const session = sessionsStore.create({
-      projectId: params.projectId,
-      agentId: params.agentId,
-      model: params.model,
-      prompt: params.prompt,
-      imageAttachments: params.imageAttachments,
-      status: 'running',
-      threadId,
-    })
-
-    // Link the thread to the new session and bump updated_at so the sidebar
-    // bubbles this thread to the top of its project list.
-    const linkedThread = threadsStore.linkSession(threadId, session.id)
-    broadcastThreadUpdated(linkedThread)
-
-    const adapter = this.resolveAdapter(params.agentId)
-    if (!adapter) {
-      const error = new Error(`Adapter not found: ${params.agentId}`)
-      this.failSession(session.id, error)
-      throw error
+    const shouldIsolate = params.isolate ?? this.worktreeIsolation
+    if (!params.threadId) {
+      this.assertNoLocalRunConflict(params.repoPath, null, shouldIsolate)
     }
 
+    const threadId = this.resolveOrCreateThread(params)
+    const sessionId = randomUUID()
+    const localRunReserved = this.reserveLocalRun({
+      sessionId,
+      repoPath: params.repoPath,
+      threadId,
+      isolated: shouldIsolate,
+    })
+    let sessionCreated = false
+
     try {
-      const shouldIsolate = params.isolate ?? this.worktreeIsolation
+      const context = buildAdapterContext(
+        params.context,
+        sessionsStore.listThreadTranscript(threadId, { limit: THREAD_CONTEXT_SESSION_LIMIT }),
+      )
+
+      const session = sessionsStore.create({
+        id: sessionId,
+        projectId: params.projectId,
+        agentId: params.agentId,
+        model: params.model,
+        prompt: params.prompt,
+        imageAttachments: params.imageAttachments,
+        status: 'running',
+        threadId,
+      })
+      sessionCreated = true
+
+      // Link the thread to the new session and bump updated_at so the sidebar
+      // bubbles this thread to the top of its project list.
+      const linkedThread = threadsStore.linkSession(threadId, session.id)
+      broadcastThreadUpdated(linkedThread)
+
+      const adapter = this.resolveAdapter(params.agentId)
+      if (!adapter) {
+        throw new Error(`Adapter not found: ${params.agentId}`)
+      }
+
       const worktreePath = shouldIsolate
         ? await worktreeManager.create(session.id, params.repoPath)
         : null
@@ -184,6 +205,7 @@ export class SessionManager {
         reject: () => agentSession.reject(),
         cancel: () => agentSession.cancel(),
         repoPath: params.repoPath,
+        threadId,
         worktreePath,
         localBaseline,
       })
@@ -194,8 +216,11 @@ export class SessionManager {
 
       return { sessionId: session.id, threadId }
     } catch (error) {
-      await worktreeManager.remove(session.id, params.repoPath)
-      this.failSession(session.id, error)
+      if (localRunReserved) this.releaseLocalRun(sessionId)
+      await worktreeManager.remove(sessionId, params.repoPath)
+      if (sessionCreated) {
+        this.failSession(sessionId, error)
+      }
       throw error
     }
   }
@@ -219,6 +244,7 @@ export class SessionManager {
   cancel(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
     this.activeSessions.delete(sessionId)
+    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
     const session = sessionsStore.get(sessionId)
@@ -410,6 +436,7 @@ export class SessionManager {
       this.recordEvent(event)
       void this.removeWorktree(event.sessionId, active)
       this.activeSessions.delete(event.sessionId)
+      this.releaseLocalRun(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
       return
     }
@@ -448,6 +475,7 @@ export class SessionManager {
     const active = this.activeSessions.get(sessionId)
     this.sessionsPausedForUserInput.add(sessionId)
     this.activeSessions.delete(sessionId)
+    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
 
     if (!active) return
@@ -489,11 +517,13 @@ export class SessionManager {
   ): Promise<void> {
     if (!active) {
       this.recordEvent(finalEvent)
+      this.releaseLocalRun(sessionId)
       return
     }
 
     if (!active.worktreePath && !active.localBaseline) {
       this.recordEvent(finalEvent)
+      this.releaseLocalRun(sessionId)
       return
     }
 
@@ -539,8 +569,12 @@ export class SessionManager {
         timestamp: Date.now(),
       })
     } finally {
-      await this.removeWorktree(sessionId, active)
-      this.recordEvent(finalEvent)
+      try {
+        await this.removeWorktree(sessionId, active)
+      } finally {
+        this.releaseLocalRun(sessionId)
+        this.recordEvent(finalEvent)
+      }
     }
   }
 
@@ -657,6 +691,49 @@ export class SessionManager {
     }
   }
 
+  private reserveLocalRun(input: {
+    sessionId: string
+    repoPath: string
+    threadId: string
+    isolated: boolean
+  }): LocalRunReservation | null {
+    if (input.isolated) return null
+
+    const reservation: LocalRunReservation = {
+      repoPath: normalizeRepoPath(input.repoPath),
+      threadId: input.threadId,
+    }
+    this.assertNoLocalRunConflict(reservation.repoPath, reservation.threadId, false)
+
+    this.activeLocalRuns.set(input.sessionId, reservation)
+    return reservation
+  }
+
+  private assertNoLocalRunConflict(
+    repoPath: string,
+    threadId: string | null,
+    isolated: boolean,
+  ): void {
+    if (isolated) return
+
+    const normalizedRepoPath = normalizeRepoPath(repoPath)
+    const conflictingRun = [...this.activeLocalRuns.values()].find(
+      (run) =>
+        run.repoPath === normalizedRepoPath &&
+        (threadId === null || run.threadId !== threadId),
+    )
+
+    if (!conflictingRun) return
+
+    throw new Error(
+      'Another chat is already running in this repository. Wait for it to finish before starting a different chat so edited files stay scoped to the current chat.',
+    )
+  }
+
+  private releaseLocalRun(sessionId: string): void {
+    this.activeLocalRuns.delete(sessionId)
+  }
+
   private failSession(sessionId: string, error: unknown): void {
     const event: AgentEvent = {
       type: 'error',
@@ -669,6 +746,7 @@ export class SessionManager {
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
     this.activeSessions.delete(sessionId)
+    this.releaseLocalRun(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
   }
@@ -692,6 +770,10 @@ function isUserQuestionActivity(payload: unknown): payload is Extract<
     payload !== null &&
     (payload as { kind?: unknown }).kind === 'user-question'
   )
+}
+
+function normalizeRepoPath(repoPath: string): string {
+  return path.resolve(repoPath)
 }
 
 function completionStatus(event: AgentEvent): SessionStatus {

@@ -327,6 +327,69 @@ describe('agent activity normalization', () => {
     ])
   })
 
+  it('normalizes nested AskUserQuestion function payloads and validates options', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.completed',
+        item: {
+          type: 'function_call',
+          call_id: 'call-nested',
+          function: {
+            name: 'functions.AskUserQuestion',
+            arguments: JSON.stringify({
+              questions: [
+                {
+                  id: 'duplicate',
+                  header: '  Editor  ',
+                  question: 'Which editor?',
+                  multi_select: true,
+                  options: [
+                    'Vim',
+                    { id: 'same', label: 'Neovim', description: 'Modern vim' },
+                    { id: 'same', label: 'Both' },
+                    { label: '' },
+                  ],
+                },
+                {
+                  id: 'duplicate',
+                  question: 'Where should it appear?',
+                  options: [{ label: 'Terminal panel' }],
+                },
+              ],
+            }),
+          },
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: 'user-question:call-nested',
+        title: 'Agent questions',
+        questions: [
+          expect.objectContaining({
+            id: 'duplicate',
+            header: 'Editor',
+            multiSelect: true,
+            options: [
+              expect.objectContaining({ label: 'Vim' }),
+              expect.objectContaining({ id: 'same', label: 'Neovim' }),
+              expect.objectContaining({ id: 'same-2', label: 'Both' }),
+            ],
+          }),
+          expect.objectContaining({
+            id: 'duplicate-2',
+            question: 'Where should it appear?',
+          }),
+        ],
+      }),
+    ])
+  })
+
   it('suppresses Codex AskUserQuestion tool result placeholders', () => {
     const activities = deriveActivityEvents({
       type: 'stdout',
@@ -422,6 +485,150 @@ describe('agent activity normalization', () => {
         tokensIn: 8,
         tokensOut: 6,
         costUsd: 0.0002,
+      }),
+    ])
+  })
+
+  it('turns Gemini stream JSON events into visible messages and tools', () => {
+    const events: AgentEvent[] = [
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: { type: 'init' },
+        timestamp: 1,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: 'Gemini response',
+        },
+        timestamp: 2,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_use',
+          tool_name: 'shell',
+          parameters: { command: 'rtk pwd' },
+        },
+        timestamp: 3,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_result',
+          tool_name: 'shell',
+          output: '/repo\n',
+        },
+        timestamp: 4,
+      },
+    ]
+
+    const activities = events.flatMap(deriveActivityEvents).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({ kind: 'step', title: 'Gemini ready', status: 'done' }),
+      expect.objectContaining({
+        kind: 'message',
+        role: 'assistant',
+        text: 'Gemini response\n',
+      }),
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'shell',
+        input: { command: 'rtk pwd' },
+        status: 'running',
+      }),
+      expect.objectContaining({
+        kind: 'tool-result',
+        name: 'shell',
+        output: '/repo',
+        status: 'done',
+      }),
+    ])
+  })
+
+  it('turns nested Gemini tool parts into visible tool activities without stealing OpenCode events', () => {
+    const events: AgentEvent[] = [
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_use',
+          part: {
+            functionCall: {
+              name: 'shell',
+              args: { command: 'rtk pwd' },
+            },
+          },
+        },
+        timestamp: 1,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_result',
+          part: {
+            functionResponse: {
+              name: 'shell',
+              response: { output: '/repo\n' },
+            },
+          },
+        },
+        timestamp: 2,
+      },
+      {
+        type: 'stdout',
+        sessionId: 'session-1',
+        payload: {
+          type: 'tool_use',
+          part: {
+            type: 'tool',
+            tool: 'bash',
+            state: {
+              status: 'completed',
+              input: { command: 'pwd' },
+              output: '/repo\n',
+              metadata: { exit: 0 },
+            },
+          },
+        },
+        timestamp: 3,
+      },
+    ]
+
+    const activities = events.flatMap(deriveActivityEvents).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'shell',
+        input: { command: 'rtk pwd' },
+        status: 'running',
+      }),
+      expect.objectContaining({
+        kind: 'tool-result',
+        name: 'shell',
+        output: '/repo',
+        status: 'done',
+      }),
+      expect.objectContaining({
+        kind: 'tool-call',
+        name: 'bash',
+        input: { command: 'pwd' },
+        status: 'done',
+      }),
+      expect.objectContaining({
+        kind: 'tool-result',
+        name: 'bash',
+        output: '/repo\n',
+        status: 'done',
       }),
     ])
   })

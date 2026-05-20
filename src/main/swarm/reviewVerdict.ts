@@ -3,7 +3,7 @@ export type ReviewVerdict = 'approved' | 'rejected'
 export interface ParsedReviewVerdict {
   verdict: ReviewVerdict
   feedback?: string
-  /** True when the verdict line was missing — caller may want to log. */
+  /** True when the verdict line was missing and the review must be retried. */
   fallback: boolean
 }
 
@@ -11,12 +11,12 @@ const VERDICT_LINE = /^\s*VERDICT\s*:\s*(APPROVED|REJECTED)\b.*$/im
 
 export function parseReviewerVerdict(text: string | undefined): ParsedReviewVerdict {
   const body = text?.trim()
-  if (!body) return { verdict: 'approved', fallback: true }
+  if (!body) return { verdict: 'rejected', fallback: true }
 
   const matches = [...body.matchAll(new RegExp(VERDICT_LINE, 'gim'))]
   const last = matches.at(-1)
 
-  if (!last) return { verdict: 'approved', feedback: body, fallback: true }
+  if (!last) return { verdict: 'rejected', feedback: body, fallback: true }
 
   const verdict: ReviewVerdict = last[1].toUpperCase() === 'APPROVED' ? 'approved' : 'rejected'
   const feedback = extractFeedback(body, last.index ?? 0)

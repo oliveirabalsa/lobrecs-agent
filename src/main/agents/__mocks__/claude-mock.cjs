@@ -6,6 +6,27 @@ setTimeout(() => {
     return
   }
 
+  if (process.env.CLAUDE_MOCK_DUPLICATE_TEXT === '1') {
+    const text = 'Duplicated Claude response'
+    console.log(
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text },
+        },
+      }),
+    )
+    console.log(
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text }] },
+      }),
+    )
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', result: text }))
+    return
+  }
+
   console.log(JSON.stringify({ type: 'system', output: 'hook noise' }))
   console.log(
     JSON.stringify({

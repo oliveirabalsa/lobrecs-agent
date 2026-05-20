@@ -21,6 +21,7 @@ const CLAUDE_MODEL_ALIASES: Record<string, string> = {
 type ClaudeParserState = {
   startupHooksShown: boolean
   toolNamesById: Map<string, string>
+  visibleText: string
 }
 
 export class ClaudeCodeAdapter implements AgentAdapter {
@@ -42,6 +43,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const parserState: ClaudeParserState = {
       startupHooksShown: false,
       toolNamesById: new Map(),
+      visibleText: '',
     }
     let completed = false
     const emitEvent = (event: AgentEvent): void => {
@@ -205,7 +207,7 @@ function mapClaudeOutputToEvents(
   }
 
   if (data.type === 'stream_event') {
-    return mapClaudeStreamEvent(data, sessionId)
+    return mapClaudeStreamEvent(data, sessionId, state)
   }
 
   if (data.type === 'assistant') {
@@ -219,14 +221,19 @@ function mapClaudeOutputToEvents(
   if (data.type === 'result') {
     const events: AgentEvent[] = []
     const visibleText = typeof data.result === 'string' ? data.result : ''
+    const isErrorResult = data.subtype === 'error' || data.is_error === true
 
-    if (visibleText.trim()) {
+    if (visibleText.trim() && isErrorResult) {
       events.push({
-        type: data.subtype === 'error' || data.is_error === true ? 'stderr' : 'stdout',
+        type: 'stderr',
         sessionId,
         payload: { text: visibleText.endsWith('\n') ? visibleText : `${visibleText}\n` },
         timestamp: Date.now(),
       })
+    } else if (visibleText.trim() && !state.visibleText.trim()) {
+      events.push(...claudeVisibleTextEvents(visibleText, sessionId, state, {
+        ensureTrailingNewline: true,
+      }))
     }
 
     events.push({
@@ -236,7 +243,7 @@ function mapClaudeOutputToEvents(
         ...data,
         cost_usd:
           typeof data.total_cost_usd === 'number' ? data.total_cost_usd : data.cost_usd,
-        exitCode: data.subtype === 'error' || data.is_error === true ? 1 : 0,
+        exitCode: isErrorResult ? 1 : 0,
       },
       timestamp: Date.now(),
     })
@@ -328,12 +335,9 @@ function mapClaudeAssistantMessage(
 
   const text = textFromClaudeMessage(value)
   if (text.trim()) {
-    events.push({
-      type: 'stdout',
-      sessionId,
-      payload: { text: text.endsWith('\n') ? text : `${text}\n` },
-      timestamp: Date.now(),
-    })
+    events.push(...claudeVisibleTextEvents(text, sessionId, state, {
+      ensureTrailingNewline: true,
+    }))
   }
 
   return events
@@ -391,6 +395,7 @@ function contentItems(value: unknown): Array<Record<string, unknown>> {
 function mapClaudeStreamEvent(
   data: Record<string, unknown>,
   sessionId: string,
+  state: ClaudeParserState,
 ): AgentEvent[] {
   const event = objectPayload(data.event)
   const delta = objectPayload(event.delta)
@@ -420,17 +425,51 @@ function mapClaudeStreamEvent(
     const text = typeof delta.text === 'string' ? delta.text : ''
     if (!text) return []
 
-    return [
-      {
-        type: 'stdout',
-        sessionId,
-        payload: { text },
-        timestamp: Date.now(),
-      },
-    ]
+    return claudeVisibleTextEvents(text, sessionId, state)
   }
 
   return []
+}
+
+function claudeVisibleTextEvents(
+  text: string,
+  sessionId: string,
+  state: ClaudeParserState,
+  options: { ensureTrailingNewline?: boolean } = {},
+): AgentEvent[] {
+  const visibleText =
+    options.ensureTrailingNewline && !text.endsWith('\n') ? `${text}\n` : text
+  const dedupedText = dedupeClaudeVisibleText(visibleText, state)
+  if (!dedupedText.trim()) return []
+
+  state.visibleText += dedupedText
+  return [
+    {
+      type: 'stdout',
+      sessionId,
+      payload: { text: dedupedText },
+      timestamp: Date.now(),
+    },
+  ]
+}
+
+function dedupeClaudeVisibleText(text: string, state: ClaudeParserState): string {
+  const visibleKey = normalizeClaudeText(state.visibleText)
+  const textKey = normalizeClaudeText(text)
+  if (!textKey || textKey === visibleKey) return ''
+
+  if (state.visibleText) {
+    if (text.startsWith(state.visibleText)) return text.slice(state.visibleText.length)
+    if (state.visibleText.endsWith(text)) return ''
+
+    if (textKey.length >= 12 && visibleKey.endsWith(textKey)) return ''
+  }
+
+  return text
+}
+
+function normalizeClaudeText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 function activityEvent(sessionId: string, payload: AgentActivity): AgentEvent {

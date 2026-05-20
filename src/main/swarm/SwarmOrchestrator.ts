@@ -15,6 +15,7 @@ import { DEFAULT_APP_SETTINGS, settingsService } from '../modules/settings'
 import { modelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore, sessionsStore, threadsStore } from '../store'
+import { extractSessionOutput } from '../store/sessionOutput'
 import type { PlanPromptOutcome } from './planPrompt'
 import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
 
@@ -661,57 +662,6 @@ async function waitForStoredSessionCompletion(
 
     await delay(750)
   }
-}
-
-function extractSessionOutput(
-  events: ReturnType<typeof sessionsStore.listEvents>,
-): string | undefined {
-  const assistantMessages = events
-    .filter((event) => event.type === 'activity')
-    .map((event) => assistantMessageText(event.payload))
-    .filter((text): text is string => Boolean(text?.trim()))
-
-  const assistantOutput = lastNonEmpty(assistantMessages)
-  if (assistantOutput) return assistantOutput
-
-  const stdoutMessages = events
-    .filter((event) => event.type === 'stdout')
-    .map((event) => textFromPayload(event.payload))
-    .filter((text) => text.trim())
-
-  return lastNonEmpty(stdoutMessages)
-}
-
-function assistantMessageText(payload: unknown): string | undefined {
-  if (!payload || typeof payload !== 'object') return undefined
-  const record = payload as Record<string, unknown>
-  return record.kind === 'message' &&
-    record.role === 'assistant' &&
-    typeof record.text === 'string'
-    ? record.text
-    : undefined
-}
-
-function textFromPayload(payload: unknown): string {
-  if (typeof payload === 'string') return payload
-  if (!payload || typeof payload !== 'object') return ''
-
-  const record = payload as Record<string, unknown>
-  for (const key of ['text', 'result', 'message', 'content', 'summary', 'output']) {
-    const value = record[key]
-    if (typeof value === 'string') return value
-  }
-
-  return ''
-}
-
-function lastNonEmpty(values: string[]): string | undefined {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const text = values[index].trim()
-    if (text) return text
-  }
-
-  return undefined
 }
 
 function isTerminalStatus(status: SessionStatus): boolean {
