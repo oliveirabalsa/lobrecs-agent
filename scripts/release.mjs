@@ -146,7 +146,6 @@ function updateVersion(newVersion) {
 }
 
 function createRelease(newVersion, options = {}) {
-  const { localPublish = false } = options
   log(`Creating release v${newVersion}...`)
 
   // Commit version bump
@@ -165,7 +164,7 @@ function createRelease(newVersion, options = {}) {
 
   // Build and publish
   log('Building and publishing...')
-  exec('npm', ['run', localPublish ? 'build:mac:local' : 'build:mac:release'])
+  exec('npm', ['run', 'build:mac:release'])
   log('✓ Build and publish complete')
 }
 
@@ -192,14 +191,14 @@ Options:
   minor         Bump minor version (e.g., 0.1.2 → 0.2.0)
   major         Bump major version (e.g., 0.1.2 → 1.0.0)
   X.Y.Z         Release as explicit version (e.g., 0.2.0)
-  --local       Bypass macOS signing/notarization checks for local release testing
+  --local       Build unsigned macOS artifacts locally without tagging or publishing
 
 Examples:
   npm run release           # Default patch bump
   npm run release:minor     # Bump minor version
   npm run release:major     # Bump major version
   npm run release 0.2.0     # Release as v0.2.0
-  npm run release -- --local # Local publish without notarization/cert validation
+  npm run release -- --local # Local unsigned macOS build only
 
 The release script will:
   1. Validate git state (clean, on main, up to date)
@@ -208,7 +207,7 @@ The release script will:
   4. Update version in package.json and electron-builder.yml
   5. Commit and tag the version bump
   6. Push commits and tags to GitHub
-  7. Build, (optionally notarize), and publish to oliveirabalsa/lobrecs-agent-releases
+  7. Build, notarize, and publish to oliveirabalsa/lobrecs-agent-releases
 `)
 }
 
@@ -267,11 +266,16 @@ export async function main(argv = process.argv.slice(2)) {
       argv.filter((arg) => arg !== '--help' && arg !== '-h'),
     )
 
+    if (localPublish) {
+      log('Running local unsigned macOS build without tagging or publishing...')
+      exec('npm', ['run', 'build:mac:local'])
+      log('✓ Local macOS build complete')
+      return 0
+    }
+
     validateGitState()
     validateGhToken()
-    if (!localPublish) {
-      validateMacReleaseEnvironment()
-    }
+    validateMacReleaseEnvironment()
 
     const currentVersion = readVersion()
     log(`Current version: ${currentVersion}`)
@@ -280,7 +284,7 @@ export async function main(argv = process.argv.slice(2)) {
     log(`New version: ${newVersion}`)
 
     updateVersion(newVersion)
-    createRelease(newVersion, { localPublish })
+    createRelease(newVersion)
     verifyRelease(newVersion)
 
     log('\n🎉 Release complete!')

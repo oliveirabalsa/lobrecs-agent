@@ -23,12 +23,16 @@ describe('createMacBuilderArgs', () => {
     ])
   })
 
-  it('can publish without signing/notarization when explicitly allowed', () => {
-    expect(createMacBuilderArgs(true, { allowUnsignedPublish: true })).toEqual([
+  it('rejects unsigned publish builds because macOS auto-update requires signing', () => {
+    expect(() =>
+      createMacBuilderArgs(true, { allowUnsignedPublish: true }),
+    ).toThrowError(/Unsigned macOS builds cannot be published/)
+  })
+
+  it('keeps unsigned local builds local', () => {
+    expect(createMacBuilderArgs(false, { allowUnsignedPublish: true })).toEqual([
       '--mac',
       '--config.npmRebuild=false',
-      '--publish',
-      'always',
     ])
   })
 })

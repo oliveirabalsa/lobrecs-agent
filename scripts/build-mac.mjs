@@ -16,6 +16,8 @@ const NOTARIZATION_HELP =
   'macOS publish builds must be notarized. Set one complete notarization credential group: APPLE_API_KEY + APPLE_API_KEY_ID + APPLE_API_ISSUER, or APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID, or APPLE_KEYCHAIN_PROFILE.'
 const CODE_SIGNING_HELP =
   'macOS publish builds must be signed with a Developer ID Application certificate. Set CSC_LINK/CSC_KEY_PASSWORD, set CSC_NAME for an installed certificate, or install a Developer ID Application identity in the macOS keychain.'
+const UNSIGNED_PUBLISH_HELP =
+  'Unsigned macOS builds cannot be published to the auto-update feed. Build unsigned artifacts locally with `npm run build:mac` and publish only Developer ID signed and notarized macOS releases.'
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   const publish = argv.includes('--publish')
@@ -53,12 +55,15 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 
 export function createMacBuilderArgs(publish = false, options = {}) {
   const { allowUnsignedPublish = false } = options
+  if (publish && allowUnsignedPublish) {
+    throw new Error(UNSIGNED_PUBLISH_HELP)
+  }
 
   return publish
     ? [
       ...DEFAULT_BUILDER_ARGS,
       ...PUBLISH_BUILDER_ARGS,
-      ...(allowUnsignedPublish ? [] : SIGNED_AND_NOTARIZED_PUBLISH_ARGS),
+      ...SIGNED_AND_NOTARIZED_PUBLISH_ARGS,
     ]
     : [...DEFAULT_BUILDER_ARGS]
 }

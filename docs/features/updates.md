@@ -32,9 +32,10 @@ The release script automates the entire process:
 6. **Pushes** commits and tags to GitHub
 7. **Builds, notarizes, and publishes** the DMG, ZIP, and metadata to `oliveirabalsa/lobrecs-agent-releases`
 
-For testing or local publishing workflows, use `npm run release -- --local` (or
-`npm run release:local`) to skip macOS signing/notarization checks while still
-publishing to GitHub releases from your machine.
+For local packaging tests, use `npm run build:mac` or
+`npm run release -- --local` (or `npm run release:local`). Local mode builds
+unsigned macOS artifacts only. It does not tag or publish, because unsigned or
+ad-hoc-signed ZIP assets cannot be installed by the macOS auto-updater.
 
 Users on older installed versions can check, download, and restart from inside the app.
 
@@ -42,10 +43,12 @@ Users on older installed versions can check, download, and restart from inside t
 
 If `oliveirabalsa/lobrecs-agent-releases` was created recently, seed it with an initial commit such as `README.md`. GitHub rejects releases for empty repositories.
 
-macOS auto-updates require a Developer ID signed and notarized app. Unsigned or
-ad-hoc-signed builds can still create DMGs, but Gatekeeper can block them after
-download with "Apple could not verify" malware warnings. Publish builds fail
-before the version bump unless signing and notarization are configured.
+macOS auto-updates require a Developer ID signed and notarized app. The updater
+uses Squirrel.Mac, which validates the downloaded replacement `.app` before
+installing it. Do not bypass this validation in production. Unsigned or
+ad-hoc-signed builds can still create local DMGs, but they must be installed
+manually. Publish builds fail before the version bump unless signing and
+notarization are configured.
 
 Configure one signing source:
 
@@ -64,6 +67,18 @@ Configure one notarization source:
 
 Do not commit these values or store them in app persistence. Keep them in the
 local shell, keychain, or CI secret store used for the release command.
+
+### GitHub Actions signing secrets
+
+The release workflow intentionally fails the macOS packaging step if signing or
+notarization secrets are missing, instead of publishing an update that installed
+apps cannot apply. Configure one signing source and one notarization source in
+the `lobrecs-agent-releases` workflow environment:
+
+- `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`, or `MAC_CSC_NAME`.
+- `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`; or
+  `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`; or
+  `APPLE_KEYCHAIN_PROFILE`.
 
 ## Feed Constraints
 
