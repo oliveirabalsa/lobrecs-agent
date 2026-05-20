@@ -21,7 +21,7 @@ import { UserMessage } from '../components/UserMessage'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import type { StartedSessionSummary } from '../../sessions/types'
-import { Button, Modal } from '../../../../components/ui'
+import { Button, Modal } from '../../../components/ui'
 
 interface RunWorkspaceProps {
   project: Project
@@ -342,7 +342,7 @@ export function RunWorkspace({
       {approvalRequest && approvalRequest.risk === 'high' ? (
         <Modal
           open={true}
-          onOpenChange={(open) => {
+          onOpenChange={(open: boolean) => {
             if (!open) void onRejectApproval()
           }}
           title="High-Risk Action Required"
