@@ -14,8 +14,10 @@ import {
 import { cloneSettings, mergeSettings } from './mergeSettings'
 import { DEFAULT_APP_SETTINGS } from './defaultSettings'
 
+const LEGACY_GEMINI_AGENT_ID = 'gemini'
+const ANTIGRAVITY_AGENT_ID = 'antigravity'
 const LEGACY_DEFAULT_AGENT_IDS = SUPPORTED_AGENT_IDS.filter(
-  (agentId) => agentId !== 'gemini',
+  (agentId) => agentId !== ANTIGRAVITY_AGENT_ID,
 )
 const MODEL_TIERS: readonly ModelTier[] = [
   'lightweight',
@@ -31,12 +33,15 @@ const PERMISSION_MODES: readonly AgentPermissionMode[] = [
 ]
 
 export function normalizeSettings(input: unknown): AppSettings {
-  const merged = mergeSettings(DEFAULT_APP_SETTINGS, objectLike(input) as AppSettingsPatch)
+  const merged = mergeSettings(
+    DEFAULT_APP_SETTINGS,
+    objectLike(migrateLegacyGeminiAgent(input)) as AppSettingsPatch,
+  )
   return sanitizeSettingsShape(merged)
 }
 
 export function normalizeSettingsPatch(input: unknown): AppSettingsPatch {
-  const candidate = objectLike(input)
+  const candidate = objectLike(migrateLegacyGeminiAgent(input))
   const normalized = normalizeSettings(mergeSettings(DEFAULT_APP_SETTINGS, candidate as AppSettingsPatch))
   return pickPatchShape(candidate, normalized) as AppSettingsPatch
 }
@@ -193,7 +198,7 @@ function normalizeRuntime(runtime: unknown): AppSettings['agents']['runtimes'][S
 }
 
 function normalizeAgentRuntimes(runtimes: unknown): AppSettings['agents']['runtimes'] {
-  const source = objectLike(runtimes)
+  const source = objectLike(migrateLegacyGeminiAgent(runtimes))
 
   return Object.fromEntries(
     SUPPORTED_AGENT_IDS.map((agentId) => [agentId, normalizeRuntime(source[agentId])]),
@@ -201,7 +206,7 @@ function normalizeAgentRuntimes(runtimes: unknown): AppSettings['agents']['runti
 }
 
 function normalizeAgentModelMap(modelMap: unknown): AppSettings['agents']['modelMap'] {
-  const source = objectLike(modelMap)
+  const source = objectLike(migrateLegacyGeminiAgent(modelMap))
 
   return Object.fromEntries(
     SUPPORTED_AGENT_IDS.map((agentId) => [
@@ -346,7 +351,7 @@ function pickPatchShape(patch: unknown, normalized: unknown): unknown {
 
 function uniqueSupportedAgents(values: unknown): SupportedAgentId[] {
   const source = Array.isArray(values) ? values : DEFAULT_APP_SETTINGS.agents.enabledAgentIds
-  return [...new Set(source.filter(isSupportedAgentId))]
+  return [...new Set(source.map(migrateLegacyAgentId).filter(isSupportedAgentId))]
 }
 
 function normalizeEnabledAgents(values: unknown): SupportedAgentId[] {
@@ -355,7 +360,7 @@ function normalizeEnabledAgents(values: unknown): SupportedAgentId[] {
 
   const isLegacyDefault =
     LEGACY_DEFAULT_AGENT_IDS.every((agentId) => enabled.includes(agentId)) &&
-    !enabled.includes('gemini')
+    !enabled.includes('antigravity')
 
   return isLegacyDefault
     ? [...new Set([...enabled, ...DEFAULT_APP_SETTINGS.agents.enabledAgentIds])]
@@ -363,7 +368,8 @@ function normalizeEnabledAgents(values: unknown): SupportedAgentId[] {
 }
 
 function supportedAgentOr(value: unknown, fallback: SupportedAgentId): SupportedAgentId {
-  return isSupportedAgentId(value) ? value : fallback
+  const migrated = migrateLegacyAgentId(value)
+  return isSupportedAgentId(migrated) ? migrated : fallback
 }
 
 function isSupportedAgentId(value: unknown): value is SupportedAgentId {
@@ -444,4 +450,53 @@ function objectLike(value: unknown): Record<string, unknown> {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function migrateLegacyAgentId(value: unknown): unknown {
+  return value === LEGACY_GEMINI_AGENT_ID ? ANTIGRAVITY_AGENT_ID : value
+}
+
+function migrateLegacyGeminiAgent(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(migrateLegacyGeminiAgent)
+  }
+
+  if (typeof value === 'string') {
+    return migrateLegacyAgentId(value)
+  }
+
+  if (!isPlainObject(value)) {
+    return value
+  }
+
+  const migrated: Record<string, unknown> = {}
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === LEGACY_GEMINI_AGENT_ID) continue
+    migrated[key] = migrateLegacyGeminiAgent(item)
+  }
+
+  if (Object.hasOwn(value, LEGACY_GEMINI_AGENT_ID)) {
+    const legacyValue = migrateLegacyGeminiAgent(value[LEGACY_GEMINI_AGENT_ID])
+    migrated[ANTIGRAVITY_AGENT_ID] = Object.hasOwn(migrated, ANTIGRAVITY_AGENT_ID)
+      ? mergeLegacyFallback(legacyValue, migrated[ANTIGRAVITY_AGENT_ID])
+      : legacyValue
+  }
+
+  return migrated
+}
+
+function mergeLegacyFallback(fallback: unknown, preferred: unknown): unknown {
+  if (!isPlainObject(fallback) || !isPlainObject(preferred)) {
+    return preferred ?? fallback
+  }
+
+  const merged: Record<string, unknown> = { ...fallback }
+  for (const [key, value] of Object.entries(preferred)) {
+    merged[key] = Object.hasOwn(merged, key)
+      ? mergeLegacyFallback(merged[key], value)
+      : value
+  }
+
+  return merged
 }

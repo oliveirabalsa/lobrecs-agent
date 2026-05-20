@@ -203,6 +203,24 @@ const migrations: Migration[] = [
       ALTER TABLE sessions ADD COLUMN image_attachments TEXT;
     `,
   },
+  {
+    version: 7,
+    up: `
+      UPDATE projects SET agent_id = 'antigravity' WHERE agent_id = 'gemini';
+      UPDATE sessions SET agent_id = 'antigravity' WHERE agent_id = 'gemini';
+      UPDATE automations SET agent_id = 'antigravity' WHERE agent_id = 'gemini';
+      UPDATE run_attempts SET agent_id = 'antigravity' WHERE agent_id = 'gemini';
+      UPDATE specs
+        SET selected_agents = REPLACE(selected_agents, '"gemini"', '"antigravity"')
+        WHERE selected_agents LIKE '%"gemini"%';
+      UPDATE app_settings
+        SET value = REPLACE(value, '"gemini"', '"antigravity"')
+        WHERE value LIKE '%"gemini"%';
+      UPDATE project_settings
+        SET value = REPLACE(value, '"gemini"', '"antigravity"')
+        WHERE value LIKE '%"gemini"%';
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {

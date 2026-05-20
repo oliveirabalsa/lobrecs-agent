@@ -65,7 +65,7 @@ describe('settings validation', () => {
     })
   })
 
-  it('merges Gemini defaults into older agent settings', () => {
+  it('merges Antigravity defaults into older agent settings', () => {
     const settings = normalizeSettings({
       agents: {
         enabledAgentIds: ['claude-code', 'codex', 'opencode'],
@@ -82,16 +82,103 @@ describe('settings validation', () => {
       },
     })
 
-    expect(settings.agents.enabledAgentIds).toContain('gemini')
-    expect(settings.agents.runtimes.gemini).toMatchObject({
+    expect(settings.agents.enabledAgentIds).toContain('antigravity')
+    expect(settings.agents.runtimes.antigravity).toMatchObject({
       enabled: true,
       permissionMode: 'dangerous',
     })
-    expect(settings.agents.modelMap.gemini).toMatchObject({
-      lightweight: 'flash-lite',
-      balanced: 'flash',
-      advanced: 'pro',
-      frontier: 'auto',
+    expect(settings.agents.modelMap.antigravity).toMatchObject({
+      lightweight: 'gemini-2.0-flash-lite',
+      balanced: 'gemini-2.5-flash',
+      advanced: 'gemini-3.0-pro',
+      frontier: 'gemini-3.5-pro',
+    })
+  })
+
+  it('migrates persisted Gemini settings to Antigravity', () => {
+    const settings = normalizeSettings({
+      agents: {
+        defaultAgentId: 'gemini',
+        fallbackAgentId: 'gemini',
+        enabledAgentIds: ['claude-code', 'gemini'],
+        runtimes: {
+          gemini: {
+            enabled: false,
+            command: '/usr/local/bin/agy',
+            permissionMode: 'read-only',
+            extraArgs: ['--print-timeout', '10m'],
+          },
+        },
+        modelMap: {
+          gemini: {
+            lightweight: 'legacy-light',
+            balanced: 'legacy-balanced',
+            advanced: 'legacy-advanced',
+            frontier: 'legacy-frontier',
+          },
+        },
+      },
+      swarms: {
+        defaultAgents: [{ role: 'researcher', agentId: 'gemini' }],
+        templates: [
+          {
+            id: 'legacy',
+            label: 'Legacy',
+            strategy: 'parallel',
+            agents: [{ role: 'approach', agentId: 'gemini' }],
+          },
+        ],
+      },
+      specs: {
+        defaultAgentIds: ['gemini'],
+      },
+    })
+
+    expect(settings.agents.defaultAgentId).toBe('antigravity')
+    expect(settings.agents.fallbackAgentId).toBe('antigravity')
+    expect(settings.agents.enabledAgentIds).toEqual(['claude-code', 'antigravity'])
+    expect(settings.agents.runtimes.antigravity).toMatchObject({
+      enabled: false,
+      command: '/usr/local/bin/agy',
+      permissionMode: 'read-only',
+      extraArgs: ['--print-timeout', '10m'],
+    })
+    expect(settings.agents.modelMap.antigravity).toEqual({
+      lightweight: 'legacy-light',
+      balanced: 'legacy-balanced',
+      advanced: 'legacy-advanced',
+      frontier: 'legacy-frontier',
+    })
+    expect(settings.swarms.defaultAgents).toEqual([
+      { role: 'researcher', agentId: 'antigravity' },
+    ])
+    expect(settings.swarms.templates[0]?.agents).toEqual([
+      { role: 'approach', agentId: 'antigravity' },
+    ])
+    expect(settings.specs.defaultAgentIds).toEqual(['antigravity'])
+  })
+
+  it('normalizes Gemini settings patches onto Antigravity keys', () => {
+    const patch = normalizeSettingsPatch({
+      agents: {
+        runtimes: {
+          gemini: {
+            enabled: false,
+            command: '/opt/bin/agy',
+          },
+        },
+      },
+    })
+
+    expect(patch).toMatchObject({
+      agents: {
+        runtimes: {
+          antigravity: {
+            enabled: false,
+            command: '/opt/bin/agy',
+          },
+        },
+      },
     })
   })
 })
