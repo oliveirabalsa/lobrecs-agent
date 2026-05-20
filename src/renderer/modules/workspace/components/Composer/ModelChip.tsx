@@ -54,7 +54,7 @@ export function ModelChip({
         tone="neutral"
         trailingIcon={<ChevronDownIcon />}
         onClick={() => setOpen((value) => !value)}
-        className="max-w-[180px] sm:max-w-[220px]"
+        className="max-w-[280px] sm:max-w-[320px]"
       >
         <span className="flex items-center gap-1.5">
           <span className="truncate">{label}</span>
