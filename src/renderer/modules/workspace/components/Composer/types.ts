@@ -1,12 +1,13 @@
 import type {
   AgentModelCatalog,
+  AgentApprovalMode,
   ImageAttachment,
   ModelTier,
   RoutingDecision,
   SupportedAgentId,
 } from '../../../../../shared/types'
 
-export type ApprovalMode = 'full' | 'auto-safe' | 'manual'
+export type ApprovalMode = AgentApprovalMode
 
 /** Reasoning/thinking depth requested for the selected model. */
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'

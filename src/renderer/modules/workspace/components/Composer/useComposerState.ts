@@ -154,7 +154,7 @@ function readApprovalMode(): ApprovalMode {
   const ls = safeStorage()
   const value = ls?.getItem(APPROVAL_MODE_KEY)
   if (value === 'full' || value === 'auto-safe' || value === 'manual') return value
-  return 'manual'
+  return 'full'
 }
 
 function parseThinking(value: unknown): ThinkingLevel | undefined {

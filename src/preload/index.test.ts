@@ -172,6 +172,7 @@ describe('preload api shape', () => {
             prompt: 'Ship it',
             agentId: 'codex',
             modelOverride: 'gpt-5.3-codex',
+            approvalMode: 'manual',
           }),
         expected: [
           'agent:dispatch',
@@ -180,6 +181,7 @@ describe('preload api shape', () => {
             prompt: 'Ship it',
             agentId: 'codex',
             modelOverride: 'gpt-5.3-codex',
+            approvalMode: 'manual',
           },
         ],
       },

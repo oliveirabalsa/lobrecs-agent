@@ -271,6 +271,7 @@ export function useWorkspaceController() {
       routingDecision: summary.routingDecision,
       agentId: summary.agentId,
       modelOverride: summary.modelOverride,
+      approvalMode: summary.approvalMode,
       createdAt: summary.createdAt ?? Date.now(),
     })
     setDiffProposalState(null)
@@ -369,6 +370,7 @@ export function useWorkspaceController() {
         prompt,
         agentId: activeSession.agentId,
         modelOverride: activeSession.modelOverride,
+        approvalMode: activeSession.approvalMode,
         imageAttachments: activeSession.imageAttachments,
         threadId: activeSession.threadId,
       })
@@ -380,6 +382,7 @@ export function useWorkspaceController() {
         routingDecision: null,
         agentId: toStartedSessionAgentId(activeSession.agentId),
         modelOverride: activeSession.modelOverride,
+        approvalMode: activeSession.approvalMode,
         createdAt,
       }
       handleSessionStarted(summary)
@@ -407,6 +410,7 @@ export function useWorkspaceController() {
     prompt: string,
     agentId?: AgentId,
     modelOverride?: string,
+    approvalMode?: StartedSessionSummary['approvalMode'],
   ): Promise<void> {
     if (!selectedProject || !activeThreadId) return
 
@@ -417,6 +421,7 @@ export function useWorkspaceController() {
         prompt,
         agentId,
         modelOverride,
+        approvalMode,
       })
       setBannerError(null)
     } catch (error: unknown) {
@@ -427,7 +432,11 @@ export function useWorkspaceController() {
 
   async function handleSteer(
     prompt: string,
-    options?: { agentId?: AgentId; modelOverride?: string },
+    options?: {
+      agentId?: AgentId
+      modelOverride?: string
+      approvalMode?: StartedSessionSummary['approvalMode']
+    },
   ): Promise<void> {
     if (!selectedProject || !activeSessionId) return
 
@@ -438,6 +447,7 @@ export function useWorkspaceController() {
         prompt,
         agentId: options?.agentId,
         modelOverride: options?.modelOverride,
+        approvalMode: options?.approvalMode,
       })
       handleSessionStarted({
         sessionId: result.sessionId,
@@ -446,6 +456,7 @@ export function useWorkspaceController() {
         routingDecision: null,
         agentId: toStartedSessionAgentId(options?.agentId ?? activeSession?.agentId),
         modelOverride: options?.modelOverride ?? activeSession?.modelOverride,
+        approvalMode: options?.approvalMode ?? activeSession?.approvalMode,
         createdAt: Date.now(),
       })
     } catch (error: unknown) {
@@ -469,6 +480,7 @@ export function useWorkspaceController() {
       await handleSteer(queuedMessage.prompt, {
         agentId: queuedMessage.agentId,
         modelOverride: queuedMessage.model,
+        approvalMode: queuedMessage.approvalMode,
       })
       setBannerError(null)
     } catch (error: unknown) {
@@ -530,6 +542,7 @@ export function useWorkspaceController() {
       routingDecision: null,
       agentId: session.agentId,
       modelOverride: session.model,
+      approvalMode: undefined,
       createdAt: session.createdAt,
     })
     writeActiveThread(session.projectId, session.threadId ?? null)

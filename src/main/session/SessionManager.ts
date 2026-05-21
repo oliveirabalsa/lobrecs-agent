@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
 import type {
   AgentActivity,
+  AgentApprovalMode,
   AgentEvent,
   AgentId,
   AgentPlanReviewDecisionPayload,
@@ -20,7 +21,7 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
 import { sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
-import { buildPlanExecutionPrompt, buildPlanModePrompt } from './planModePrompt'
+import { buildPlanExecutionPrompt, buildPlanModeContext } from './planModePrompt'
 import {
   buildLocalDiffProposals,
   captureLocalChangeBaseline,
@@ -144,6 +145,10 @@ type PlanReviewRecord = {
   baseContext?: string | null
 }
 
+type PendingQueuedMessage = QueuedMessage & {
+  runtimeSettings?: AgentRuntimeSettings
+}
+
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
 const THREAD_CONTEXT_SESSION_LIMIT = 6
 const THREAD_CONTEXT_PROMPT_CHARS = 2_000
@@ -167,7 +172,7 @@ export class SessionManager {
   private readonly worktreeIsolation: boolean
   private readonly processWarningsBySession = new Map<string, Set<string>>()
   private readonly sessionsPausedForUserInput = new Set<string>()
-  private readonly pendingQueues = new Map<string, QueuedMessage[]>()
+  private readonly pendingQueues = new Map<string, PendingQueuedMessage[]>()
   /** Plans awaiting an Approve/Reject decision, keyed by reviewId. */
   private readonly pendingPlanReviews = new Map<string, PlanReviewRecord>()
   private estimateCost: CostEstimator
@@ -255,19 +260,20 @@ export class SessionManager {
         })
       }
 
-      // Plan mode wraps the prompt with planning instructions for the agent
-      // only — `sessionsStore` keeps the original task so the UI bubble and
-      // replayed thread history stay clean.
-      const adapterPrompt = params.planMode
-        ? buildPlanModePrompt(params.prompt)
-        : params.prompt
+      // Plan mode appends instructions to adapter context while leaving the
+      // adapter prompt as the user's real task. If the prompt itself becomes
+      // "create a plan", external CLIs can produce a meta-plan instead of a
+      // plan for the requested implementation.
+      const adapterContext = params.planMode
+        ? buildPlanModeContext(context)
+        : context
 
       const agentSession = await adapter.dispatch({
         sessionId: session.id,
-        prompt: adapterPrompt,
+        prompt: params.prompt,
         repoPath: worktreePath ?? params.repoPath,
         model: params.model,
-        context,
+        context: adapterContext,
         imageAttachments: params.imageAttachments,
         runtimeSettings: params.runtimeSettings,
       })
@@ -355,26 +361,34 @@ export class SessionManager {
   }
 
   enqueueMessage(
-    params: { prompt: string; agentId: AgentId; model: string },
+    params: {
+      prompt: string
+      agentId: AgentId
+      model: string
+      approvalMode?: AgentApprovalMode
+      runtimeSettings?: AgentRuntimeSettings
+    },
     threadId: string,
   ): QueuedMessage {
-    const message: QueuedMessage = {
+    const message: PendingQueuedMessage = {
       id: randomUUID(),
       prompt: params.prompt,
       agentId: params.agentId,
       model: params.model,
+      approvalMode: params.approvalMode,
+      runtimeSettings: params.runtimeSettings,
       createdAt: Date.now(),
     }
 
     const queue = this.pendingQueues.get(threadId) ?? []
     const updated = [...queue, message]
     this.pendingQueues.set(threadId, updated)
-    broadcastQueueUpdated(threadId, updated)
-    return message
+    broadcastQueueUpdated(threadId, publicQueuedMessages(updated))
+    return publicQueuedMessage(message)
   }
 
   getQueue(threadId: string): QueuedMessage[] {
-    return [...(this.pendingQueues.get(threadId) ?? [])]
+    return publicQueuedMessages(this.pendingQueues.get(threadId) ?? [])
   }
 
   removeQueueItem(threadId: string, messageId: string): void {
@@ -389,7 +403,7 @@ export class SessionManager {
     } else {
       this.pendingQueues.set(threadId, updated)
     }
-    broadcastQueueUpdated(threadId, updated)
+    broadcastQueueUpdated(threadId, publicQueuedMessages(updated))
   }
 
   clearQueue(threadId: string): void {
@@ -962,7 +976,7 @@ export class SessionManager {
     } else {
       this.pendingQueues.set(threadId, rest)
     }
-    broadcastQueueUpdated(threadId, rest)
+    broadcastQueueUpdated(threadId, publicQueuedMessages(rest))
 
     try {
       await this.dispatch({
@@ -972,6 +986,7 @@ export class SessionManager {
         model: next.model,
         repoPath: fallback.repoPath,
         threadId,
+        runtimeSettings: next.runtimeSettings,
       })
     } catch (error) {
       // dispatch() invokes failSession() on most error paths, which already
@@ -1021,6 +1036,15 @@ function isUserQuestionActivity(payload: unknown): payload is Extract<
     payload !== null &&
     (payload as { kind?: unknown }).kind === 'user-question'
   )
+}
+
+function publicQueuedMessage(message: PendingQueuedMessage): QueuedMessage {
+  const { runtimeSettings: _runtimeSettings, ...publicMessage } = message
+  return publicMessage
+}
+
+function publicQueuedMessages(messages: readonly PendingQueuedMessage[]): QueuedMessage[] {
+  return messages.map(publicQueuedMessage)
 }
 
 function completionStatus(event: AgentEvent): SessionStatus {

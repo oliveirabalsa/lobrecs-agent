@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom'
 import type {
   AgentId,
+  AgentApprovalMode,
   ImageAttachment,
   Project,
   RoutingDecision,
@@ -19,6 +20,7 @@ import type {
 import { Spinner } from '../../../../components/ui'
 import { AttachButton } from './AttachButton'
 import { AttachmentStrip } from './AttachmentStrip'
+import { ApprovalModeChip } from './ApprovalModeChip'
 import { ModelChip } from './ModelChip'
 import { SendButton } from './SendButton'
 import { StatusFooter } from './StatusFooter'
@@ -37,6 +39,7 @@ export interface ComposerStartedSession {
   routingDecision: RoutingDecision | null
   agentId?: SupportedAgentId
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
 }
 
 export interface ComposerProps {
@@ -70,6 +73,7 @@ export interface ComposerProps {
     prompt: string,
     agentId?: AgentId,
     modelOverride?: string,
+    approvalMode?: AgentApprovalMode,
   ) => void | Promise<void>
 }
 
@@ -134,6 +138,8 @@ export function Composer({
     clearAttachments,
     attaching,
     setAttaching,
+    approvalMode,
+    setApprovalMode,
     planMode,
     setPlanMode,
     modelSelection,
@@ -198,7 +204,12 @@ export function Composer({
       setSubmitting(true)
       setError(null)
       try {
-        await onEnqueue(effectivePrompt, manualOption?.agentId, manualOption?.modelId)
+        await onEnqueue(
+          effectivePrompt,
+          manualOption?.agentId,
+          manualOption?.modelId,
+          approvalMode,
+        )
         setDraft('')
         clearAttachments()
         window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
@@ -224,6 +235,7 @@ export function Composer({
         prompt: effectivePrompt,
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
+        approvalMode,
         imageAttachments: sentAttachments,
         threadId: activeThreadId ?? undefined,
         planMode: planMode || undefined,
@@ -236,6 +248,7 @@ export function Composer({
         routingDecision: manualOption ? null : routerPreview,
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
+        approvalMode,
         createdAt: startedAt,
       })
       setDraft('')
@@ -253,6 +266,7 @@ export function Composer({
     activeThreadId,
     attachments,
     attaching,
+    approvalMode,
     busy,
     clearAttachments,
     draft,
@@ -460,6 +474,7 @@ export function Composer({
               disabled={submitting}
               onFilesSelected={(files) => void attachImageFiles(files)}
             />
+            <ApprovalModeChip mode={approvalMode} onChange={setApprovalMode} />
             {!running ? (
               <button
                 type="button"

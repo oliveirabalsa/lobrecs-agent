@@ -6,6 +6,7 @@ import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
+import { runtimeSettingsWithApprovalMode } from '../domain/approvalMode'
 import { isSupportedAgentId } from '../domain/isSupportedAgentId'
 import type {
   AgentDispatchParams,
@@ -88,6 +89,12 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         throw new Error(`Image attachments are not supported by the selected agent/model (${decision.agentId} - ${decision.model})`)
       }
 
+      const runtimeSettings = runtimeSettingsWithApprovalMode(
+        settings.agents.runtimes[decision.agentId],
+        params.approvalMode,
+        settings.execution.defaultApprovalMode,
+      )
+
       const { sessionId, threadId } = await context.sessionManager.dispatch({
         projectId: project.id,
         prompt: params.prompt,
@@ -98,7 +105,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         context: projectsStore.getContext(project.id),
         threadId: params.threadId,
         isolate: settings.execution.worktreeIsolation,
-        runtimeSettings: settings.agents.runtimes[decision.agentId],
+        runtimeSettings,
         planMode: params.planMode,
       })
 
@@ -159,11 +166,19 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         throw new Error('Thread message queue is full')
       }
 
+      const runtimeSettings = runtimeSettingsWithApprovalMode(
+        settings.agents.runtimes[decision.agentId],
+        params.approvalMode,
+        settings.execution.defaultApprovalMode,
+      )
+
       return context.sessionManager.enqueueMessage(
         {
           prompt: params.prompt,
           agentId: decision.agentId,
           model: decision.model,
+          approvalMode: params.approvalMode,
+          runtimeSettings,
         },
         params.threadId,
       )
@@ -213,6 +228,12 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       recentFailures,
     })
 
+    const runtimeSettings = runtimeSettingsWithApprovalMode(
+      settings.agents.runtimes[decision.agentId],
+      params.approvalMode,
+      settings.execution.defaultApprovalMode,
+    )
+
     return context.sessionManager.steer({
       sessionId: params.sessionId,
       projectId: session.projectId,
@@ -222,7 +243,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       repoPath: project.repoPath,
       context: projectsStore.getContext(project.id),
       isolate: settings.execution.worktreeIsolation,
-      runtimeSettings: settings.agents.runtimes[decision.agentId],
+      runtimeSettings,
     })
   })
 }

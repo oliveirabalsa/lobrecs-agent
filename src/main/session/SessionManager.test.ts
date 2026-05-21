@@ -906,7 +906,7 @@ describe('SessionManager', () => {
     ).toBe(true)
   })
 
-  it('wraps the prompt in plan mode and emits a plan-review marker on completion', async () => {
+  it('adds plan-mode instructions without turning the task into a plan request', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
@@ -925,10 +925,15 @@ describe('SessionManager', () => {
       planMode: true,
     })
 
-    // The agent receives planning instructions...
-    expect(adapter.dispatchedParams?.prompt).toContain('[Plan Mode]')
-    expect(adapter.dispatchedParams?.prompt).toContain('add a settings page')
-    // ...but the stored session keeps the original task text clean.
+    // The agent receives the real task as the task, while plan-mode rules live
+    // in context. This avoids creating a plan for "create a plan".
+    expect(adapter.dispatchedParams?.prompt).toBe('add a settings page')
+    expect(adapter.dispatchedParams?.context).toContain('[Plan Mode]')
+    expect(adapter.dispatchedParams?.context).toMatch(/actual work request/i)
+    expect(adapter.dispatchedParams?.context).toMatch(
+      /implementation plan itself/i,
+    )
+    // The stored session also keeps the original task text clean.
     expect(sessionsStore.get(sessionId)?.prompt).toBe('add a settings page')
 
     adapter.emit({
@@ -1159,9 +1164,25 @@ describe('SessionManager', () => {
 
     // A follow-up is queued while the plan is pending review.
     manager.enqueueMessage(
-      { prompt: 'then add tests', agentId: 'claude-code', model: 'claude-sonnet-4-6' },
+      {
+        prompt: 'then add tests',
+        agentId: 'claude-code',
+        model: 'claude-sonnet-4-6',
+        approvalMode: 'manual',
+        runtimeSettings: {
+          enabled: true,
+          command: '',
+          permissionMode: 'ask-for-approval',
+          extraArgs: [],
+        },
+      },
       planning.threadId,
     )
+    expect(manager.getQueue(planning.threadId)[0]).toMatchObject({
+      prompt: 'then add tests',
+      approvalMode: 'manual',
+    })
+    expect(manager.getQueue(planning.threadId)[0]).not.toHaveProperty('runtimeSettings')
 
     adapter.emit({
       type: 'session-complete',
@@ -1181,6 +1202,7 @@ describe('SessionManager', () => {
     // The queued follow-up runs instead of being stranded on an idle thread.
     await waitFor(() => adapter.dispatches.length === 2)
     expect(adapter.dispatches[1]?.prompt).toBe('then add tests')
+    expect(adapter.dispatches[1]?.runtimeSettings?.permissionMode).toBe('ask-for-approval')
     expect(manager.getQueue(planning.threadId)).toHaveLength(0)
   })
 

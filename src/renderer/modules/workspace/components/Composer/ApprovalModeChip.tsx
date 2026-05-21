@@ -23,10 +23,7 @@ const MODES: ApprovalMode[] = ['manual', 'auto-safe', 'full']
 
 /**
  * Status chip with a chevron dropdown that lets the user pick an approval
- * posture. Currently visual-only — selection persists to localStorage but
- * is NOT yet wired to dispatch.
- *
- * TODO: M7+ — wire to agent:set-approval-mode IPC once contract exists.
+ * posture. Selection persists locally and is threaded into each dispatch.
  */
 export function ApprovalModeChip({ mode, onChange }: ApprovalModeChipProps) {
   const [open, setOpen] = useState(false)

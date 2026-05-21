@@ -1,5 +1,6 @@
 import type {
   ImageAttachment,
+  AgentApprovalMode,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -15,6 +16,7 @@ export interface ActiveSessionMeta {
   routingDecision: RoutingDecision | null
   agentId?: Project['agentId']
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
   createdAt?: number
 }
 
@@ -31,5 +33,6 @@ export interface StartedSessionSummary {
   routingDecision: RoutingDecision | null
   agentId?: SupportedAgentId
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
   createdAt?: number
 }

@@ -34,11 +34,14 @@ export interface AgentModelCatalog {
   error?: string
 }
 
+export type AgentApprovalMode = 'manual' | 'auto-safe' | 'full'
+
 export interface AgentDispatchParams {
   projectId: string
   prompt: string
   agentId?: AgentId
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
   imageAttachments?: ImageAttachment[]
   /** When provided, links the new session to an existing thread instead of creating one. */
   threadId?: string
@@ -94,6 +97,7 @@ export interface QueuedMessage {
   prompt: string
   agentId: AgentId
   model: string
+  approvalMode?: AgentApprovalMode
   createdAt: number
 }
 
@@ -104,6 +108,7 @@ export interface EnqueueParams {
   prompt: string
   agentId?: AgentId
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
 }
 
 /** Broadcast payload when the queue for a thread changes. */
@@ -120,6 +125,7 @@ export interface SteerParams {
   prompt: string
   agentId?: AgentId
   modelOverride?: string
+  approvalMode?: AgentApprovalMode
 }
 
 export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
