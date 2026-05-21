@@ -554,6 +554,94 @@ describe('SwarmOrchestrator', () => {
 
     await expect(orchestrator.spawn(baseConfig())).rejects.toThrow('Swarm agent limit is 1')
   })
+
+  it('spawns a swarm when plan confirmation succeeds (yes outcome)', async () => {
+    const worktrees = createFakeWorktrees()
+    const confirmPlan = vi.fn(async () => ({ optionId: 'yes' }))
+    const orchestrator = new SwarmOrchestrator({
+      getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: async (input) => ({
+        agentId: input.preferredAgentId,
+        model: input.modelOverride ?? 'claude-sonnet-4-6',
+      }),
+      dispatchSession: async (input) => {
+        return { sessionId: input.sessionId, status: 'running' }
+      },
+      confirmPlan,
+      worktrees,
+    })
+
+    const result = await orchestrator.spawn(baseConfig())
+    expect(result.sessions).toHaveLength(2)
+    expect(confirmPlan).toHaveBeenCalledTimes(1)
+    expect(confirmPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Implement this plan?',
+        options: [
+          { id: 'yes', label: 'Yes, implement this plan' },
+          { id: 'no', label: 'No, and tell me what to change' },
+        ],
+        allowFreeText: true,
+      })
+    )
+  })
+
+  it('aborts swarm and throws PLAN_REJECTED when plan confirmation is rejected (no outcome)', async () => {
+    const worktrees = createFakeWorktrees()
+    const confirmPlan = vi.fn(async () => ({ optionId: 'no', freeText: 'change something' }))
+    const orchestrator = new SwarmOrchestrator({
+      getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: async (input) => ({
+        agentId: input.preferredAgentId,
+        model: input.modelOverride ?? 'claude-sonnet-4-6',
+      }),
+      dispatchSession: async (input) => {
+        return { sessionId: input.sessionId, status: 'running' }
+      },
+      confirmPlan,
+      worktrees,
+    })
+
+    const spawnPromise = orchestrator.spawn(baseConfig())
+    await expect(spawnPromise).rejects.toThrow('User rejected plan: change something')
+    
+    try {
+      await spawnPromise
+    } catch (error: any) {
+      expect(error.code).toBe('PLAN_REJECTED')
+      expect(error.freeText).toBe('change something')
+    }
+  })
+
+  it('aborts swarm and throws error when plan confirmation times out or is cancelled', async () => {
+    const worktrees = createFakeWorktrees()
+    let outcome: 'timeout' | 'cancelled' = 'timeout'
+    const confirmPlan = vi.fn(async () => outcome)
+    const orchestrator = new SwarmOrchestrator({
+      getProject: async () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: async (input) => ({
+        agentId: input.preferredAgentId,
+        model: input.modelOverride ?? 'claude-sonnet-4-6',
+      }),
+      dispatchSession: async (input) => {
+        return { sessionId: input.sessionId, status: 'running' }
+      },
+      confirmPlan,
+      worktrees,
+    })
+
+    await expect(orchestrator.spawn(baseConfig())).rejects.toThrow(
+      'Plan prompt timed out before the user responded'
+    )
+
+    outcome = 'cancelled'
+    await expect(orchestrator.spawn(baseConfig())).rejects.toThrow(
+      'Plan prompt was cancelled before the user responded'
+    )
+  })
 })
 
 function baseConfig(): SwarmConfig {

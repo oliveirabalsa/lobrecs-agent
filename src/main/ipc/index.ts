@@ -23,7 +23,9 @@ import { registerUpdateHandlers } from '../modules/updates'
 import { ModelRouter } from '../router'
 import { sessionManager } from '../session'
 import { projectsStore, threadsStore } from '../store'
+import { askPlanPrompt } from '../swarm/planPrompt'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
+
 
 const modelRouter = new ModelRouter({
   adapterRegistry,
@@ -124,6 +126,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
       return { sessionId, threadId, status: 'running' }
     },
     cancelSession: (sessionId) => context.sessionManager.cancel(sessionId),
+    confirmPlan: (input) => askPlanPrompt(input),
     worktrees: context.worktreeManager,
     getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
   })
