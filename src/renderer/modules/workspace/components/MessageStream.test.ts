@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { StreamItem } from '../lib/groupTurns'
 import {
+  editedFileCardsForFallbackFiles,
   flattenCodeChangeFallbacks,
   shouldPinMessageStream,
   splitFinalAssistant,
   streamItemReceivesRunningState,
+  visibleProposalsForFallbackFiles,
 } from './MessageStream'
 
 describe('shouldPinMessageStream', () => {
@@ -45,6 +47,30 @@ describe('splitFinalAssistant', () => {
 
     expect(result.finalAssistantText).toBeUndefined()
     expect(result.renderable).toEqual(items)
+  })
+
+  it('moves running code changes into the trailing edited-files card path', () => {
+    const codeChange = {
+      kind: 'file-change',
+      filePath: 'src/app.ts',
+      changeType: 'modified',
+      additions: 3,
+      deletions: 0,
+      status: 'pending',
+    } satisfies Extract<StreamItem, { kind: 'file-change' }>
+    const items: StreamItem[] = [
+      { kind: 'message', role: 'assistant', text: 'editing' },
+      codeChange,
+      { kind: 'message', role: 'assistant', text: 'still editing' },
+    ]
+
+    const result = splitFinalAssistant(items, { separateFinalAssistant: false })
+
+    expect(result.renderable).toEqual([
+      { kind: 'message', role: 'assistant', text: 'editing' },
+      { kind: 'message', role: 'assistant', text: 'still editing' },
+    ])
+    expect(result.trailingCodeChanges).toEqual([codeChange])
   })
 
   it('moves the final assistant message after completed-turn artifacts', () => {
@@ -198,6 +224,128 @@ describe('flattenCodeChangeFallbacks', () => {
         changeType: 'added',
         additions: 8,
         deletions: 0,
+      },
+    ])
+  })
+})
+
+describe('visibleProposalsForFallbackFiles', () => {
+  it('matches relative HTML file-change paths to absolute diff proposal paths', () => {
+    const proposal = {
+      filePath: '/Users/leo/project/index.html',
+      originalContent: '<main>old</main>\n',
+      proposedContent: '<main>new</main>\n',
+      additions: 1,
+      deletions: 1,
+    }
+
+    expect(
+      visibleProposalsForFallbackFiles([proposal], [
+        {
+          filePath: '/repo/index.html',
+          changeType: 'modified',
+        },
+      ]),
+    ).toEqual([proposal])
+  })
+
+  it('keeps fallback rows when any changed file has no matching proposal yet', () => {
+    const proposal = {
+      filePath: '/Users/leo/project/src/app.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+    }
+
+    expect(
+      visibleProposalsForFallbackFiles([proposal], [
+        {
+          filePath: 'src/app.ts',
+          changeType: 'modified',
+        },
+        {
+          filePath: 'index.html',
+          changeType: 'modified',
+        },
+      ]),
+    ).toEqual([])
+  })
+
+  it('does not use basename fallback when multiple proposals share the name', () => {
+    const proposals = [
+      {
+        filePath: '/Users/leo/project/index.html',
+        originalContent: 'old\n',
+        proposedContent: 'new\n',
+      },
+      {
+        filePath: '/Users/leo/project/public/index.html',
+        originalContent: 'old\n',
+        proposedContent: 'new\n',
+      },
+    ]
+
+    expect(
+      visibleProposalsForFallbackFiles(proposals, [
+        {
+          filePath: '/repo/index.html',
+          changeType: 'modified',
+        },
+      ]),
+    ).toEqual([])
+  })
+})
+
+describe('editedFileCardsForFallbackFiles', () => {
+  it('builds one card per edited file and keeps live counts beside matching proposals', () => {
+    const htmlProposal = {
+      filePath: '/Users/leo/project/index.html',
+      originalContent: '<main>old</main>\n',
+      proposedContent: '<main>new</main>\n',
+      additions: 16,
+      deletions: 1,
+    }
+
+    expect(
+      editedFileCardsForFallbackFiles([htmlProposal], [
+        {
+          filePath: '/repo/index.html',
+          changeType: 'modified',
+          additions: 7,
+          deletions: 0,
+        },
+        {
+          filePath: 'src/app.ts',
+          changeType: 'modified',
+          additions: 2,
+          deletions: 1,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: '/repo/index.html',
+        proposals: [htmlProposal],
+        fallbackFiles: [
+          {
+            filePath: '/Users/leo/project/index.html',
+            changeType: 'modified',
+            additions: 7,
+            deletions: 0,
+          },
+        ],
+      },
+      {
+        id: 'src/app.ts',
+        proposals: [],
+        fallbackFiles: [
+          {
+            filePath: 'src/app.ts',
+            changeType: 'modified',
+            additions: 2,
+            deletions: 1,
+          },
+        ],
       },
     ])
   })

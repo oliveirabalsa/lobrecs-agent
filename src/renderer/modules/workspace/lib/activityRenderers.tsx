@@ -20,6 +20,7 @@ import {
 } from '../components/artifacts'
 import type { UserQuestionActivity } from '../components/artifacts'
 import type { StreamItem } from './groupTurns'
+import { matchingDiffProposals } from './diffProposalMatching'
 import {
   shouldSuppressUserQuestionToolResult,
   userQuestionActivityFromToolPayload,
@@ -192,9 +193,7 @@ export function renderStreamItem(
 
     case 'file-change':
       {
-        const proposals = (ctx.diffProposals ?? []).filter(
-          (proposal) => proposal.filePath === item.filePath,
-        )
+        const proposals = matchingDiffProposals(ctx.diffProposals ?? [], item.filePath)
         const hasLiveProposals = hasLiveDiffProposals(proposals)
         return (
           <EditedFilesCard

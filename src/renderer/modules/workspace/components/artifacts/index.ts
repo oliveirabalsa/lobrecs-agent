@@ -13,6 +13,9 @@ export type { CommandsGroupProps } from './CommandsGroup'
 export { EditedFilesCard } from './EditedFilesCard'
 export type { EditedFilesCardProps } from './EditedFilesCard'
 
+export { FileDiffModal } from './FileDiffModal'
+export type { FileDiffModalProps } from './FileDiffModal'
+
 export { AnimatedDiffStat } from './AnimatedDiffStat'
 export type { AnimatedDiffStatProps } from './AnimatedDiffStat'
 

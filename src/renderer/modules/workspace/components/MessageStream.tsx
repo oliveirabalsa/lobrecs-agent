@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { AgentActivity } from '../../../../shared/types'
 import { Divider } from '../../../components/ui'
 import { groupTurns, type StreamItem, type Turn, type TurnUserMessage } from '../lib/groupTurns'
@@ -11,6 +11,8 @@ import type { EditedFilesCardProps } from './artifacts'
 import { AssistantMessage } from './AssistantMessage'
 import { UserMessage } from './UserMessage'
 import { WorkingState } from './WorkingState'
+import { matchingDiffProposals } from '../lib/diffProposalMatching'
+import type { DiffProposal } from '../../../../shared/types'
 
 export interface MessageStreamProps {
   activities: AgentActivity[]
@@ -36,6 +38,12 @@ interface AutoPinState {
 }
 
 type CodeChangeFallback = NonNullable<EditedFilesCardProps['fallbackFiles']>[number]
+
+interface EditedFileCardModel {
+  id: string
+  proposals: DiffProposal[]
+  fallbackFiles: CodeChangeFallback[]
+}
 
 export function shouldPinMessageStream({
   loading: _loading,
@@ -104,6 +112,81 @@ export function flattenCodeChangeFallbacks(
   }
 
   return [...files.values()]
+}
+
+export function visibleProposalsForFallbackFiles(
+  liveProposals: readonly DiffProposal[],
+  fallbackFiles: readonly CodeChangeFallback[],
+): DiffProposal[] {
+  if (fallbackFiles.length === 0) return []
+
+  const byPath = new Map<string, DiffProposal>()
+  for (const file of fallbackFiles) {
+    const matches = matchingDiffProposals(liveProposals, file.filePath)
+    if (matches.length === 0) return []
+
+    for (const proposal of matches) {
+      byPath.set(proposal.filePath, proposal)
+    }
+  }
+
+  return [...byPath.values()]
+}
+
+export function editedFileCardsForFallbackFiles(
+  liveProposals: readonly DiffProposal[],
+  fallbackFiles: readonly CodeChangeFallback[],
+): EditedFileCardModel[] {
+  return fallbackFiles.map((fallback) => {
+    const proposals = visibleProposalsForFallbackFiles(liveProposals, [fallback])
+    const normalizedFallback =
+      proposals.length === 1
+        ? [{ ...fallback, filePath: proposals[0].filePath }]
+        : [fallback]
+
+    return {
+      id: fallback.filePath,
+      proposals,
+      fallbackFiles: normalizedFallback,
+    }
+  })
+}
+
+/**
+ * Card models for a turn's trailing "Edited files" section.
+ *
+ * A turn's edits are described by two streams that rarely line up perfectly:
+ *
+ *  - `fallbackFiles` — one row per `file-change` activity the agent emitted.
+ *    Turn-scoped and ordered, but some agents (notably Codex `apply_patch`)
+ *    never emit a `file-change` for an edit, so this set can miss files.
+ *  - `liveProposals` — whole-file diffs the main process computes against the
+ *    repo baseline. Authoritative about *content*, but global to the session,
+ *    so a proposal cannot be attributed to a single turn on its own.
+ *
+ * `editedFileCardsForFallbackFiles` already covers the first stream. This
+ * function adds the missing half: a card for every proposal that no
+ * file-change row accounted for — which is how a file edited only via
+ * `apply_patch` (proposal, no `file-change` activity) still gets a card.
+ *
+ * `includeUnmatchedProposals` gates the proposal-only cards. `liveProposals`
+ * is session-global, so if every turn appended them the same file would
+ * render once per turn — the caller passes `true` for a single turn only.
+ */
+export function editedFileCards(
+  liveProposals: readonly DiffProposal[],
+  fallbackFiles: readonly CodeChangeFallback[],
+  options: { includeUnmatchedProposals: boolean },
+): EditedFileCardModel[] {
+  const fallbackCards = editedFileCardsForFallbackFiles(liveProposals, fallbackFiles)
+  if (!options.includeUnmatchedProposals) return fallbackCards
+
+  // TODO(you): return `fallbackCards` plus one card per live proposal that no
+  // fallback card already covers. A proposal is "covered" when it appears in
+  // some `fallbackCards[i].proposals`. A proposal-only card model looks like:
+  //   { id: proposal.filePath, proposals: [proposal], fallbackFiles: [] }
+  // See the guidance in the chat for the design trade-offs to weigh.
+  return fallbackCards
 }
 
 /**
@@ -315,7 +398,11 @@ function TurnBlock({
             >
               {renderStreamItem(item, `${turn.id}-${idx}`, {
                 ...ctx,
-                running: streamItemReceivesRunningState(renderable, idx, running),
+                running: streamItemReceivesRunningState(
+                  [...renderable, ...trailingCodeChanges],
+                  idx,
+                  running,
+                ),
               })}
             </div>
           ))}
@@ -345,7 +432,6 @@ function TurnBlock({
       ))}
 
       <TrailingEditedFilesCard
-        turn={turn}
         isLast={isLast}
         ctx={ctx}
         trailingCodeChanges={trailingCodeChanges}
@@ -364,12 +450,10 @@ function TurnBlock({
 }
 
 function TrailingEditedFilesCard({
-  turn,
   isLast,
   ctx,
   trailingCodeChanges,
 }: {
-  turn: Turn
   isLast: boolean
   ctx: RendererContext
   trailingCodeChanges: StreamItem[]
@@ -377,35 +461,26 @@ function TrailingEditedFilesCard({
   const liveProposals = ctx.diffProposals ?? []
   const fallbackFiles = flattenCodeChangeFallbacks(trailingCodeChanges)
 
-  if (fallbackFiles.length > 0) {
-    const fallbackPaths = new Set(fallbackFiles.map((file) => file.filePath))
-    const proposals = liveProposals.filter((proposal) =>
-      fallbackPaths.has(proposal.filePath),
-    )
-    const hasProposalForEveryFallback = fallbackFiles.every((file) =>
-      proposals.some((proposal) => proposal.filePath === file.filePath),
-    )
-    const visibleProposals = hasProposalForEveryFallback ? proposals : []
+  // `liveProposals` is session-global; only the last turn surfaces proposals
+  // that lack a `file-change` activity, so the same file is not rendered once
+  // per turn.
+  const cards = editedFileCards(liveProposals, fallbackFiles, {
+    includeUnmatchedProposals: isLast,
+  })
+  if (cards.length === 0) return null
 
-    return (
-      <EditedFilesCard
-        proposals={visibleProposals}
-        fallbackFiles={fallbackFiles}
-        onReview={visibleProposals.length > 0 ? ctx.onReviewFile : undefined}
-      />
-    )
-  }
-
-  if (isLast && turn.completion !== undefined && liveProposals.length > 0) {
-    return (
-      <EditedFilesCard
-        proposals={liveProposals}
-        onReview={ctx.onReviewFile}
-      />
-    )
-  }
-
-  return null
+  return (
+    <Fragment>
+      {cards.map((card) => (
+        <EditedFilesCard
+          key={card.id}
+          proposals={card.proposals}
+          fallbackFiles={card.fallbackFiles}
+          onReview={card.proposals.length > 0 ? ctx.onReviewFile : undefined}
+        />
+      ))}
+    </Fragment>
+  )
 }
 
 export function streamItemReceivesRunningState(
@@ -468,7 +543,7 @@ export function splitFinalAssistant(
   const trailingCodeChanges = reviewlessItems.filter(isCodeChangeItem)
   const assistantCandidates = reviewlessItems.filter((item) => !isCodeChangeItem(item))
   if (options.separateFinalAssistant === false) {
-    return { renderable: reviewlessItems, trailingCodeChanges: [], planReviewItems }
+    return { renderable: assistantCandidates, trailingCodeChanges, planReviewItems }
   }
 
   let lastAssistantIndex = -1

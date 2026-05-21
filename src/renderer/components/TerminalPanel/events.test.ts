@@ -68,6 +68,47 @@ describe('terminal event handling', () => {
     ])
   })
 
+  it('updates live diff proposals without printing terminal noise', () => {
+    const writes: string[] = []
+    const callbacks = {
+      onDiffProposals: vi.fn(),
+      onApprovalRequest: vi.fn(),
+      onStatusChange: vi.fn(),
+    }
+    const handler = createTerminalEventHandler(
+      { write: (message) => writes.push(message) },
+      callbacks,
+      new Set(),
+    )
+
+    handler({
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/new.ts',
+            originalContent: '',
+            proposedContent: 'created\n',
+            additions: 1,
+            deletions: 0,
+          },
+        ],
+      },
+      timestamp: 1,
+    })
+
+    expect(callbacks.onDiffProposals).toHaveBeenCalledWith([
+      expect.objectContaining({
+        filePath: '/repo/new.ts',
+        additions: 1,
+        deletions: 0,
+      }),
+    ])
+    expect(writes).toEqual([])
+  })
+
   it('deduplicates replayed events without clearing visible output', () => {
     const writes: string[] = []
     const callbacks = {

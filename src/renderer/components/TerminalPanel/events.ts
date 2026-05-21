@@ -65,6 +65,10 @@ export function normalizeDiffPayload(payload: unknown): DiffProposal[] {
     }))
 }
 
+export function isLiveDiffPayload(payload: unknown): boolean {
+  return isRecord(payload) && payload.live === true
+}
+
 export function normalizeApprovalPayload(payload: unknown): ApprovalRequest {
   if (isRecord(payload)) {
     const action =
@@ -159,7 +163,9 @@ export function createTerminalEventHandler(
       const proposals = normalizeDiffPayload(event.payload)
       if (proposals.length > 0) {
         callbacks.onDiffProposals(proposals)
-        writeLine(term, `Diff proposal received for ${proposals.length} file(s).`)
+        if (!isLiveDiffPayload(event.payload)) {
+          writeLine(term, `Diff proposal received for ${proposals.length} file(s).`)
+        }
       }
       return
     }

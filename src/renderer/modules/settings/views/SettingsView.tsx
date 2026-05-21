@@ -770,7 +770,7 @@ function ThemePicker() {
   const { theme, setTheme } = useTheme()
 
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {THEME_IDS.map((id) => {
         const meta = THEME_META[id]
         const selected = theme === id

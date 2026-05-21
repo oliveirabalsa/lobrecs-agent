@@ -64,6 +64,38 @@ describe('renderStreamItem diff actions', () => {
     expect(props.onReview).toBe(onReview)
   })
 
+  it('matches relative file-change paths to absolute diff proposal paths', () => {
+    const onReview = vi.fn()
+    const htmlProposal: DiffProposal = {
+      filePath: '/Users/leo/project/index.html',
+      originalContent: '<h1>Old</h1>\n',
+      proposedContent: '<h1>New</h1>\n',
+      additions: 1,
+      deletions: 1,
+    }
+
+    const node = renderStreamItem(
+      {
+        kind: 'file-change',
+        filePath: '/repo/index.html',
+        changeType: 'modified',
+        status: 'applied',
+      },
+      'change',
+      {
+        sessionId: 'session-1',
+        running: false,
+        diffProposals: [htmlProposal],
+        onReviewFile: onReview,
+      },
+    )
+
+    const props = elementProps<EditedFilesCardElementProps>(node)
+
+    expect(props.proposals).toEqual([htmlProposal])
+    expect(props.onReview).toBe(onReview)
+  })
+
   it('renders agent question prompts as answerable cards', () => {
     const onAnswer = vi.fn()
     const prompt = {
