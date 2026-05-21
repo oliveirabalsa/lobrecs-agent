@@ -223,6 +223,7 @@ function isCodexInfrastructureNoise(line: string): boolean {
     line.includes('Auth(TokenRefreshFailed') ||
     line.includes('codex_core_plugins::') ||
     line.includes('codex_core_skills::') ||
+    line.includes('codex_memories_write::phase2') ||
     line.includes('codex_rmcp_client::') ||
     line.includes('codex_mcp::rmcp_client') ||
     line.includes('stdio_server_launcher') ||

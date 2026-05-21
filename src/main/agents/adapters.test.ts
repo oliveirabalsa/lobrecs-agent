@@ -221,6 +221,7 @@ describe('agent adapters', () => {
     expect(stderrText).toBe('codex warning')
     expect(stderrText).not.toContain('TokenRefreshFailed')
     expect(stderrText).not.toContain('Reading additional input')
+    expect(stderrText).not.toContain('codex_memories_write')
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 
