@@ -11,6 +11,7 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { closeDb, projectsStore, sessionsStore, setDbForTests, threadsStore } from '../store'
 import type { AgentAdapter, AgentSession } from './SessionManager'
 import { SessionManager } from './SessionManager'
+import { buildPlanExecutionPrompt } from './planModePrompt'
 
 const execFileAsync = promisify(execFile)
 
@@ -1007,10 +1008,7 @@ describe('SessionManager', () => {
     expect(execution).not.toBeNull()
     expect(execution?.threadId).toBe(planning.threadId)
     expect(adapter.dispatches).toHaveLength(2)
-    // The execution prompt releases the agent to act — it is NOT re-wrapped
-    // with the planning phase's no-changes instructions.
-    expect(adapter.dispatches[1]?.prompt).toMatch(/approved/i)
-    expect(adapter.dispatches[1]?.prompt).not.toMatch(/do not edit files/i)
+    expect(adapter.dispatches[1]?.prompt).toBe(buildPlanExecutionPrompt())
   })
 
   it('does not dispatch an execution session when the plan is rejected', async () => {
