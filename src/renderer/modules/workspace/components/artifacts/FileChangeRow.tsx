@@ -1,3 +1,5 @@
+import { AnimatedDiffStat } from './AnimatedDiffStat'
+
 export type FileChangeType = 'added' | 'modified' | 'deleted'
 
 export interface FileChangeRowProps {
@@ -19,35 +21,9 @@ export function FileChangeRow({
   const delCount = deletions ?? 0
   const total = addCount + delCount
 
-  const stats = (
-    <span className="flex items-center shrink-0 font-mono text-xs">
-      {total > 0 ? (
-        <span className="hidden sm:inline-flex h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-white/10 mx-2">
-          {addCount > 0 ? (
-            <span 
-              className="bg-accent-add h-full" 
-              style={{ width: `${(addCount / total) * 100}%` }} 
-            />
-          ) : null}
-          {delCount > 0 ? (
-            <span 
-              className="bg-accent-del h-full" 
-              style={{ width: `${(delCount / total) * 100}%` }} 
-            />
-          ) : null}
-        </span>
-      ) : null}
-      {typeof additions === 'number' ? (
-        <span className="text-accent-add">+{additions}</span>
-      ) : null}
-      {typeof additions === 'number' && typeof deletions === 'number' ? (
-        <span className="mx-1 text-muted"> </span>
-      ) : null}
-      {typeof deletions === 'number' ? (
-        <span className="text-accent-del">-{deletions}</span>
-      ) : null}
-    </span>
-  )
+  const stats = total > 0 ? (
+    <AnimatedDiffStat additions={addCount} deletions={delCount} className="text-xs" />
+  ) : null
 
   if (onClick) {
     return (

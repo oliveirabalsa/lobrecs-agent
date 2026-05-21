@@ -38,13 +38,13 @@ export function ChangeBar({ additions, deletions, className }: ChangeBarProps) {
       {additions > 0 ? (
         <span
           className="h-full bg-accent-add"
-          style={{ width: `${(additions / total) * 100}%` }}
+          style={{ width: `${(additions / total) * 100}%`, transition: 'width 280ms ease-out' }}
         />
       ) : null}
       {deletions > 0 ? (
         <span
           className="h-full bg-accent-del"
-          style={{ width: `${(deletions / total) * 100}%` }}
+          style={{ width: `${(deletions / total) * 100}%`, transition: 'width 280ms ease-out' }}
         />
       ) : null}
     </span>

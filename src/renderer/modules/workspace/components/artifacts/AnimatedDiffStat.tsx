@@ -1,5 +1,5 @@
 import NumberFlow from '@number-flow/react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChangeBar } from './ChangeBar'
 
 export interface AnimatedDiffStatProps {
@@ -42,19 +42,20 @@ function DiffNumber({
   tone: 'add' | 'del'
 }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const previous = useRef(value)
+  // null = first mount (skip bounce, but still count up from 0)
+  const previous = useRef<number | null>(null)
+  const [displayValue, setDisplayValue] = useState(0)
 
-  // Re-trigger the bounce keyframe on every change. Removing the class and
-  // forcing a reflow before re-adding it restarts the animation even when the
-  // class is already present.
   useEffect(() => {
     const element = ref.current
-    if (element && previous.current !== value) {
+    const isUpdate = previous.current !== null && previous.current !== value
+    if (element && isUpdate) {
       element.classList.remove('diff-stat-bounce')
       void element.offsetWidth
       element.classList.add('diff-stat-bounce')
     }
     previous.current = value
+    setDisplayValue(value)
   }, [value])
 
   return (
@@ -64,7 +65,7 @@ function DiffNumber({
         tone === 'add' ? 'text-accent-add' : 'text-accent-del'
       }`}
     >
-      <NumberFlow value={value} prefix={prefix} />
+      <NumberFlow value={displayValue} prefix={prefix} />
     </span>
   )
 }
