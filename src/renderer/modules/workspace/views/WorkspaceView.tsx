@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type {
   AgentId,
+  AgentApprovalMode,
   ApprovalRequest,
   DiffProposal,
   EditorInfo,
@@ -10,6 +11,7 @@ import type {
 } from '../../../../shared/types'
 import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
+import { ContextExplorer } from '../../context'
 import { CostDashboard } from '../../costs'
 import { MemoryManager } from '../../memory'
 import {
@@ -92,6 +94,7 @@ interface WorkspaceViewProps {
     prompt: string,
     agentId?: AgentId,
     modelOverride?: string,
+    approvalMode?: AgentApprovalMode,
   ) => void | Promise<void>
   onForceSteerQueuedMessage: (messageId: string) => void | Promise<void>
   onRemoveQueueItem: (messageId: string) => void | Promise<void>
@@ -141,7 +144,7 @@ function readPanelMode(threadId: string | null, fallback: RightPanelMode = 'diff
   const key = rightPanelModeKey(threadId)
   const value = ls?.getItem(key)
   if (value === null || value === undefined) return fallback
-  if (value === 'terminal' || value === 'swarm') return value
+  if (value === 'terminal' || value === 'swarm' || value === 'context') return value
   return 'diff'
 }
 
@@ -312,6 +315,15 @@ export function WorkspaceView({
     },
     [rightPanelMode],
   )
+
+  const openContextExplorer = useCallback(() => {
+    setRightPanelOpenState(true)
+    setRightPanelModeState('context')
+  }, [])
+
+  const openProjectContextDialog = useCallback(() => {
+    setContextDialogOpen(true)
+  }, [])
 
   /**
    * Opens the right panel in diff mode and optionally focuses a specific file.
@@ -494,6 +506,7 @@ export function WorkspaceView({
               rightPanelMode={rightPanelMode}
               hasDiff={diffProposals.length > 0}
               hasSwarmGraph={Boolean(activeThreadId)}
+              hasContext={Boolean(selectedProject)}
               canRerun={Boolean(activeSession?.prompt) && !busy}
               onRerun={onRerunSession}
               onToggleRightPanel={handleToggleRightPanel}
@@ -606,7 +619,7 @@ export function WorkspaceView({
                           onSessionStarted={onSessionStarted}
                           contextPercent={contextPercent}
                           hasProjectContext={Boolean(selectedProject.context?.trim())}
-                          onContextClick={() => setContextDialogOpen(true)}
+                          onContextClick={openContextExplorer}
                           onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
                         />
                       </div>
@@ -733,6 +746,11 @@ export function WorkspaceView({
                       disabled={!activeThreadId}
                       onClick={() => setRightPanelModeState('swarm')}
                     />
+                    <RightPanelTab
+                      label="Context"
+                      active={rightPanelMode === 'context'}
+                      onClick={() => setRightPanelModeState('context')}
+                    />
                     <div className="flex-1" />
                     <button
                       type="button"
@@ -774,6 +792,11 @@ export function WorkspaceView({
                         activeSessionStatus={activeSession?.status ?? null}
                         onPauseSession={onCancelSession}
                         onResumeWithEdit={handleResumeSwarmWithEdit}
+                      />
+                    ) : rightPanelMode === 'context' ? (
+                      <ContextExplorer
+                        project={selectedProject}
+                        onEditProjectContext={openProjectContextDialog}
                       />
                     ) : (
                       <TerminalPanel

@@ -9,7 +9,7 @@ interface StatusFooterProps {
 
 /**
  * 22px Cursor-style accent row below the composer card. Left shows a worktree
- * label when available; right opens project context.
+ * label when available; right opens the repository context explorer.
  */
 export function StatusFooter({
   worktreeBranch,
@@ -36,8 +36,8 @@ export function StatusFooter({
         onClick={onContextClick}
         disabled={!onContextClick}
         className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-primary disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted"
-        aria-label="Edit project context"
-        title="Edit project context"
+        aria-label="Open context explorer"
+        title="Open context explorer"
       >
         <span aria-hidden="true">{hasProjectContext ? '●' : '○'}</span>
         <span>{contextLabel}</span>

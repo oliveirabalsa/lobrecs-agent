@@ -3,7 +3,7 @@ import type { EditorInfo } from '../../../../shared/types'
 import { Pill } from '../../../components/ui'
 import { OpenInEditorMenu } from './OpenInEditorMenu'
 
-export type RightPanelMode = 'diff' | 'terminal' | 'swarm'
+export type RightPanelMode = 'diff' | 'terminal' | 'swarm' | 'context'
 
 interface WorkspaceTopBarProps {
   title: string
@@ -12,6 +12,7 @@ interface WorkspaceTopBarProps {
   rightPanelMode: RightPanelMode
   hasDiff: boolean
   hasSwarmGraph: boolean
+  hasContext: boolean
   canRerun: boolean
   onRerun?: () => void | Promise<void>
   onToggleRightPanel: (mode: RightPanelMode) => void
@@ -40,6 +41,7 @@ export function WorkspaceTopBar({
   rightPanelMode,
   hasDiff,
   hasSwarmGraph,
+  hasContext,
   canRerun,
   onRerun,
   onToggleRightPanel,
@@ -90,6 +92,7 @@ export function WorkspaceTopBar({
   const diffActive = rightPanelOpen && rightPanelMode === 'diff'
   const termActive = rightPanelOpen && rightPanelMode === 'terminal'
   const swarmActive = rightPanelOpen && rightPanelMode === 'swarm'
+  const contextActive = rightPanelOpen && rightPanelMode === 'context'
   const leftInsetClass = reserveTrafficLightInset
     ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
     : 'pl-2 md:pl-4'
@@ -244,6 +247,14 @@ export function WorkspaceTopBar({
           <GraphIcon />
         </IconButton>
         <IconButton
+          aria-label={contextActive ? 'Hide context explorer' : 'Show context explorer'}
+          onClick={() => onToggleRightPanel('context')}
+          disabled={!hasContext}
+          active={contextActive}
+        >
+          <ContextIcon />
+        </IconButton>
+        <IconButton
           aria-label={termActive ? 'Hide terminal panel' : 'Show terminal panel'}
           onClick={() => onToggleRightPanel('terminal')}
           active={termActive}
@@ -395,6 +406,27 @@ function GraphIcon() {
   )
 }
 
+function ContextIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+      <path d="M8 9h6" />
+      <path d="M8 12h4" />
+    </svg>
+  )
+}
+
 function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
     <svg
@@ -418,4 +450,3 @@ function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
     </svg>
   )
 }
-
