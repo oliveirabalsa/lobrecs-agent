@@ -77,6 +77,26 @@ describe('RepositoryContextService', () => {
     expect(context).toContain('src/routing.ts:1-3')
     expect(context).toContain('routeModel')
   })
+
+  it('uses compact context when one large file dominates the matches', async () => {
+    const lines = Array.from(
+      { length: 320 },
+      (_, index) => `function renderGuest${index}() { return "firebase mobile layout ${index}" }`,
+    )
+    await writeFile(path.join(repoPath, 'index.html'), lines.join('\n'))
+
+    const service = new RepositoryContextService()
+    const context = await service.buildPromptContext({
+      projectId: 'project-1',
+      repoPath,
+      prompt: 'improve firebase mobile layout guest delete password',
+    })
+
+    expect(context).toContain('Repository context (compact)')
+    expect(context).toContain('Likely target file: index.html:')
+    expect(context).toContain('full snippet was not injected')
+    expect(context).not.toContain('function renderGuest')
+  })
 })
 
 function seedProject(projectId: string): void {

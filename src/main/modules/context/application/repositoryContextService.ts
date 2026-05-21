@@ -15,6 +15,8 @@ import { scanRepository } from '../infrastructure/repositoryScanner'
 const DEFAULT_LIMIT = 6
 const MAX_LIMIT = 12
 const MAX_CONTEXT_CHARS = 12_000
+const COMPACT_SINGLE_FILE_CONTEXT_CHARS = 8_000
+const COMPACT_SINGLE_FILE_CHUNKS = 3
 const REINDEX_AFTER_MS = 5 * 60 * 1000
 
 export class RepositoryContextService {
@@ -95,6 +97,9 @@ export class RepositoryContextService {
 
     if (chunks.length === 0) return null
 
+    const compactSingleFileContext = compactContextForLargeSingleFile(chunks)
+    if (compactSingleFileContext) return compactSingleFileContext
+
     let usedChars = 0
     const rendered: string[] = []
 
@@ -130,6 +135,31 @@ export class RepositoryContextService {
 }
 
 export const repositoryContextService = new RepositoryContextService()
+
+function compactContextForLargeSingleFile(
+  chunks: readonly RepositoryContextChunk[],
+): string | null {
+  const paths = new Set(chunks.map((chunk) => chunk.path))
+  const totalChars = chunks.reduce((sum, chunk) => sum + chunk.content.length, 0)
+  if (
+    paths.size !== 1 ||
+    chunks.length < COMPACT_SINGLE_FILE_CHUNKS ||
+    totalChars < COMPACT_SINGLE_FILE_CONTEXT_CHARS
+  ) {
+    return null
+  }
+
+  const first = chunks[0]
+  if (!first) return null
+  const lastLine = Math.max(...chunks.map((chunk) => chunk.endLine))
+
+  return [
+    'Repository context (compact):',
+    `Likely target file: ${first.path}:${first.startLine}-${lastLine}.`,
+    'This project is dominated by one large file, so the full snippet was not injected.',
+    'Read focused ranges from that file before editing to avoid duplicating large context.',
+  ].join('\n')
+}
 
 function clampLimit(limit: number | undefined): number {
   if (!Number.isFinite(limit)) return DEFAULT_LIMIT
