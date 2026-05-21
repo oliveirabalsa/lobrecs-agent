@@ -15,6 +15,10 @@ import type { MarkdownPreviewDocument } from '../components/MarkdownPreviewer'
 import { MessageStream } from '../components/MessageStream'
 import { PlanPromptModal } from '../components/modals/PlanPromptModal'
 import {
+  emitPlanModeReset,
+  latestPlanReviewId,
+} from '../components/Composer/planMode'
+import {
   formatUserQuestionPromptAnswers,
   UserQuestionPromptModal,
   type UserQuestionPromptAnswer,
@@ -128,6 +132,7 @@ export function RunWorkspace({
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
   const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
+  const lastPlanReviewResetKeyRef = useRef<string | null>(null)
 
   // Audible "agent needs you" alert — chimes on new questions, approvals, and
   // finished runs. Tune *when* it fires in src/renderer/lib/attentionSound.ts.
@@ -170,6 +175,20 @@ export function RunWorkspace({
     setActiveUserQuestion(null)
     setQuestionSubmitError(null)
   }, [questionThreadKey])
+
+  // Plan mode should be one-shot: once a plan reaches review, reset the
+  // composer's sticky plan toggle so follow-up prompts execute normally.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sessionId) return
+    const reviewId = latestPlanReviewId(activities)
+    if (!reviewId) return
+
+    const key = `${sessionId}:${reviewId}`
+    if (lastPlanReviewResetKeyRef.current === key) return
+
+    lastPlanReviewResetKeyRef.current = key
+    emitPlanModeReset(window)
+  }, [activities, sessionId])
 
   useEffect(() => {
     if (!pendingUserQuestion || activeUserQuestion) return

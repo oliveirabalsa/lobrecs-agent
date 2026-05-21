@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SUPPORTED_AGENT_IDS } from '../../../../../shared/types'
 import { useDebouncedValue } from '../../../../hooks/useDebouncedValue'
 import { formatModelLabel } from './modelDisplay'
+import { PLAN_MODE_RESET_EVENT } from './planMode'
 import type {
   AgentModelCatalog,
   ApprovalMode,
@@ -381,6 +382,17 @@ export function useComposerState({
     setPlanModeState(value)
     writePlanMode(value)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handlePlanModeReset = () => {
+      setPlanMode(false)
+    }
+
+    window.addEventListener(PLAN_MODE_RESET_EVENT, handlePlanModeReset)
+    return () => window.removeEventListener(PLAN_MODE_RESET_EVENT, handlePlanModeReset)
+  }, [setPlanMode])
 
   const setModelSelection = useCallback((selection: ModelSelection) => {
     setModelSelectionState(selection)

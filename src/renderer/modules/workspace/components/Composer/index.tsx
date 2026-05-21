@@ -24,6 +24,7 @@ import { SendButton } from './SendButton'
 import { StatusFooter } from './StatusFooter'
 import { useComposerState } from './useComposerState'
 import { AGENT_SHORT, formatModelLabel } from './modelDisplay'
+import { shouldResetPlanModeAfterDispatch } from './planMode'
 import type { AttachedImage } from './types'
 
 /** Mirrors the `StartedSessionSummary` shape consumed by the workspace controller. */
@@ -215,6 +216,7 @@ export function Composer({
     setError(null)
     const startedAt = Date.now()
     const sentAttachments = attachments.map((image) => image.attachment)
+    const resetPlanMode = shouldResetPlanModeAfterDispatch(planMode)
 
     try {
       const result = await window.agentforge.agent.dispatch({
@@ -238,6 +240,7 @@ export function Composer({
       })
       setDraft('')
       clearAttachments()
+      if (resetPlanMode) setPlanMode(false)
       window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
     } catch (dispatchError: unknown) {
       setError(
@@ -261,6 +264,7 @@ export function Composer({
     routerPreview,
     setDraft,
     setError,
+    setPlanMode,
     submitting,
   ])
 
