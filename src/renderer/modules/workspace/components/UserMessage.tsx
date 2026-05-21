@@ -1,6 +1,10 @@
 import type { ImageAttachment } from '../../../../shared/types'
 import { parseSwarmRolePrompt } from '../lib/swarmMessage'
 import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
+import {
+  isPlanModeExecutionPrompt,
+  PlanModeExecutionMessage,
+} from './PlanModeExecutionMessage'
 import { SwarmRoleMessage } from './SwarmRoleMessage'
 
 export interface UserMessageProps {
@@ -30,6 +34,10 @@ export function UserMessage({ text, attachments, onOpenMarkdown }: UserMessagePr
         onOpenMarkdown={onOpenMarkdown}
       />
     )
+  }
+
+  if (isPlanModeExecutionPrompt(text)) {
+    return <PlanModeExecutionMessage />
   }
 
   return (

@@ -16,6 +16,7 @@ import type {
 
 const APPROVAL_MODE_KEY = 'composer.approvalMode'
 const MODEL_SELECTION_KEY = 'composer.modelSelection'
+const PLAN_MODE_KEY = 'composer.planMode'
 
 const FALLBACK_MODEL_CATALOGS: AgentModelCatalog[] = [
   {
@@ -195,6 +196,17 @@ function writeApprovalMode(mode: ApprovalMode): void {
   ls.setItem(APPROVAL_MODE_KEY, mode)
 }
 
+function readPlanMode(): boolean {
+  return safeStorage()?.getItem(PLAN_MODE_KEY) === 'true'
+}
+
+function writePlanMode(value: boolean): void {
+  const ls = safeStorage()
+  if (!ls) return
+  if (value) ls.setItem(PLAN_MODE_KEY, 'true')
+  else ls.removeItem(PLAN_MODE_KEY)
+}
+
 function writeModelSelection(selection: ModelSelection): void {
   const ls = safeStorage()
   if (!ls) return
@@ -244,6 +256,9 @@ export interface UseComposerStateResult {
   setAttaching: (value: boolean) => void
   approvalMode: ApprovalMode
   setApprovalMode: (mode: ApprovalMode) => void
+  /** When true, the next dispatch runs in plan mode (plan first, then approve). */
+  planMode: boolean
+  setPlanMode: (value: boolean) => void
   modelSelection: ModelSelection
   setModelSelection: (selection: ModelSelection) => void
   modelCatalogs: AgentModelCatalog[]
@@ -270,6 +285,7 @@ export function useComposerState({
   const [attaching, setAttaching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [approvalMode, setApprovalModeState] = useState<ApprovalMode>(() => readApprovalMode())
+  const [planMode, setPlanModeState] = useState<boolean>(() => readPlanMode())
   const [modelSelection, setModelSelectionState] = useState<ModelSelection>(() =>
     readModelSelection(),
   )
@@ -361,6 +377,11 @@ export function useComposerState({
     writeApprovalMode(mode)
   }, [])
 
+  const setPlanMode = useCallback((value: boolean) => {
+    setPlanModeState(value)
+    writePlanMode(value)
+  }, [])
+
   const setModelSelection = useCallback((selection: ModelSelection) => {
     setModelSelectionState(selection)
     writeModelSelection(selection)
@@ -396,6 +417,8 @@ export function useComposerState({
     setAttaching,
     approvalMode,
     setApprovalMode,
+    planMode,
+    setPlanMode,
     modelSelection,
     setModelSelection,
     modelCatalogs,

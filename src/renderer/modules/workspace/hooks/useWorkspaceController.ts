@@ -14,7 +14,7 @@ import { isSessionStatus } from '../../sessions/domain/sessionStatus'
 import { useTabs, type Tab } from '../../sessions/state/tabs'
 import type { ActiveSessionMeta, StartedSessionSummary } from '../../sessions/types'
 
-export type MainView = 'workspace' | 'costs' | 'automations'
+export type MainView = 'workspace' | 'costs' | 'automations' | 'memory'
 
 const ACTIVE_THREAD_KEY_PREFIX = 'activeThread:'
 const BLOCKING_SESSION_STATUSES = new Set<SessionStatus>([
@@ -425,7 +425,10 @@ export function useWorkspaceController() {
     }
   }
 
-  async function handleSteer(prompt: string): Promise<void> {
+  async function handleSteer(
+    prompt: string,
+    options?: { agentId?: AgentId; modelOverride?: string },
+  ): Promise<void> {
     if (!selectedProject || !activeSessionId) return
 
     try {
@@ -433,19 +436,45 @@ export function useWorkspaceController() {
         sessionId: activeSessionId,
         projectId: selectedProject.id,
         prompt,
+        agentId: options?.agentId,
+        modelOverride: options?.modelOverride,
       })
       handleSessionStarted({
         sessionId: result.sessionId,
         threadId: result.threadId,
         prompt,
         routingDecision: null,
-        agentId: toStartedSessionAgentId(activeSession?.agentId),
-        modelOverride: activeSession?.modelOverride,
+        agentId: toStartedSessionAgentId(options?.agentId ?? activeSession?.agentId),
+        modelOverride: options?.modelOverride ?? activeSession?.modelOverride,
         createdAt: Date.now(),
       })
     } catch (error: unknown) {
       setBannerError(error instanceof Error ? error.message : 'Failed to steer agent')
       throw error
+    }
+  }
+
+  async function handleForceSteerQueuedMessage(messageId: string): Promise<void> {
+    if (!selectedProject || !activeThreadId || !activeSessionId) return
+
+    try {
+      const queue = await window.agentforge.agent.getQueue(activeThreadId)
+      const queuedMessage = queue.find((item) => item.id === messageId)
+      if (!queuedMessage) {
+        setBannerError('Queued message no longer exists')
+        return
+      }
+
+      await window.agentforge.agent.dequeueItem(activeThreadId, messageId)
+      await handleSteer(queuedMessage.prompt, {
+        agentId: queuedMessage.agentId,
+        modelOverride: queuedMessage.model,
+      })
+      setBannerError(null)
+    } catch (error: unknown) {
+      setBannerError(
+        error instanceof Error ? error.message : 'Failed to force steer queued message',
+      )
     }
   }
 
@@ -663,7 +692,7 @@ export function useWorkspaceController() {
     handleRerunActiveSession,
     handleCancelSession,
     handleEnqueue,
-    handleSteer,
+    handleForceSteerQueuedMessage,
     handleRemoveQueueItem,
     handleClearQueue,
     pendingQueue,

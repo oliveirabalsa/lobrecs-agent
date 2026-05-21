@@ -904,6 +904,449 @@ describe('SessionManager', () => {
       ),
     ).toBe(true)
   })
+
+  it('wraps the prompt in plan mode and emits a plan-review marker on completion', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    // The agent receives planning instructions...
+    expect(adapter.dispatchedParams?.prompt).toContain('[Plan Mode]')
+    expect(adapter.dispatchedParams?.prompt).toContain('add a settings page')
+    // ...but the stored session keeps the original task text clean.
+    expect(sessionsStore.get(sessionId)?.prompt).toBe('add a settings page')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          (event.payload as { kind?: string }).kind === 'plan-review',
+      ),
+    )
+
+    const planReview = broadcasts.find(
+      (event) =>
+        event.type === 'activity' &&
+        (event.payload as { kind?: string }).kind === 'plan-review',
+    )
+    expect(planReview?.sessionId).toBe(sessionId)
+    expect((planReview?.payload as { reviewId?: string }).reviewId).toBeTruthy()
+  })
+
+  it('dispatches the gated execution session only after the plan is approved', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          (event.payload as { kind?: string }).kind === 'plan-review',
+      ),
+    )
+
+    // The gate: no execution session exists until the user approves.
+    expect(adapter.dispatches).toHaveLength(1)
+
+    const reviewEvent = broadcasts.find(
+      (event) =>
+        event.type === 'activity' &&
+        (event.payload as { kind?: string }).kind === 'plan-review',
+    )
+    const reviewId = (reviewEvent?.payload as { reviewId: string }).reviewId
+
+    const execution = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+    })
+
+    expect(execution).not.toBeNull()
+    expect(execution?.threadId).toBe(planning.threadId)
+    expect(adapter.dispatches).toHaveLength(2)
+    // The execution prompt releases the agent to act — it is NOT re-wrapped
+    // with the planning phase's no-changes instructions.
+    expect(adapter.dispatches[1]?.prompt).toMatch(/approved/i)
+    expect(adapter.dispatches[1]?.prompt).not.toMatch(/do not edit files/i)
+  })
+
+  it('does not dispatch an execution session when the plan is rejected', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          (event.payload as { kind?: string }).kind === 'plan-review',
+      ),
+    )
+
+    const reviewEvent = broadcasts.find(
+      (event) =>
+        event.type === 'activity' &&
+        (event.payload as { kind?: string }).kind === 'plan-review',
+    )
+    const reviewId = (reviewEvent?.payload as { reviewId: string }).reviewId
+
+    const rejected = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'reject',
+    })
+    expect(rejected).toBeNull()
+    expect(adapter.dispatches).toHaveLength(1)
+
+    // The review is consumed — a second decision on the same id is a no-op.
+    const replay = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+    })
+    expect(replay).toBeNull()
+    expect(adapter.dispatches).toHaveLength(1)
+  })
+
+  it('returns null when resolving an unknown plan review', async () => {
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: () => undefined,
+      worktreeIsolation: false,
+    })
+
+    await expect(
+      manager.resolvePlanReview({
+        reviewId: 'missing-review',
+        sessionId: 'missing-session',
+        decision: 'approve',
+      }),
+    ).resolves.toBeNull()
+  })
+
+  it('never auto-applies diffs or runs the quality gate for a plan-mode session', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const qualityGateRunner = vi.fn(async () => undefined)
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      qualityGateRunner,
+      worktreeIsolation: true,
+    })
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    // The planning agent ignores the no-changes instruction and edits its
+    // isolated worktree anyway — plan mode must still leave the repo untouched.
+    const worktreePath = adapter.dispatchedParams?.repoPath
+    expect(worktreePath).toBeTruthy()
+    await fs.writeFile(path.join(worktreePath ?? '', 'existing.ts'), 'planning edit\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          (event.payload as { kind?: string }).kind === 'plan-review',
+      ),
+    )
+
+    // The repo is untouched: no diff applied, no diff event, no quality gate.
+    await expect(fs.readFile(path.join(repoPath, 'existing.ts'), 'utf-8')).resolves.toBe(
+      'original\n',
+    )
+    expect(broadcasts.map((event) => event.type)).not.toContain('diff')
+    expect(qualityGateRunner).not.toHaveBeenCalled()
+  })
+
+  it('dispatches queued follow-ups when a plan is rejected', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    // A follow-up is queued while the plan is pending review.
+    manager.enqueueMessage(
+      { prompt: 'then add tests', agentId: 'claude-code', model: 'claude-sonnet-4-6' },
+      planning.threadId,
+    )
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+
+    await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'reject',
+    })
+
+    // The queued follow-up runs instead of being stranded on an idle thread.
+    await waitFor(() => adapter.dispatches.length === 2)
+    expect(adapter.dispatches[1]?.prompt).toBe('then add tests')
+    expect(manager.getQueue(planning.threadId)).toHaveLength(0)
+  })
+
+  it('retrieves execution-session context with the original task, not the approval prompt', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const contextQueries: string[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+      resolveContext: async ({ prompt, baseContext }) => {
+        contextQueries.push(prompt)
+        return baseContext ?? null
+      },
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+
+    await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+    })
+
+    // Both phases query repo context with the raw task — the execution phase
+    // must NOT search with the generic "plan approved" prompt.
+    expect(contextQueries).toEqual(['add a settings page', 'add a settings page'])
+    expect(contextQueries[1]).not.toMatch(/approved/i)
+  })
+
+  it('leaves the queue intact when a plan is rejected while the thread is still busy', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+
+    // Newer work is dispatched on the same thread and is still running when
+    // the older plan is rejected.
+    const running = await manager.dispatch({
+      projectId: project.id,
+      threadId: planning.threadId,
+      prompt: 'unrelated follow-up work',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    manager.enqueueMessage(
+      { prompt: 'then add tests', agentId: 'claude-code', model: 'claude-sonnet-4-6' },
+      planning.threadId,
+    )
+
+    await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'reject',
+    })
+
+    // The queued follow-up is NOT dispatched: the thread already has a running
+    // session, so dispatching now would start a second concurrent session.
+    expect(adapter.dispatches).toHaveLength(2)
+    expect(manager.getQueue(planning.threadId)).toHaveLength(1)
+
+    // Once the running session completes, its normal completion path drains
+    // the queue in order.
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: running.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+
+    await waitFor(() => adapter.dispatches.length === 3)
+    expect(adapter.dispatches[2]?.prompt).toBe('then add tests')
+    expect(manager.getQueue(planning.threadId)).toHaveLength(0)
+  })
+
+  it('ignores a plan-review decision whose sessionId does not match the planning session', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+
+    // A decision carrying the wrong planning sessionId — a stale or misrouted
+    // UI event — must not dispatch and must not consume the review.
+    const mismatched = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: 'some-other-session',
+      decision: 'approve',
+    })
+    expect(mismatched).toBeNull()
+    expect(adapter.dispatches).toHaveLength(1)
+
+    // The review survives the mismatch — the correctly paired decision still
+    // resolves it and dispatches the execution session.
+    const execution = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+    })
+    expect(execution).not.toBeNull()
+    expect(adapter.dispatches).toHaveLength(2)
+  })
 })
 
 class FakeAdapter implements AgentAdapter {
@@ -967,4 +1410,14 @@ async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<voi
   }
 
   throw new Error('Timed out waiting for condition')
+}
+
+/** Waits for a `plan-review` activity broadcast and returns its `reviewId`. */
+async function waitForPlanReviewId(broadcasts: AgentEvent[]): Promise<string> {
+  const isPlanReview = (event: AgentEvent): boolean =>
+    event.type === 'activity' &&
+    (event.payload as { kind?: string }).kind === 'plan-review'
+
+  await waitFor(() => broadcasts.some(isPlanReview))
+  return (broadcasts.find(isPlanReview)?.payload as { reviewId: string }).reviewId
 }

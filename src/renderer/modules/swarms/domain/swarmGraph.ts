@@ -155,6 +155,8 @@ function textFromActivity(activity: AgentActivity): string {
       return 'Context compacted'
     case 'plan-prompt':
       return activity.title
+    case 'plan-review':
+      return 'Plan ready for review'
     case 'user-question':
       return activity.title
   }

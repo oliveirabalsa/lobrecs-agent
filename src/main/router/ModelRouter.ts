@@ -1,5 +1,5 @@
 import { MODEL_MAP, SUPPORTED_AGENT_IDS } from '../../shared/types'
-import { inferModelTier, pickModelForTier } from '../agents/modelDiscovery'
+import { inferModelTier, pickModelForTier, modelSupportsImages } from '../agents/modelDiscovery'
 import { scoreComplexity } from './ComplexityScorer'
 import type {
   AgentId,
@@ -66,13 +66,13 @@ export class ModelRouter {
         this.normalizeAgentId(params.preferredAgentId, enabledAgents) ?? defaultAgentId
       let agentId = requestedAgentId
 
-      if (imageSupportRequired && !this.supportsImages(agentId)) {
+      if (imageSupportRequired && !this.supportsImages(agentId, params.modelOverride)) {
         throw new Error('Manual image-capable model required')
       }
 
       if (!(await this.isAgentAvailable(agentId))) {
         agentId = imageSupportRequired
-          ? await this.firstAvailableImageAwareAgent(enabledAgents)
+          ? await this.firstAvailableImageAwareAgent(enabledAgents, modelTierFromModel(params.modelOverride), settings)
           : await this.firstAvailableAgent([
               fallbackAgentId,
               defaultAgentId,
@@ -80,15 +80,15 @@ export class ModelRouter {
             ], fallbackAgentId)
       }
 
-      if (imageSupportRequired && !this.supportsImages(agentId)) {
-        throw new Error('Manual image-capable model required')
-      }
-
       const tier = modelTierFromModel(params.modelOverride)
       const model =
         agentId === requestedAgentId
           ? params.modelOverride
           : await this.resolveModelForTier(agentId, tier, settings)
+
+      if (imageSupportRequired && !this.supportsImages(agentId, model)) {
+        throw new Error('Manual image-capable model required')
+      }
 
       return {
         agentId,
@@ -110,16 +110,23 @@ export class ModelRouter {
     })
     let agentId = this.normalizeAgentId(params.preferredAgentId, enabledAgents) ?? defaultAgentId
 
-    if (imageSupportRequired && !this.supportsImages(agentId)) {
-      agentId = await this.firstAvailableImageAwareAgent(enabledAgents)
+    if (imageSupportRequired) {
+      const resolvedModel = await this.resolveModelForTier(agentId, scoring.tier, settings)
+      if (!this.supportsImages(agentId, resolvedModel)) {
+        agentId = await this.firstAvailableImageAwareAgent(enabledAgents, scoring.tier, settings)
+      }
     }
 
     if (!(await this.isAgentAvailable(agentId))) {
-      agentId = await this.firstAvailableAgent([
-        fallbackAgentId,
-        defaultAgentId,
-        ...enabledAgents,
-      ], fallbackAgentId)
+      if (imageSupportRequired) {
+        agentId = await this.firstAvailableImageAwareAgent(enabledAgents, scoring.tier, settings)
+      } else {
+        agentId = await this.firstAvailableAgent([
+          fallbackAgentId,
+          defaultAgentId,
+          ...enabledAgents,
+        ], fallbackAgentId)
+      }
     }
 
     if (
@@ -133,10 +140,12 @@ export class ModelRouter {
         ...enabledAgents,
       ] as SupportedAgentId[]).filter((id) => enabledAgents.includes(id))
 
-      agentId = await this.firstAvailableAgent(
-        frontierCandidates,
-        fallbackAgentId,
-      )
+      agentId = imageSupportRequired
+        ? await this.firstAvailableImageAwareAgent(frontierCandidates, scoring.tier, settings)
+        : await this.firstAvailableAgent(
+            frontierCandidates,
+            fallbackAgentId,
+          )
     }
 
     return {
@@ -148,8 +157,14 @@ export class ModelRouter {
     }
   }
 
-  private supportsImages(agentId: SupportedAgentId): boolean {
-    return agentId === 'claude-code' || agentId === 'codex'
+  supportsImages(agentId: SupportedAgentId, modelId?: string): boolean {
+    if (modelId) {
+      return modelSupportsImages(modelId)
+    }
+    if (agentId === 'claude-code' || agentId === 'codex' || agentId === 'antigravity') {
+      return true
+    }
+    return false
   }
 
   private normalizeAgentId(
@@ -197,10 +212,18 @@ export class ModelRouter {
 
   private async firstAvailableImageAwareAgent(
     enabledAgents: readonly SupportedAgentId[] = SUPPORTED_AGENT_IDS,
+    tier: ModelTier = 'frontier',
+    settings?: AppSettings,
   ): Promise<SupportedAgentId> {
-    for (const agentId of ['claude-code', 'codex'] as SupportedAgentId[]) {
+    const priority = ['claude-code', 'codex', 'antigravity', 'opencode'] as SupportedAgentId[]
+    for (const agentId of priority) {
       if (!enabledAgents.includes(agentId)) continue
-      if (await this.isAgentAvailable(agentId)) return agentId
+      if (!(await this.isAgentAvailable(agentId))) continue
+
+      const model = await this.resolveModelForTier(agentId, tier, settings)
+      if (this.supportsImages(agentId, model)) {
+        return agentId
+      }
     }
 
     throw new Error('Image-capable model required')

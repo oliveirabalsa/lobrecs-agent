@@ -272,12 +272,10 @@ function TurnBlock({
     return <Divider label="Context automatically compacted" />
   }
 
-  const { renderable, finalAssistantText, trailingCodeChanges } = splitFinalAssistant(
-    turn.streamItems,
-    {
+  const { renderable, finalAssistantText, trailingCodeChanges, planReviewItems } =
+    splitFinalAssistant(turn.streamItems, {
       separateFinalAssistant: !running && turn.completion !== undefined,
-    },
-  )
+    })
   const showWorkingState = running || turn.completion !== undefined
   const totalMs =
     turn.endedAt !== undefined ? Math.max(0, turn.endedAt - turn.startedAt) : undefined
@@ -336,6 +334,12 @@ function TurnBlock({
           onPreviewMarkdown={ctx.onPreviewMarkdown}
         />
       ) : null}
+
+      {planReviewItems.map((item, idx) => (
+        <div key={`${turn.id}-plan-${idx}`} className="motion-fade-up-in">
+          {renderStreamItem(item, `${turn.id}-plan-${idx}`, ctx)}
+        </div>
+      ))}
 
       <TrailingEditedFilesCard
         turn={turn}
@@ -434,6 +438,11 @@ interface FinalAssistantSplit {
   renderable: StreamItem[]
   finalAssistantText?: string
   trailingCodeChanges: StreamItem[]
+  /**
+   * `plan-review` markers, pulled out so they render *beneath* the final
+   * assistant message (the proposed plan) rather than above it.
+   */
+  planReviewItems: StreamItem[]
 }
 
 /**
@@ -451,10 +460,12 @@ export function splitFinalAssistant(
   options: { separateFinalAssistant?: boolean } = {},
 ): FinalAssistantSplit {
   const completionlessItems = items.filter((item) => item.kind !== 'completion')
-  const trailingCodeChanges = completionlessItems.filter(isCodeChangeItem)
-  const assistantCandidates = completionlessItems.filter((item) => !isCodeChangeItem(item))
+  const planReviewItems = completionlessItems.filter((item) => item.kind === 'plan-review')
+  const reviewlessItems = completionlessItems.filter((item) => item.kind !== 'plan-review')
+  const trailingCodeChanges = reviewlessItems.filter(isCodeChangeItem)
+  const assistantCandidates = reviewlessItems.filter((item) => !isCodeChangeItem(item))
   if (options.separateFinalAssistant === false) {
-    return { renderable: completionlessItems, trailingCodeChanges: [] }
+    return { renderable: reviewlessItems, trailingCodeChanges: [], planReviewItems }
   }
 
   let lastAssistantIndex = -1
@@ -472,11 +483,17 @@ export function splitFinalAssistant(
     return {
       renderable: assistantCandidates,
       trailingCodeChanges,
+      planReviewItems,
     }
   }
 
   const renderable = assistantCandidates.filter((_, index) => index !== lastAssistantIndex)
-  return { renderable, finalAssistantText: lastAssistantText, trailingCodeChanges }
+  return {
+    renderable,
+    finalAssistantText: lastAssistantText,
+    trailingCodeChanges,
+    planReviewItems,
+  }
 }
 
 function isCodeChangeItem(item: StreamItem): boolean {

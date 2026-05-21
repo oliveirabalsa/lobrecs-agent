@@ -42,6 +42,12 @@ export interface AgentDispatchParams {
   imageAttachments?: ImageAttachment[]
   /** When provided, links the new session to an existing thread instead of creating one. */
   threadId?: string
+  /**
+   * When true, the agent first produces an implementation plan and stops.
+   * Execution is gated behind an explicit user approval (see
+   * `AgentPlanReviewDecisionPayload`).
+   */
+  planMode?: boolean
 }
 
 export interface AgentDispatchResult {
@@ -56,6 +62,22 @@ export interface AgentPlanDecisionPayload {
   sessionId: string
   optionId: string
   freeText?: string
+}
+
+/**
+ * Renderer→main payload for approving or rejecting a plan produced by a
+ * plan-mode session. Echoes the `reviewId` from the matching `plan-review`
+ * activity event.
+ */
+export interface AgentPlanReviewDecisionPayload {
+  reviewId: string
+  /**
+   * The planning session that produced the plan under review. The main
+   * process enforces this against the stored review and ignores the decision
+   * on a mismatch, guarding against stale or misrouted UI events.
+   */
+  sessionId: string
+  decision: 'approve' | 'reject'
 }
 
 export interface ImageAttachment {

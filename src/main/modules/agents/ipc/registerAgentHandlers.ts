@@ -11,14 +11,12 @@ import type {
   AgentDispatchParams,
   AgentId,
   AgentPlanDecisionPayload,
+  AgentPlanReviewDecisionPayload,
   EnqueueParams,
   ImageAttachment,
   QueuedMessage,
   SteerParams,
 } from '../../../../shared/types'
-function isImageSupported(agentId: AgentId): boolean {
-  return agentId === 'claude-code' || agentId === 'codex'
-}
 
 async function normalizeImageAttachments(
   images: ImageAttachment[] | undefined,
@@ -86,8 +84,8 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         recentFailures,
       })
 
-      if (imageAttachments.length > 0 && !isImageSupported(decision.agentId)) {
-        throw new Error('Image attachments are only supported by Claude Code and OpenAI Codex')
+      if (imageAttachments.length > 0 && !context.modelRouter.supportsImages(decision.agentId, decision.model)) {
+        throw new Error(`Image attachments are not supported by the selected agent/model (${decision.agentId} - ${decision.model})`)
       }
 
       const { sessionId, threadId } = await context.sessionManager.dispatch({
@@ -101,6 +99,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         threadId: params.threadId,
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings: settings.agents.runtimes[decision.agentId],
+        planMode: params.planMode,
       })
 
       return { sessionId, threadId }
@@ -122,6 +121,12 @@ export function registerAgentHandlers(context: MainIpcContext): void {
     'agent:plan-decision',
     async (_event, payload: AgentPlanDecisionPayload) => {
       submitPlanDecision(payload)
+    },
+  )
+  ipcMain.handle(
+    'agent:plan-review-decision',
+    async (_event, payload: AgentPlanReviewDecisionPayload) => {
+      return context.sessionManager.resolvePlanReview(payload)
     },
   )
 

@@ -1,11 +1,25 @@
 import { EventEmitter } from 'node:events'
+import { readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
-import { commandExists, resolveCommand, withContext } from './command'
+import { commandExists, resolveCommand, withContextAndImages } from './command'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
 import type { AgentEvent } from '../../shared/types'
 
 const ANTIGRAVITY_COMMAND_ENV = 'ANTIGRAVITY_COMMAND'
+const TRANSCRIPT_POLL_MS = 250
+
+interface AntigravityTranscriptRecord {
+  step_index?: number
+  source?: string
+  type?: string
+  status?: string
+  created_at?: string
+  content?: string
+  tool_calls?: unknown
+}
 
 interface AntigravityParserState {
   completionUsage?: AntigravityCompletionUsage
@@ -39,17 +53,20 @@ export class AntigravityAdapter implements AgentAdapter {
       events.emitBuffered(event)
     }
 
-    const prompt = withContext(params.prompt, params.context)
+    const prompt = withContextAndImages(params.prompt, params.context, params.imageAttachments)
     const command = resolveCommand(
       ANTIGRAVITY_COMMAND_ENV,
       'agy',
       params.runtimeSettings?.command,
     )
+    const extraArgs = params.runtimeSettings?.extraArgs ?? []
+    const logFile = antigravityLogFile(params.sessionId)
     const args = [
       '--add-dir',
       params.repoPath,
       ...permissionArgs(params.runtimeSettings?.permissionMode),
-      ...(params.runtimeSettings?.extraArgs ?? []),
+      ...extraArgs,
+      ...missingLogFileArgs(extraArgs, logFile),
       '--print',
       // AGY currently exposes model selection through CLI settings and /model,
       // not a supported per-run launch flag.
@@ -69,12 +86,19 @@ export class AntigravityAdapter implements AgentAdapter {
         return createIdleSession(params.sessionId, events)
       }
 
+      const transcriptWatcher = createAntigravityTranscriptWatcher({
+        sessionId: params.sessionId,
+        logFile: configuredLogFile(extraArgs) ?? logFile,
+        emitEvent,
+      })
+
       const child = processPool.spawn(params.sessionId, command, args, {
         cwd: params.repoPath,
         stdin: 'ignore',
       })
 
       child.once('error', (error) => {
+        transcriptWatcher.stop()
         emitEvent({
           type: 'error',
           sessionId: params.sessionId,
@@ -102,14 +126,18 @@ export class AntigravityAdapter implements AgentAdapter {
       })
 
       child.on('exit', (code, signal) => {
-        if (completed) return
+        void (async () => {
+          await transcriptWatcher.drain()
+          transcriptWatcher.stop()
+          if (completed) return
 
-        emitEvent({
-          type: 'session-complete',
-          sessionId: params.sessionId,
-          payload: completionPayload(code, signal, parserState),
-          timestamp: Date.now(),
-        } satisfies AgentEvent)
+          emitEvent({
+            type: 'session-complete',
+            sessionId: params.sessionId,
+            payload: completionPayload(code, signal, parserState),
+            timestamp: Date.now(),
+          } satisfies AgentEvent)
+        })()
       })
     } catch (error) {
       emitEvent({
@@ -128,6 +156,237 @@ export class AntigravityAdapter implements AgentAdapter {
       cancel: () => processPool.kill(params.sessionId),
     }
   }
+}
+
+function antigravityLogFile(sessionId: string): string {
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '-')
+  return path.join(tmpdir(), `lobrecs-agent-antigravity-${safeSessionId}.log`)
+}
+
+function missingLogFileArgs(extraArgs: readonly string[], logFile: string): string[] {
+  return configuredLogFile(extraArgs) ? [] : ['--log-file', logFile]
+}
+
+function configuredLogFile(extraArgs: readonly string[]): string | undefined {
+  const flagIndex = extraArgs.indexOf('--log-file')
+  if (flagIndex === -1) return undefined
+
+  const value = extraArgs[flagIndex + 1]
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function createAntigravityTranscriptWatcher({
+  sessionId,
+  logFile,
+  emitEvent,
+}: {
+  sessionId: string
+  logFile: string
+  emitEvent(event: AgentEvent): void
+}): { drain(): Promise<void>; stop(): void } {
+  const emittedSteps = new Set<number>()
+  let appDataDir: string | undefined
+  let conversationId: string | undefined
+  let activePoll: Promise<void> | undefined
+  let stopped = false
+
+  const poll = async (): Promise<void> => {
+    if (activePoll) return activePoll
+
+    activePoll = pollOnce().finally(() => {
+      activePoll = undefined
+    })
+
+    return activePoll
+  }
+
+  const pollOnce = async (): Promise<void> => {
+    const logText = await readOptionalText(logFile)
+    if (logText) {
+      appDataDir = appDataDir ?? parseAntigravityAppDataDir(logText)
+      conversationId = conversationId ?? parseAntigravityConversationId(logText)
+    }
+
+    if (!appDataDir || !conversationId) return
+
+    const transcript = await readOptionalText(antigravityTranscriptPath(appDataDir, conversationId))
+    if (!transcript) return
+
+    for (const line of transcript.split('\n')) {
+      if (!line.trim()) continue
+
+      const record = parseTranscriptRecord(line)
+      if (!record) continue
+
+      const stepIndex = record.step_index
+      if (typeof stepIndex === 'number') {
+        if (emittedSteps.has(stepIndex)) continue
+        emittedSteps.add(stepIndex)
+      }
+
+      for (const event of antigravityTranscriptEvents(record, sessionId)) {
+        emitEvent(event)
+      }
+    }
+  }
+
+  const timer = setInterval(() => {
+    if (!stopped) void poll()
+  }, TRANSCRIPT_POLL_MS)
+
+  void poll()
+
+  return {
+    drain: poll,
+    stop: () => {
+      stopped = true
+      clearInterval(timer)
+    },
+  }
+}
+
+async function readOptionalText(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
+function parseAntigravityAppDataDir(logText: string): string | undefined {
+  return logText.match(/CLI app data directory:\s*(.+)$/m)?.[1]?.trim()
+}
+
+function parseAntigravityConversationId(logText: string): string | undefined {
+  return (
+    logText.match(/Print mode: conversation=([0-9a-f-]+)/i)?.[1] ??
+    logText.match(/Created conversation ([0-9a-f-]+)/i)?.[1]
+  )
+}
+
+function antigravityTranscriptPath(appDataDir: string, conversationId: string): string {
+  return path.join(
+    appDataDir,
+    'brain',
+    conversationId,
+    '.system_generated',
+    'logs',
+    'transcript.jsonl',
+  )
+}
+
+function parseTranscriptRecord(line: string): AntigravityTranscriptRecord | undefined {
+  try {
+    const parsed = JSON.parse(line) as unknown
+    return isRecord(parsed) ? (parsed as AntigravityTranscriptRecord) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function antigravityTranscriptEvents(
+  record: AntigravityTranscriptRecord,
+  sessionId: string,
+): AgentEvent[] {
+  if (record.source === 'USER_EXPLICIT' || record.type === 'CONVERSATION_HISTORY') {
+    return []
+  }
+
+  const timestamp = transcriptTimestamp(record.created_at)
+  if (record.type === 'PLANNER_RESPONSE') {
+    return [
+      ...messageEvents(record, sessionId, timestamp),
+      ...toolCallEvents(record, sessionId, timestamp),
+    ]
+  }
+
+  if (record.source !== 'MODEL' || !record.type || !record.content) return []
+
+  return [
+    {
+      type: 'stdout',
+      sessionId,
+      payload: {
+        type: 'tool_result',
+        tool_name: transcriptToolName(record.type),
+        output: record.content,
+        status: record.status?.toLowerCase(),
+      },
+      timestamp,
+    },
+  ]
+}
+
+function messageEvents(
+  record: AntigravityTranscriptRecord,
+  sessionId: string,
+  timestamp: number,
+): AgentEvent[] {
+  if (!record.content?.trim()) return []
+
+  return [
+    {
+      type: 'stdout',
+      sessionId,
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: record.content,
+      },
+      timestamp,
+    },
+  ]
+}
+
+function toolCallEvents(
+  record: AntigravityTranscriptRecord,
+  sessionId: string,
+  timestamp: number,
+): AgentEvent[] {
+  const toolCalls = Array.isArray(record.tool_calls) ? record.tool_calls.filter(isRecord) : []
+
+  return toolCalls.map((toolCall, index) => ({
+    type: 'stdout',
+    sessionId,
+    payload: {
+      type: 'tool_use',
+      tool_name: stringField(toolCall, 'name') ?? 'tool',
+      parameters: normalizeTranscriptArgs(recordField(toolCall, 'args') ?? {}),
+    },
+    timestamp: timestamp + (index + 1) / 1000,
+  }))
+}
+
+function normalizeTranscriptArgs(args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? stripJsonStringWrapper(value) : value,
+    ]),
+  )
+}
+
+function stripJsonStringWrapper(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"')) return value
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    return typeof parsed === 'string' ? parsed : value
+  } catch {
+    return value
+  }
+}
+
+function transcriptToolName(type: string): string {
+  return type.toLowerCase().replace(/_/g, '-')
+}
+
+function transcriptTimestamp(createdAt: string | undefined): number {
+  if (!createdAt) return Date.now()
+
+  const timestamp = Date.parse(createdAt)
+  return Number.isFinite(timestamp) ? timestamp : Date.now()
 }
 
 function createIdleSession(

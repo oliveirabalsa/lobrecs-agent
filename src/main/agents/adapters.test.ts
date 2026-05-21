@@ -399,6 +399,69 @@ describe('agent adapters', () => {
     expect(payloadField(complete, 'exitCode')).toBe(0)
   })
 
+  it('emits Antigravity transcript tool calls when print mode stdout is final text only', async () => {
+    process.env.ANTIGRAVITY_COMMAND = antigravityMock
+    process.env.ANTIGRAVITY_MOCK_MODE = 'transcript-only'
+    const adapter = new AntigravityAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'antigravity-transcript-session',
+      prompt: 'Run pwd and create a note',
+      repoPath: process.cwd(),
+      model: 'gemini-3.5-flash',
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = argvFromEvent(argvEvent)
+
+    expect(argv).toContain('--log-file')
+    expect(events.some((event) => payloadField(event, 'text') === 'Transcript final answer from Antigravity mock\n')).toBe(true)
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'stdout' &&
+          payloadField(event, 'type') === 'message' &&
+          payloadField(event, 'content') === 'I will run pwd and create a note.',
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (event) => {
+          const parameters = payloadField(event, 'parameters')
+          return (
+            event.type === 'stdout' &&
+            payloadField(event, 'type') === 'tool_use' &&
+            payloadField(event, 'tool_name') === 'run_command' &&
+            isRecord(parameters) &&
+            parameters.CommandLine === 'rtk pwd'
+          )
+        },
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (event) => {
+          const parameters = payloadField(event, 'parameters')
+          return (
+            event.type === 'stdout' &&
+            payloadField(event, 'type') === 'tool_use' &&
+            payloadField(event, 'tool_name') === 'write_to_file' &&
+            isRecord(parameters) &&
+            parameters.TargetFile === '/repo/note.md'
+          )
+        },
+      ),
+    ).toBe(true)
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'stdout' &&
+          payloadField(event, 'type') === 'tool_result' &&
+          payloadField(event, 'tool_name') === 'run-command',
+      ),
+    ).toBe(true)
+  })
+
   it('surfaces a clear error when the Antigravity CLI is missing', async () => {
     const adapter = new AntigravityAdapter()
 
@@ -492,6 +555,10 @@ function payloadText(event: AgentEvent | undefined): unknown {
 function argvFromEvent(event: AgentEvent | undefined): string[] {
   const argv = payloadField(event, 'argv')
   return Array.isArray(argv) && argv.every((item) => typeof item === 'string') ? argv : []
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {

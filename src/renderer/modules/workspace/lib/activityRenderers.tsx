@@ -14,6 +14,7 @@ import {
   CommandsGroup,
   CompletionFooter,
   EditedFilesCard,
+  PlanReviewCard,
   RanCommandsPill,
   UserQuestionPromptCard,
 } from '../components/artifacts'
@@ -224,6 +225,12 @@ export function renderStreamItem(
           onApprove={ctx.onApproveApproval}
           onReject={ctx.onRejectApproval}
         />
+      )
+
+    case 'plan-review':
+      if (!ctx.sessionId) return null
+      return (
+        <PlanReviewCard key={key} reviewId={item.reviewId} sessionId={ctx.sessionId} />
       )
 
     case 'step':

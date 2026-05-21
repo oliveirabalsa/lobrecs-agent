@@ -225,4 +225,80 @@ describe('ModelRouter', () => {
     expect(decision.agentId).toBe('codex')
     expect(decision.model).toBe('custom-codex-light')
   })
+
+  describe('image-aware routing', () => {
+    it('routes to an image-capable agent if the preferred agent resolved model does not support images', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          opencode: true,
+          'claude-code': true,
+        }),
+      })
+
+      const decision = await router.route({
+        prompt: 'analyze UI layout',
+        preferredAgentId: 'opencode', // MiniMax models don't support images
+        requiresImageSupport: true,
+      })
+
+      // Should switch from opencode to claude-code because claude-code supports images
+      expect(decision.agentId).toBe('claude-code')
+      expect(decision.model).toBe('claude-haiku-4-5-20251001')
+    })
+
+    it('stays on opencode if model override supports images', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          opencode: true,
+          'claude-code': true,
+        }),
+      })
+
+      const decision = await router.route({
+        prompt: 'analyze UI layout',
+        preferredAgentId: 'opencode',
+        modelOverride: 'gpt-4o',
+        requiresImageSupport: true,
+      })
+
+      expect(decision.agentId).toBe('opencode')
+      expect(decision.model).toBe('gpt-4o')
+    })
+
+    it('throws when model override does not support images', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          opencode: true,
+        }),
+      })
+
+      await expect(
+        router.route({
+          prompt: 'analyze UI layout',
+          preferredAgentId: 'opencode',
+          modelOverride: 'minimax-coding-plan/MiniMax-M2',
+          requiresImageSupport: true,
+        })
+      ).rejects.toThrow('Manual image-capable model required')
+    })
+
+    it('routes to antigravity with gemini models when image support is required', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          antigravity: true,
+          opencode: true,
+        }),
+      })
+
+      const decision = await router.route({
+        prompt: 'process layout screenshot',
+        preferredAgentId: 'antigravity',
+        requiresImageSupport: true,
+      })
+
+      expect(decision.agentId).toBe('antigravity')
+      expect(decision.model).toBe('gemini-2.0-flash-lite')
+    })
+  })
 })
+

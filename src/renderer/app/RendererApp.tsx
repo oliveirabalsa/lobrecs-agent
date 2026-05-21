@@ -359,7 +359,7 @@ export function RendererApp() {
           onOpenSidebar={() => setMobileSidebarOpen(true)}
           pendingQueue={workspace.pendingQueue}
           onEnqueue={workspace.handleEnqueue}
-          onSteer={workspace.handleSteer}
+          onForceSteerQueuedMessage={workspace.handleForceSteerQueuedMessage}
           onRemoveQueueItem={workspace.handleRemoveQueueItem}
           onClearQueue={workspace.handleClearQueue}
           openTerminalOnMount={openTerminalOnMount}

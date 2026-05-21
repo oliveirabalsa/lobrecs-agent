@@ -11,7 +11,7 @@ type ToolCall = Extract<AgentActivity, { kind: 'tool-call' }>
 
 describe('isEditToolName', () => {
   it('recognizes file-editing tools across adapters, case-insensitively', () => {
-    for (const name of ['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_file']) {
+    for (const name of ['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_file', 'write_to_file']) {
       expect(isEditToolName(name)).toBe(true)
     }
   })
@@ -93,6 +93,26 @@ describe('fileChangesFromEditToolCall', () => {
         filePath: 'src/new.ts',
         changeType: 'added',
         additions: 3,
+        deletions: 0,
+        status: 'applied',
+      },
+    ])
+  })
+
+  it('converts Antigravity write_to_file calls into added file changes', () => {
+    const call: ToolCall = {
+      kind: 'tool-call',
+      name: 'write_to_file',
+      status: 'running',
+      input: { TargetFile: '/repo/note.md', CodeContent: 'hello\nworld\n' },
+    }
+
+    expect(fileChangesFromEditToolCall(call)).toEqual([
+      {
+        kind: 'file-change',
+        filePath: '/repo/note.md',
+        changeType: 'added',
+        additions: 2,
         deletions: 0,
         status: 'applied',
       },

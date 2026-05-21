@@ -28,6 +28,9 @@ export type { CalloutProps, CalloutVariant } from './Callout'
 export { ApprovalRequestPill } from './ApprovalRequestPill'
 export type { ApprovalRequestPillProps } from './ApprovalRequestPill'
 
+export { PlanReviewCard } from './PlanReviewCard'
+export type { PlanReviewCardProps } from './PlanReviewCard'
+
 export { UserQuestionPromptCard } from './UserQuestionPromptCard'
 export type {
   UserQuestionActivity,

@@ -265,3 +265,48 @@ function collectClaudeModelIds(value: unknown, output: Set<string>): void {
     collectClaudeModelIds(item, output)
   }
 }
+
+export function modelSupportsImages(modelId: string): boolean {
+  const normalized = modelId.toLowerCase()
+
+  // Gemini & Antigravity models (always support images)
+  if (normalized.includes('gemini') || normalized.includes('antigravity')) {
+    return true
+  }
+
+  // Claude models (Claude 3, 3.5, 4, etc. support images)
+  if (
+    normalized.includes('claude-3') ||
+    normalized.includes('claude-4') ||
+    normalized.includes('claude-opus') ||
+    normalized.includes('claude-sonnet') ||
+    normalized.includes('claude-haiku')
+  ) {
+    return true
+  }
+  // Claude Code fallbacks like 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'
+  if (/^claude-(haiku|sonnet|opus)/i.test(modelId)) {
+    return true
+  }
+
+  // OpenAI models (GPT-4, GPT-4o, GPT-5, etc. support images/vision)
+  if (
+    normalized.includes('gpt-4') ||
+    normalized.includes('gpt-5') ||
+    normalized.includes('gpt-o')
+  ) {
+    return true
+  }
+
+  // Generic vision/multimodal indicators (common in open source/OpenCode catalog)
+  if (
+    normalized.includes('vision') ||
+    normalized.includes('vl') ||
+    normalized.includes('multimodal')
+  ) {
+    return true
+  }
+
+  return false
+}
+

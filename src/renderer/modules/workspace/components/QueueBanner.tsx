@@ -4,15 +4,16 @@ interface QueueBannerProps {
   messages: QueuedMessage[]
   onRemove: (id: string) => void | Promise<void>
   onClearAll: () => void | Promise<void>
+  onForceSteer?: (id: string) => void | Promise<void>
 }
 
 /**
  * Slim banner shown above the Composer when the active thread has queued
  * messages waiting for the running session to finish. Displays a count + a
- * preview of the next prompt, and lets the user remove the single queued
- * message or clear them all.
+ * preview of the next prompt, and lets the user force-steer with that prompt,
+ * remove the single queued message, or clear them all.
  */
-export function QueueBanner({ messages, onRemove, onClearAll }: QueueBannerProps) {
+export function QueueBanner({ messages, onRemove, onClearAll, onForceSteer }: QueueBannerProps) {
   if (messages.length === 0) return null
 
   const [first] = messages
@@ -34,6 +35,15 @@ export function QueueBanner({ messages, onRemove, onClearAll }: QueueBannerProps
       <span className="min-w-0 flex-1 truncate text-muted" title={first.prompt}>
         {preview}
       </span>
+      {onForceSteer ? (
+        <button
+          type="button"
+          onClick={() => void onForceSteer(first.id)}
+          className="shrink-0 rounded px-1.5 py-0.5 text-accent-warn transition-colors hover:bg-accent-warn/10 hover:text-accent-warn"
+        >
+          Force steer
+        </button>
+      ) : null}
       {messages.length === 1 ? (
         <button
           type="button"

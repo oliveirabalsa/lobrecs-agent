@@ -3,6 +3,7 @@ import type {
   AgentDispatchParams,
   AgentDispatchResult,
   AgentPlanDecisionPayload,
+  AgentPlanReviewDecisionPayload,
   EnqueueParams,
   QueuedMessage,
   QueueStatusEvent,
@@ -18,6 +19,14 @@ export interface AgentApi {
   killAll(): Promise<void>
   /** Resolves a pending `plan-prompt` round-trip from the main process. */
   planDecision(payload: AgentPlanDecisionPayload): Promise<void>
+  /**
+   * Approves or rejects a plan produced by a plan-mode session. Approving
+   * dispatches the gated execution session and resolves with its identifiers;
+   * rejecting resolves with `null`.
+   */
+  planReviewDecision(
+    payload: AgentPlanReviewDecisionPayload,
+  ): Promise<AgentDispatchResult | null>
   /** Adds a message to a thread's pending queue. Returns the queued entry. */
   enqueue(params: EnqueueParams): Promise<QueuedMessage>
   /** Returns the current queue snapshot for a thread. */
@@ -43,6 +52,8 @@ export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentAp
     cancel: (sessionId) => ipcRenderer.invoke('agent:cancel', sessionId),
     killAll: () => ipcRenderer.invoke('agent:kill-all'),
     planDecision: (payload) => ipcRenderer.invoke('agent:plan-decision', payload),
+    planReviewDecision: (payload) =>
+      ipcRenderer.invoke('agent:plan-review-decision', payload),
     enqueue: (params) => ipcRenderer.invoke('agent:enqueue', params),
     getQueue: (threadId) => ipcRenderer.invoke('agent:queue-status', threadId),
     dequeueItem: (threadId, messageId) =>

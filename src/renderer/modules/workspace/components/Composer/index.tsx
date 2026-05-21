@@ -70,12 +70,6 @@ export interface ComposerProps {
     agentId?: AgentId,
     modelOverride?: string,
   ) => void | Promise<void>
-  /**
-   * When provided, the composer shows a Steer toggle while a session is
-   * running. Activating it and submitting cancels the active session and
-   * redirects the agent with the new prompt on the same thread.
-   */
-  onSteer?: (prompt: string) => void | Promise<void>
 }
 
 const MIN_TEXTAREA_HEIGHT = 56
@@ -128,7 +122,6 @@ export function Composer({
   onContextClick,
   onSessionStarted,
   onEnqueue,
-  onSteer,
 }: ComposerProps) {
   const state = useComposerState({ projectId: project.id, prefillPrompt })
   const {
@@ -140,6 +133,8 @@ export function Composer({
     clearAttachments,
     attaching,
     setAttaching,
+    planMode,
+    setPlanMode,
     modelSelection,
     setModelSelection,
     modelGroups,
@@ -150,7 +145,6 @@ export function Composer({
   } = state
 
   const [submitting, setSubmitting] = useState(false)
-  const [steerMode, setSteerMode] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const attachingRef = useRef(false)
@@ -198,25 +192,6 @@ export function Composer({
       trimmed || (attachments.length > 0 ? 'Use the attached image as context.' : '')
     if (!effectivePrompt || submitting || attaching) return
 
-    if (steerMode && onSteer) {
-      setSubmitting(true)
-      setError(null)
-      try {
-        await onSteer(effectivePrompt)
-        setDraft('')
-        clearAttachments()
-        setSteerMode(false)
-        window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
-      } catch (steerError: unknown) {
-        setError(
-          steerError instanceof Error ? steerError.message : 'Failed to steer agent',
-        )
-      } finally {
-        setSubmitting(false)
-      }
-      return
-    }
-
     if (busy) {
       if (!onEnqueue) return
       setSubmitting(true)
@@ -249,6 +224,7 @@ export function Composer({
         modelOverride: manualOption?.modelId,
         imageAttachments: sentAttachments,
         threadId: activeThreadId ?? undefined,
+        planMode: planMode || undefined,
       })
       onSessionStarted({
         sessionId: result.sessionId,
@@ -280,12 +256,11 @@ export function Composer({
     manualOption,
     onEnqueue,
     onSessionStarted,
-    onSteer,
+    planMode,
     project.id,
     routerPreview,
     setDraft,
     setError,
-    steerMode,
     submitting,
   ])
 
@@ -415,39 +390,25 @@ export function Composer({
     (activeSessionStatus === 'running' || activeSessionStatus === 'awaiting-approval')
   const awaitingInput = activeSessionStatus === 'awaiting-input'
 
-  // Drop steer mode automatically when the session is no longer running, so a
-  // stale toggle doesn't apply to the next idle composer state.
-  useEffect(() => {
-    if (!running) setSteerMode(false)
-  }, [running])
-
   const hasContent = draft.trim().length > 0 || attachments.length > 0
-  const queueAllowed = busy && !awaitingInput && Boolean(onEnqueue) && !steerMode
-  const canSend =
-    hasContent && !attaching && (!busy || queueAllowed || (steerMode && Boolean(onSteer)))
+  const queueAllowed = busy && !awaitingInput && Boolean(onEnqueue)
+  const canSend = hasContent && !attaching && (!busy || queueAllowed)
   const showRouterPreview = modelSelection.kind === 'auto' && draft.trim().length > 0
-  const placeholder = steerMode
-    ? 'Redirect the agent…'
-    : awaitingInput
-      ? 'Answer the agent question above'
-      : queueAllowed
-        ? 'Queue a follow-up message…'
-        : activeThreadId
-          ? 'Ask for follow-up changes'
-          : 'Describe the coding task…'
+  const placeholder = awaitingInput
+    ? 'Answer the agent question above'
+    : queueAllowed
+      ? 'Queue a follow-up message…'
+      : activeThreadId
+        ? 'Ask for follow-up changes'
+        : 'Describe the coding task…'
   const submitLabel = !hasContent
     ? undefined
-    : steerMode
-      ? 'Steer agent'
-      : queueAllowed
-        ? 'Queue message'
-        : undefined
+    : queueAllowed
+      ? 'Queue message'
+      : undefined
 
-  const wrapperBorderClass = steerMode
-    ? 'border-accent-warn/50 focus-within:border-accent-warn/70'
-    : 'border-hairline focus-within:border-white/15'
+  const wrapperBorderClass = 'border-hairline focus-within:border-white/15'
   // Soft accent glow breathing behind the bar while the agent runs a turn.
-  // Suppressed in steer mode, whose amber border owns the composer's color.
   const wrapperGlowClass = ''
 
   return (
@@ -495,23 +456,27 @@ export function Composer({
               disabled={submitting}
               onFilesSelected={(files) => void attachImageFiles(files)}
             />
-            {running && onSteer ? (
+            {!running ? (
               <button
                 type="button"
-                onClick={() => setSteerMode((current) => !current)}
-                aria-pressed={steerMode}
-                title={steerMode ? 'Cancel steer mode' : 'Steer agent (redirect mid-run)'}
+                onClick={() => setPlanMode(!planMode)}
+                aria-pressed={planMode}
+                title={
+                  planMode
+                    ? 'Plan mode on — the agent drafts a plan and waits for your approval before executing'
+                    : 'Plan mode off — the agent starts work immediately'
+                }
                 className={`flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
-                  steerMode
-                    ? 'bg-accent-warn/20 text-accent-warn'
+                  planMode
+                    ? 'bg-accent-primary/20 text-accent-primary'
                     : 'text-muted hover:bg-white/5 hover:text-secondary'
                 }`}
               >
-                <span aria-hidden="true">↻</span>
-                {steerMode ? 'Steering' : 'Steer'}
+                <PlanModeIcon />
+                Plan
               </button>
             ) : null}
-            {busyReason && !steerMode && !queueAllowed ? (
+            {busyReason && !queueAllowed ? (
               <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
             ) : null}
           </div>
@@ -588,6 +553,28 @@ function DropzoneOverlay() {
         </div>
       </div>
     </div>
+  )
+}
+
+/** Checklist-with-tick glyph for the composer's plan-mode toggle. */
+function PlanModeIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 6h10" />
+      <path d="M4 12h10" />
+      <path d="M4 18h7" />
+      <path d="m15 16 2 2 4-4" />
+    </svg>
   )
 }
 

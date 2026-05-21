@@ -418,7 +418,10 @@ function isPostCompletionArtifact(activity: AgentActivity): boolean {
     activity.kind === 'step' ||
     activity.kind === 'approval' ||
     activity.kind === 'diff-summary' ||
-    activity.kind === 'file-change'
+    activity.kind === 'file-change' ||
+    // The plan-review marker is emitted right after `session-complete`; keep
+    // it on the completed turn so it renders beneath that turn's plan.
+    activity.kind === 'plan-review'
   )
 }
 

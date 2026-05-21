@@ -11,6 +11,7 @@ import type {
 import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
 import { CostDashboard } from '../../costs'
+import { MemoryManager } from '../../memory'
 import {
   TerminalPanel,
   type ActiveSessionMeta,
@@ -92,7 +93,7 @@ interface WorkspaceViewProps {
     agentId?: AgentId,
     modelOverride?: string,
   ) => void | Promise<void>
-  onSteer: (prompt: string) => void | Promise<void>
+  onForceSteerQueuedMessage: (messageId: string) => void | Promise<void>
   onRemoveQueueItem: (messageId: string) => void | Promise<void>
   onClearQueue: () => void | Promise<void>
   /** When true, WorkspaceView opens the terminal as soon as it mounts (used when switching from settings view). */
@@ -102,7 +103,7 @@ interface WorkspaceViewProps {
   onToggleSidebar?: () => void
 }
 
-const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations']
+const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations', 'memory']
 const RIGHT_PANEL_FULLSCREEN_CLASS =
   'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
 const RIGHT_PANEL_DOCKED_CLASS =
@@ -176,7 +177,7 @@ export function WorkspaceView({
   onOpenSidebar,
   pendingQueue,
   onEnqueue,
-  onSteer,
+  onForceSteerQueuedMessage,
   onRemoveQueueItem,
   onClearQueue,
   openTerminalOnMount,
@@ -583,6 +584,9 @@ export function WorkspaceView({
                             messages={pendingQueue}
                             onRemove={onRemoveQueueItem}
                             onClearAll={onClearQueue}
+                            onForceSteer={
+                              busy && activeSessionId ? onForceSteerQueuedMessage : undefined
+                            }
                           />
                         </div>
                       </div>
@@ -604,7 +608,6 @@ export function WorkspaceView({
                           hasProjectContext={Boolean(selectedProject.context?.trim())}
                           onContextClick={() => setContextDialogOpen(true)}
                           onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
-                          onSteer={busy && activeSessionId ? onSteer : undefined}
                         />
                       </div>
                     </div>
@@ -653,8 +656,10 @@ export function WorkspaceView({
                   </div>
                 ) : mainView === 'costs' ? (
                   <CostDashboard project={selectedProject} />
-                ) : (
+                ) : mainView === 'automations' ? (
                   <AutomationManager project={selectedProject} />
+                ) : (
+                  <MemoryManager project={selectedProject} />
                 )}
 
                 {bottomPanelInitialTab ? (

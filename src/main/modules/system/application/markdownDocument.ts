@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
@@ -46,19 +47,17 @@ function parseMarkdownLocation(input: ReadMarkdownDocumentInput): MarkdownLocati
     throw new Error('Only Markdown documents can be previewed.')
   }
 
-  try {
-    const url = new URL(href)
+  const url = parseUrl(href)
+  if (url) {
     if (url.protocol === 'http:' || url.protocol === 'https:') {
       return { kind: 'remote', url }
     }
     if (url.protocol === 'file:') {
       return {
         kind: 'file',
-        filePath: ensureInsideRepo(fileURLToPath(url), input.repoPath),
+        filePath: ensureAllowedLocalMarkdownPath(fileURLToPath(url), input.repoPath),
       }
     }
-  } catch {
-    // Continue below for absolute and repo-relative filesystem paths.
   }
 
   const pathLike = decodePath(stripQueryAndHash(href))
@@ -68,7 +67,7 @@ function parseMarkdownLocation(input: ReadMarkdownDocumentInput): MarkdownLocati
 
   return {
     kind: 'file',
-    filePath: ensureInsideRepo(filePath, input.repoPath),
+    filePath: ensureAllowedLocalMarkdownPath(filePath, input.repoPath),
   }
 }
 
@@ -131,16 +130,40 @@ function resolveRelativeMarkdownPath(pathLike: string, repoPath?: string): strin
   return path.resolve(repoPath, pathLike)
 }
 
-function ensureInsideRepo(filePath: string, repoPath?: string): string {
+function ensureAllowedLocalMarkdownPath(filePath: string, repoPath?: string): string {
   if (!repoPath) return path.resolve(filePath)
 
-  const root = path.resolve(repoPath)
-  const resolved = path.resolve(filePath)
-  const relative = path.relative(root, resolved)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('Markdown preview can only open files inside the selected project.')
+  if (isInsideRepo(filePath, repoPath) || isTrustedGeneratedMarkdownPath(filePath)) {
+    return path.resolve(filePath)
   }
-  return resolved
+
+  throw new Error('Markdown preview can only open files inside the selected project.')
+}
+
+function isInsideRepo(filePath: string, repoPath: string): boolean {
+  return isPathInside(path.resolve(repoPath), path.resolve(filePath))
+}
+
+function isPathInside(root: string, filePath: string): boolean {
+  const resolvedRoot = path.resolve(root)
+  const resolved = path.resolve(filePath)
+  const relative = path.relative(resolvedRoot, resolved)
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+}
+
+export function isTrustedGeneratedMarkdownPath(filePath: string): boolean {
+  return isPathInside(
+    path.join(homedir(), '.gemini', 'antigravity-cli', 'brain'),
+    path.resolve(filePath),
+  )
+}
+
+function parseUrl(value: string): URL | null {
+  try {
+    return new URL(value)
+  } catch {
+    return null
+  }
 }
 
 function hasMarkdownExtension(pathname: string): boolean {

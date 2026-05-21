@@ -110,6 +110,16 @@ export type AgentActivity =
       allowFreeText?: boolean
     }
   | {
+      /**
+       * Emitted when a plan-mode session finishes producing its plan. The
+       * renderer pairs this with an inline Approve/Reject card; the agent does
+       * not execute until the user approves via `agent:plan-review-decision`.
+       */
+      kind: 'plan-review'
+      /** Identifier echoed back in `AgentPlanReviewDecisionPayload`. */
+      reviewId: string
+    }
+  | {
       kind: 'user-question'
       promptId: string
       title: string

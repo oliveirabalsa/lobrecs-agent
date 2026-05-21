@@ -84,6 +84,22 @@ describe('splitFinalAssistant', () => {
     expect(result.renderable).toEqual([])
     expect(result.trailingCodeChanges).toHaveLength(1)
   })
+
+  it('extracts plan-review markers so they render below the final plan', () => {
+    const items: StreamItem[] = [
+      { kind: 'message', role: 'assistant', text: 'Here is my plan' },
+      { kind: 'completion', status: 'done', summary: 'Session complete' },
+      { kind: 'plan-review', reviewId: 'review-1' },
+    ]
+
+    const result = splitFinalAssistant(items)
+
+    expect(result.finalAssistantText).toBe('Here is my plan')
+    // The marker is pulled out of `renderable` so it does not appear above
+    // the plan it belongs to.
+    expect(result.renderable).toEqual([])
+    expect(result.planReviewItems).toEqual([{ kind: 'plan-review', reviewId: 'review-1' }])
+  })
 })
 
 describe('streamItemReceivesRunningState', () => {

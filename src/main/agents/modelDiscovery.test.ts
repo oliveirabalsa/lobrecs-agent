@@ -5,6 +5,7 @@ import {
   parseCodexModels,
   parseOpenCodeModels,
   pickModelForTier,
+  modelSupportsImages,
 } from './modelDiscovery'
 
 describe('modelDiscovery', () => {
@@ -99,5 +100,36 @@ describe('modelDiscovery', () => {
       'gemini-3.0-pro',
       'gemini-3.5-flash',
     ])
+  })
+
+  describe('modelSupportsImages', () => {
+    it('returns true for Gemini and Antigravity models', () => {
+      expect(modelSupportsImages('gemini-2.5-flash')).toBe(true)
+      expect(modelSupportsImages('antigravity-3.0-pro')).toBe(true)
+      expect(modelSupportsImages('google/gemini-2.0-flash-lite')).toBe(true)
+    })
+
+    it('returns true for Claude 3+ and Claude Code fallback models', () => {
+      expect(modelSupportsImages('claude-3-5-sonnet')).toBe(true)
+      expect(modelSupportsImages('claude-haiku-4-5-20251001')).toBe(true)
+      expect(modelSupportsImages('claude-opus-4-7')).toBe(true)
+    })
+
+    it('returns true for OpenAI GPT-4/5 models', () => {
+      expect(modelSupportsImages('gpt-4o')).toBe(true)
+      expect(modelSupportsImages('gpt-5.5')).toBe(true)
+    })
+
+    it('returns true for models with vision/VL in their name', () => {
+      expect(modelSupportsImages('qwen-vl-max')).toBe(true)
+      expect(modelSupportsImages('llama3-vision-70b')).toBe(true)
+      expect(modelSupportsImages('internvl-2')).toBe(true)
+    })
+
+    it('returns false for text-only models like MiniMax M2', () => {
+      expect(modelSupportsImages('minimax-coding-plan/MiniMax-M2')).toBe(false)
+      expect(modelSupportsImages('minimax-coding-plan/MiniMax-M2.7')).toBe(false)
+      expect(modelSupportsImages('text-davinci-003')).toBe(false)
+    })
   })
 })

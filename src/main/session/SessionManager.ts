@@ -5,9 +5,11 @@ import type {
   AgentActivity,
   AgentEvent,
   AgentId,
+  AgentPlanReviewDecisionPayload,
   AgentRuntimeSettings,
   QueuedMessage,
   QueueStatusEvent,
+  Session,
   ThreadTranscriptTurn,
   SessionStatus,
   Thread,
@@ -18,6 +20,7 @@ import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
 import { sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
+import { buildPlanExecutionPrompt, buildPlanModePrompt } from './planModePrompt'
 import {
   buildLocalDiffProposals,
   captureLocalChangeBaseline,
@@ -57,12 +60,25 @@ export type DispatchSessionParams = {
   model: string
   repoPath: string
   context?: string | null
+  /**
+   * Optional override for the query used to retrieve repository context.
+   * Defaults to `prompt`. Plan mode's execution session sets this to the
+   * original task so context retrieval is not poisoned by the generic
+   * "plan approved" prompt the agent actually receives.
+   */
+  contextQuery?: string
   imageAttachments?: ImageAttachment[]
   runtimeSettings?: AgentRuntimeSettings
   isolate?: boolean
   qualityAttempt?: number
   /** When provided, links the new session to an existing thread. */
   threadId?: string
+  /**
+   * When true the prompt is wrapped with planning instructions and, on a
+   * successful completion, a `plan-review` activity is emitted instead of
+   * draining the thread queue. Execution waits for `resolvePlanReview`.
+   */
+  planMode?: boolean
 }
 
 export type DispatchSessionResult = {
@@ -95,6 +111,37 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   worktreePath: string | null
   localBaseline: LocalChangeBaseline | null
   qualityAttempt: number
+  /** True when this session was dispatched as the planning phase of plan mode. */
+  planMode: boolean
+  /** Carried so the gated execution session can re-dispatch with the same config. */
+  isolate: boolean
+  runtimeSettings?: AgentRuntimeSettings
+  /** Raw project context — carried so a gated execution session resolves with parity. */
+  baseContext?: string | null
+}
+
+/**
+ * A plan awaiting the user's Approve/Reject decision. Holds everything needed
+ * to dispatch the execution session once `resolvePlanReview` is called.
+ */
+type PlanReviewRecord = {
+  reviewId: string
+  planningSessionId: string
+  projectId: string
+  threadId: string
+  repoPath: string
+  agentId: AgentId
+  model: string
+  isolate: boolean
+  runtimeSettings?: AgentRuntimeSettings
+  /**
+   * The original user task. Used as the execution session's context-retrieval
+   * query so repo context stays task-relevant — the agent prompt itself is the
+   * generic `buildPlanExecutionPrompt()` string, which is useless as a query.
+   */
+  taskPrompt: string
+  /** The planning session's raw project context, replayed for the execution session. */
+  baseContext?: string | null
 }
 
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
@@ -121,6 +168,8 @@ export class SessionManager {
   private readonly processWarningsBySession = new Map<string, Set<string>>()
   private readonly sessionsPausedForUserInput = new Set<string>()
   private readonly pendingQueues = new Map<string, QueuedMessage[]>()
+  /** Plans awaiting an Approve/Reject decision, keyed by reviewId. */
+  private readonly pendingPlanReviews = new Map<string, PlanReviewRecord>()
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
   private qualityGateRunner?: QualityGateRunner
@@ -206,9 +255,16 @@ export class SessionManager {
         })
       }
 
+      // Plan mode wraps the prompt with planning instructions for the agent
+      // only — `sessionsStore` keeps the original task so the UI bubble and
+      // replayed thread history stay clean.
+      const adapterPrompt = params.planMode
+        ? buildPlanModePrompt(params.prompt)
+        : params.prompt
+
       const agentSession = await adapter.dispatch({
         sessionId: session.id,
-        prompt: params.prompt,
+        prompt: adapterPrompt,
         repoPath: worktreePath ?? params.repoPath,
         model: params.model,
         context,
@@ -225,6 +281,10 @@ export class SessionManager {
         worktreePath,
         localBaseline,
         qualityAttempt: params.qualityAttempt ?? 0,
+        planMode: params.planMode ?? false,
+        isolate: shouldIsolate,
+        runtimeSettings: params.runtimeSettings,
+        baseContext: params.context,
       })
 
       agentSession.events.on('event', (event: AgentEvent) => {
@@ -262,6 +322,7 @@ export class SessionManager {
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
+    this.dropPlanReviewsForSession(sessionId)
     const session = sessionsStore.get(sessionId)
 
     if (session && !terminalSessionStatuses.has(session.status)) {
@@ -376,6 +437,134 @@ export class SessionManager {
     })
   }
 
+  /**
+   * Resolves a plan awaiting review.
+   *
+   * On `approve` this dispatches the gated execution session on the planning
+   * session's thread — the very gate of plan mode: the execution session does
+   * not exist until this call. On `reject` the plan is discarded and any
+   * follow-ups queued while the plan was pending are released to run.
+   *
+   * Returns the execution session identifiers on approval, or `null` when the
+   * review was rejected or is unknown (already resolved).
+   */
+  async resolvePlanReview(
+    payload: AgentPlanReviewDecisionPayload,
+  ): Promise<DispatchSessionResult | null> {
+    const record = this.pendingPlanReviews.get(payload.reviewId)
+    if (!record) return null
+
+    // The decision must come from the UI bound to the planning session that
+    // produced this plan. A `sessionId` mismatch means a stale or misrouted
+    // event — ignore it WITHOUT consuming the review, so the correctly paired
+    // decision can still resolve it.
+    if (payload.sessionId !== record.planningSessionId) return null
+
+    this.pendingPlanReviews.delete(payload.reviewId)
+
+    if (payload.decision === 'reject') {
+      // The plan is discarded, but the planning turn is over. Release the
+      // thread by draining its queue so follow-ups enqueued while the plan
+      // was pending are not stranded. `dispatchNextQueued` only drains an
+      // idle thread: if another session is still running here it leaves the
+      // queue intact and that session's own completion drains it in order.
+      // An empty queue makes this a no-op.
+      void this.dispatchNextQueued(record.threadId, {
+        projectId: record.projectId,
+        repoPath: record.repoPath,
+      })
+      return null
+    }
+
+    return this.dispatch({
+      projectId: record.projectId,
+      prompt: buildPlanExecutionPrompt(),
+      // The agent prompt is generic, so retrieve repo context with the
+      // original task instead; base context is replayed for parity with the
+      // planning session.
+      contextQuery: record.taskPrompt,
+      context: record.baseContext,
+      agentId: record.agentId,
+      model: record.model,
+      repoPath: record.repoPath,
+      threadId: record.threadId,
+      isolate: record.isolate,
+      runtimeSettings: record.runtimeSettings,
+    })
+  }
+
+  /**
+   * Completion path for a plan-mode planning session.
+   *
+   * Unlike the normal path this never builds, applies, or quality-gates
+   * diffs — the planning phase must leave the repo untouched until the user
+   * approves. A cleanly finished plan surfaces a `plan-review` activity; a
+   * failed plan just records its terminal event with nothing to approve.
+   */
+  private async completePlanModeSession(
+    sessionId: string,
+    active: ActiveSession,
+    finalEvent: AgentEvent,
+    session: Session | null,
+  ): Promise<void> {
+    try {
+      // Drop the planning worktree (if any). Stray edits the agent made
+      // despite the no-changes instruction are isolated there and discarded.
+      await this.removeWorktree(sessionId, active)
+    } finally {
+      this.recordEvent(finalEvent)
+    }
+
+    if (completionStatus(finalEvent) === 'done' && session) {
+      this.registerPlanReview(sessionId, active, session)
+    }
+  }
+
+  /**
+   * Records a finished plan-mode session's plan as awaiting review and emits
+   * the `plan-review` activity that the renderer pairs with an Approve/Reject
+   * card. Emitted after the `session-complete` event so it attaches to the
+   * completed turn.
+   */
+  private registerPlanReview(
+    sessionId: string,
+    active: ActiveSession,
+    session: Session,
+  ): void {
+    const reviewId = randomUUID()
+    this.pendingPlanReviews.set(reviewId, {
+      reviewId,
+      planningSessionId: sessionId,
+      projectId: session.projectId,
+      threadId: active.threadId,
+      repoPath: active.repoPath,
+      agentId: session.agentId,
+      model: session.model,
+      isolate: active.isolate,
+      runtimeSettings: active.runtimeSettings,
+      // `session.prompt` is the original task — plan mode only wraps the
+      // adapter prompt, never the stored prompt.
+      taskPrompt: session.prompt,
+      baseContext: active.baseContext,
+    })
+
+    this.recordEvent({
+      type: 'activity',
+      sessionId,
+      payload: { kind: 'plan-review', reviewId },
+      timestamp: Date.now(),
+    })
+  }
+
+  /** Drops any pending plan reviews tied to a session (e.g. on cancellation). */
+  private dropPlanReviewsForSession(sessionId: string): void {
+    for (const [reviewId, record] of this.pendingPlanReviews) {
+      if (record.planningSessionId === sessionId) {
+        this.pendingPlanReviews.delete(reviewId)
+      }
+    }
+  }
+
   private resolveAdapter(agentId: AgentId): AgentAdapter | undefined {
     return this.adapterResolver?.(agentId) ?? this.adapters.get(agentId)
   }
@@ -388,7 +577,9 @@ export class SessionManager {
     return this.resolveContext({
       projectId: params.projectId,
       repoPath: params.repoPath,
-      prompt: params.prompt,
+      // `contextQuery` lets a caller decouple the retrieval query from the
+      // prompt the agent receives (see plan mode's execution session).
+      prompt: params.contextQuery ?? params.prompt,
       baseContext: params.context,
     })
   }
@@ -438,9 +629,19 @@ export class SessionManager {
       this.activeSessions.delete(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
 
+      // A plan-mode planning session bypasses the diff/quality pipeline
+      // entirely: the repo must stay untouched until the user approves, so
+      // diffs are never auto-applied and the quality gate never runs before
+      // review. This branch must precede `emitCompletionDiffs`.
+      if (active?.planMode) {
+        void this.completePlanModeSession(event.sessionId, active, completedEvent, session)
+        return
+      }
+
       void this.emitCompletionDiffs(event.sessionId, active, completedEvent).then(() => {
         if (status !== 'done') return
         if (!active) return
+
         if (!session?.threadId) {
           console.warn(
             `[session] skipping queued dispatch: session ${event.sessionId} missing thread on completion`,
@@ -725,12 +926,35 @@ export class SessionManager {
     sessionsStore.updateUsage(event.sessionId, usage.tokensIn, usage.tokensOut, costUsd)
   }
 
+  /**
+   * True when a live agent session is still attached to the thread.
+   *
+   * Backed by `activeSessions`, which holds running and awaiting-approval
+   * sessions and drops a session the instant it completes, errors, is
+   * cancelled, or pauses for user input. A thread whose sessions have all
+   * finished (or only paused) therefore reads as not busy.
+   */
+  private isThreadBusy(threadId: string): boolean {
+    for (const active of this.activeSessions.values()) {
+      if (active.threadId === threadId) return true
+    }
+    return false
+  }
+
   private async dispatchNextQueued(
     threadId: string,
     fallback: { projectId: string; repoPath: string },
   ): Promise<void> {
     const queue = this.pendingQueues.get(threadId)
     if (!queue?.length) return
+
+    // A queued follow-up must start on an idle thread. If a session is still
+    // active here — e.g. a plan rejected while newer work runs on the same
+    // thread — leave the queue intact; that session's own completion calls
+    // back here and drains it in order. Without this guard a reject (or an
+    // out-of-order completion) could start a second concurrent dispatch on
+    // the thread and break queue ordering.
+    if (this.isThreadBusy(threadId)) return
 
     const [next, ...rest] = queue
     if (rest.length === 0) {

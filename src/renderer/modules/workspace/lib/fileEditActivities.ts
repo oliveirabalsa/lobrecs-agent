@@ -37,6 +37,7 @@ const EDIT_TOOL_NAMES = new Set<string>([
   'str_replace_editor',
   'create_file',
   'write_file',
+  'write_to_file',
   'edit_file',
   'replace_file_content',
 ])
@@ -48,7 +49,10 @@ const PATH_KEYS = [
   'path',
   'notebook_path',
   'target_file',
+  'TargetFile',
   'absolute_path',
+  'AbsolutePath',
+  'FilePath',
 ]
 
 /** "Before" content field names (the text being replaced). */
@@ -62,6 +66,7 @@ const NEW_KEYS = [
   'new_content',
   'newText',
   'content',
+  'CodeContent',
   'new_source',
   'code_edit',
 ]
