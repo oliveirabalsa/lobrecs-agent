@@ -18,6 +18,10 @@ refactor.
   stored at `.lobrecs/memory.json`.
 - [Updates](features/updates.md) documents how packaged builds check,
   download, and install new releases.
+- [Feature investigation](product/feature-investigation-2026-05-21.md)
+  captures the current new-feature recommendations and implementation paths.
+- [Feature investigation addendum](product/feature-investigation-2026-05-21-addendum.md)
+  adds the second-pass codebase delta and live web-researched feature signals.
 
 ## Agent Skills
 
