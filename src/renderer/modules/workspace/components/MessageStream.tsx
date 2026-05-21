@@ -337,7 +337,10 @@ function TurnBlock({
 
       {planReviewItems.map((item, idx) => (
         <div key={`${turn.id}-plan-${idx}`} className="motion-fade-up-in">
-          {renderStreamItem(item, `${turn.id}-plan-${idx}`, ctx)}
+          {renderStreamItem(item, `${turn.id}-plan-${idx}`, {
+            ...ctx,
+            planReviewPlanText: finalAssistantText,
+          })}
         </div>
       ))}
 

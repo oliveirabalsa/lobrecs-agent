@@ -30,11 +30,11 @@ export function PlanModeExecutionMessage() {
       <div className="grid gap-2 px-4 py-3 text-sm leading-6 text-secondary">
         <div className="flex items-start gap-2">
           <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
-          <span>Applying the approved file changes.</span>
+          <span>Applying changes from the approved plan.</span>
         </div>
         <div className="flex items-start gap-2">
           <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
-          <span>Running the verification steps from the plan.</span>
+          <span>Running the verification steps listed in that plan.</span>
         </div>
       </div>
     </article>

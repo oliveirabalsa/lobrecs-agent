@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolvePlanReviewOutcome } from './PlanReviewCard'
+import {
+  resolvePlanReviewOutcome,
+  toPlanReviewMarkdownDocument,
+} from './PlanReviewCard'
 
 describe('resolvePlanReviewOutcome', () => {
   it('reports an approval that dispatched an execution session as approved', () => {
@@ -16,5 +19,24 @@ describe('resolvePlanReviewOutcome', () => {
 
   it('reports a rejection as rejected (its result is null by contract)', () => {
     expect(resolvePlanReviewOutcome('reject', null)).toBe('rejected')
+  })
+})
+
+describe('toPlanReviewMarkdownDocument', () => {
+  it('builds a markdown preview document from the plan text', () => {
+    expect(
+      toPlanReviewMarkdownDocument('## Steps\n\n1. Update composer state'),
+    ).toEqual({
+      title: 'Plan review.md',
+      content: '## Steps\n\n1. Update composer state',
+      sourceLabel: 'Plan review',
+      suggestedFileName: 'plan-review.md',
+    })
+  })
+
+  it('falls back when plan text is blank', () => {
+    expect(toPlanReviewMarkdownDocument('   ').content).toBe(
+      '_No plan text was captured for this review._',
+    )
   })
 })

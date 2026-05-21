@@ -44,6 +44,8 @@ export interface RendererContext {
   onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
+  /** The plan text shown above an inline plan-review control, when present. */
+  planReviewPlanText?: string
 }
 
 const EMPTY_CONTEXT: RendererContext = {
@@ -230,7 +232,13 @@ export function renderStreamItem(
     case 'plan-review':
       if (!ctx.sessionId) return null
       return (
-        <PlanReviewCard key={key} reviewId={item.reviewId} sessionId={ctx.sessionId} />
+        <PlanReviewCard
+          key={key}
+          reviewId={item.reviewId}
+          sessionId={ctx.sessionId}
+          planText={ctx.planReviewPlanText}
+          onPreviewMarkdown={ctx.onPreviewMarkdown}
+        />
       )
 
     case 'step':
