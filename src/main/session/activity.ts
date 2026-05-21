@@ -53,6 +53,8 @@ export function activityFromEvent(event: AgentEvent): AgentActivity | AgentActiv
   }
 
   if (event.type === 'diff') {
+    if (isLiveDiffPayload(event.payload)) return null
+
     const proposals = normalizeDiffs(event.payload)
     if (proposals.length === 0) return null
 
@@ -384,6 +386,10 @@ function activityFromCodexPayload(
   const item = isRecord(payload.item) ? payload.item : payload
   const itemType = stringField(item, 'type') ?? type
 
+  if (itemType === 'file_change') {
+    return codexFileChangeActivities(item)
+  }
+
   if (type === 'item.started') {
     if (isReasoningItem(itemType)) {
       return { kind: 'step', title: 'Thinking', status: 'running' }
@@ -499,6 +505,69 @@ function activityFromCodexPayload(
   return undefined
 }
 
+function codexFileChangeActivities(
+  item: Record<string, unknown>,
+): AgentActivity | AgentActivity[] | null {
+  const changes = Array.isArray(item.changes) ? item.changes.filter(isRecord) : []
+  if (changes.length === 0) {
+    return {
+      kind: 'step',
+      title: 'Editing files',
+      status: codexFileChangeStepStatus(item),
+    }
+  }
+
+  return changes
+    .map((change): AgentActivity | null => {
+      const filePath = stringField(change, 'path') ?? stringField(change, 'filePath')
+      if (!filePath) return null
+
+      return {
+        kind: 'file-change',
+        filePath,
+        changeType: codexFileChangeType(change),
+        status: codexFileChangeStatus(item),
+      }
+    })
+    .filter((activity): activity is AgentActivity => activity !== null)
+}
+
+function codexFileChangeType(
+  change: Record<string, unknown>,
+): Extract<AgentActivity, { kind: 'file-change' }>['changeType'] {
+  const kind = stringField(change, 'kind') ?? stringField(change, 'changeType')
+  if (kind === 'add' || kind === 'added' || kind === 'create' || kind === 'created') {
+    return 'added'
+  }
+  if (
+    kind === 'delete' ||
+    kind === 'deleted' ||
+    kind === 'remove' ||
+    kind === 'removed'
+  ) {
+    return 'deleted'
+  }
+  return 'modified'
+}
+
+function codexFileChangeStatus(
+  item: Record<string, unknown>,
+): Extract<AgentActivity, { kind: 'file-change' }>['status'] {
+  const status = stringField(item, 'status')
+  if (status === 'failed' || status === 'error') return 'conflict'
+  if (status === 'completed' || status === 'done' || status === 'applied') return 'applied'
+  return 'pending'
+}
+
+function codexFileChangeStepStatus(
+  item: Record<string, unknown>,
+): Extract<AgentActivity, { kind: 'step' }>['status'] {
+  const status = codexFileChangeStatus(item)
+  if (status === 'conflict') return 'error'
+  if (status === 'applied') return 'done'
+  return 'running'
+}
+
 function normalizeApproval(payload: unknown): ApprovalRequest {
   if (!isRecord(payload)) {
     return {
@@ -560,6 +629,10 @@ function normalizeDiffs(payload: unknown): DiffProposal[] {
       typeof proposal.proposedContent === 'string'
     )
   })
+}
+
+function isLiveDiffPayload(payload: unknown): boolean {
+  return isRecord(payload) && payload.live === true
 }
 
 function inferChangeType(proposal: DiffProposal): 'added' | 'modified' | 'deleted' {

@@ -190,6 +190,40 @@ describe('agent activity normalization', () => {
     ])
   })
 
+  it('surfaces Codex file_change events as file activities', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'item.completed',
+        item: {
+          type: 'file_change',
+          status: 'completed',
+          changes: [
+            { path: '/repo/index.html', kind: 'update' },
+            { path: '/repo/new.css', kind: 'add' },
+          ],
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'file-change',
+        filePath: '/repo/index.html',
+        changeType: 'modified',
+        status: 'applied',
+      }),
+      expect.objectContaining({
+        kind: 'file-change',
+        filePath: '/repo/new.css',
+        changeType: 'added',
+        status: 'applied',
+      }),
+    ])
+  })
+
   it('preserves nested Codex function-call tool names and inputs', () => {
     const activities = deriveActivityEvents({
       type: 'stdout',
@@ -690,5 +724,27 @@ describe('agent activity normalization', () => {
       expect.objectContaining({ kind: 'diff-summary', filesChanged: 1, additions: 2, deletions: 1 }),
       expect.objectContaining({ kind: 'file-change', filePath: '/repo/a.ts', status: 'pending' }),
     ])
+  })
+
+  it('does not turn live diff snapshots into duplicate timeline activities', () => {
+    const activities = deriveActivityEvents({
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/a.ts',
+            originalContent: 'old\n',
+            proposedContent: 'new\n',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      },
+      timestamp: 1,
+    })
+
+    expect(activities).toEqual([])
   })
 })

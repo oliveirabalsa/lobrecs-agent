@@ -1,6 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   AgentActivity,
   AgentApprovalMode,
@@ -111,6 +111,11 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   threadId: string
   worktreePath: string | null
   localBaseline: LocalChangeBaseline | null
+  liveDiffTimer?: ReturnType<typeof setTimeout>
+  liveDiffSignature?: string
+  lastAgentEventAt: number
+  lastIdleHeartbeatAt: number
+  idleHeartbeatTimer?: ReturnType<typeof setTimeout>
   qualityAttempt: number
   /** True when this session was dispatched as the planning phase of plan mode. */
   planMode: boolean
@@ -153,6 +158,7 @@ const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancel
 const THREAD_CONTEXT_SESSION_LIMIT = 6
 const THREAD_CONTEXT_PROMPT_CHARS = 2_000
 const THREAD_CONTEXT_ASSISTANT_CHARS = 4_000
+const LIVE_DIFF_DEBOUNCE_MS = 120
 
 export type SessionManagerOptions = {
   adapters?: Iterable<AgentAdapter>
@@ -162,6 +168,7 @@ export type SessionManagerOptions = {
   worktreeIsolation?: boolean
   resolveContext?: SessionContextResolver
   qualityGateRunner?: QualityGateRunner
+  idleHeartbeatMs?: number | false
 }
 
 export class SessionManager {
@@ -178,6 +185,7 @@ export class SessionManager {
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
   private qualityGateRunner?: QualityGateRunner
+  private readonly idleHeartbeatMs: number | false
 
   constructor(options: SessionManagerOptions = {}) {
     this.adapterResolver = options.adapterResolver
@@ -186,6 +194,7 @@ export class SessionManager {
     this.estimateCost = options.estimateCost ?? (() => 0)
     this.resolveContext = options.resolveContext
     this.qualityGateRunner = options.qualityGateRunner
+    this.idleHeartbeatMs = options.idleHeartbeatMs ?? 45_000
 
     for (const adapter of options.adapters ?? []) {
       this.registerAdapter(adapter)
@@ -286,12 +295,15 @@ export class SessionManager {
         threadId,
         worktreePath,
         localBaseline,
+        lastAgentEventAt: Date.now(),
+        lastIdleHeartbeatAt: 0,
         qualityAttempt: params.qualityAttempt ?? 0,
         planMode: params.planMode ?? false,
         isolate: shouldIsolate,
         runtimeSettings: params.runtimeSettings,
         baseContext: params.context,
       })
+      this.scheduleIdleHeartbeat(session.id)
 
       agentSession.events.on('event', (event: AgentEvent) => {
         this.handleAgentEvent({ ...event, sessionId: session.id })
@@ -312,6 +324,7 @@ export class SessionManager {
     const session = sessionsStore.get(sessionId)
     if (session?.status === 'awaiting-approval') {
       sessionsStore.updateStatus(sessionId, 'running')
+      this.noteAgentEvent(sessionId)
     }
   }
 
@@ -320,11 +333,13 @@ export class SessionManager {
     const session = sessionsStore.get(sessionId)
     if (session?.status === 'awaiting-approval') {
       sessionsStore.updateStatus(sessionId, 'running')
+      this.noteAgentEvent(sessionId)
     }
   }
 
   cancel(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
+    this.stopIdleHeartbeat(sessionId)
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
@@ -620,6 +635,7 @@ export class SessionManager {
 
   private handleAgentEvent(event: AgentEvent): void {
     if (this.sessionsPausedForUserInput.has(event.sessionId)) return
+    this.noteAgentEvent(event.sessionId)
 
     if (event.type === 'approval-request') {
       if (this.isTerminalSession(event.sessionId)) return
@@ -640,6 +656,8 @@ export class SessionManager {
 
       this.applyUsage(event)
       sessionsStore.updateStatus(event.sessionId, status)
+      this.stopIdleHeartbeat(event.sessionId)
+      this.stopLiveDiff(event.sessionId)
       this.activeSessions.delete(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
 
@@ -678,6 +696,8 @@ export class SessionManager {
       sessionsStore.updateStatus(event.sessionId, 'error')
       this.recordEvent(event)
       void this.removeWorktree(event.sessionId, active)
+      this.stopIdleHeartbeat(event.sessionId)
+      this.stopLiveDiff(event.sessionId)
       this.activeSessions.delete(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
       return
@@ -692,13 +712,78 @@ export class SessionManager {
     this.broadcastEvent(event)
   }
 
+  private noteAgentEvent(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active) return
+
+    active.lastAgentEventAt = Date.now()
+    this.scheduleIdleHeartbeat(sessionId)
+  }
+
+  private scheduleIdleHeartbeat(sessionId: string): void {
+    if (this.idleHeartbeatMs === false) return
+
+    const active = this.activeSessions.get(sessionId)
+    if (!active) return
+
+    if (active.idleHeartbeatTimer) {
+      clearTimeout(active.idleHeartbeatTimer)
+    }
+
+    active.idleHeartbeatTimer = setTimeout(() => {
+      this.emitIdleHeartbeat(sessionId)
+    }, this.idleHeartbeatMs)
+    active.idleHeartbeatTimer.unref?.()
+  }
+
+  private emitIdleHeartbeat(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active || this.idleHeartbeatMs === false) return
+
+    const session = sessionsStore.get(sessionId)
+    if (!session || session.status !== 'running') return
+
+    const now = Date.now()
+    if (now - active.lastIdleHeartbeatAt < this.idleHeartbeatMs) {
+      this.scheduleIdleHeartbeat(sessionId)
+      return
+    }
+
+    active.lastIdleHeartbeatAt = now
+    const idleSeconds = Math.max(1, Math.round((now - active.lastAgentEventAt) / 1000))
+    this.recordEvent({
+      type: 'activity',
+      sessionId,
+      payload: {
+        kind: 'step',
+        title: 'Waiting for agent output',
+        detail: `The agent process is still running; no new stream events for ${idleSeconds}s.`,
+        status: 'running',
+      },
+      timestamp: now,
+    })
+    this.scheduleIdleHeartbeat(sessionId)
+  }
+
+  private stopIdleHeartbeat(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active?.idleHeartbeatTimer) return
+
+    clearTimeout(active.idleHeartbeatTimer)
+    active.idleHeartbeatTimer = undefined
+  }
+
   private recordActivityEvents(event: AgentEvent): void {
     let shouldPauseForUserInput = false
+    let shouldRefreshLiveDiff = shouldTriggerLiveLocalDiff(event)
 
     for (const activityEvent of deriveActivityEvents(event)) {
       if (this.hasSeenProcessWarning(activityEvent)) continue
 
       this.recordEvent(activityEvent)
+      if (shouldTriggerLiveLocalDiff(activityEvent)) {
+        shouldRefreshLiveDiff = true
+      }
       if (isUserQuestionActivity(activityEvent.payload)) {
         shouldPauseForUserInput = true
       }
@@ -706,6 +791,56 @@ export class SessionManager {
 
     if (shouldPauseForUserInput) {
       this.pauseForUserInput(event.sessionId)
+    }
+
+    if (shouldRefreshLiveDiff) {
+      this.scheduleLiveLocalDiff(event.sessionId)
+    }
+  }
+
+  private scheduleLiveLocalDiff(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active?.localBaseline || active.planMode) return
+
+    if (active.liveDiffTimer) {
+      clearTimeout(active.liveDiffTimer)
+    }
+
+    active.liveDiffTimer = setTimeout(() => {
+      active.liveDiffTimer = undefined
+      void this.emitLiveLocalDiff(sessionId)
+    }, LIVE_DIFF_DEBOUNCE_MS)
+    active.liveDiffTimer.unref?.()
+  }
+
+  private stopLiveDiff(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active?.liveDiffTimer) return
+
+    clearTimeout(active.liveDiffTimer)
+    active.liveDiffTimer = undefined
+  }
+
+  private async emitLiveLocalDiff(sessionId: string): Promise<void> {
+    const active = this.activeSessions.get(sessionId)
+    if (!active?.localBaseline || active.planMode) return
+
+    try {
+      const proposals = await buildLocalDiffProposals(active.repoPath, active.localBaseline)
+      if (proposals.length === 0) return
+
+      const signature = diffProposalSignature(proposals)
+      if (signature === active.liveDiffSignature) return
+
+      active.liveDiffSignature = signature
+      this.handleAgentEvent({
+        type: 'diff',
+        sessionId,
+        payload: { proposals, live: true },
+        timestamp: Date.now(),
+      })
+    } catch {
+      // Live counters are best-effort; completion still performs the authoritative diff.
     }
   }
 
@@ -716,6 +851,8 @@ export class SessionManager {
     sessionsStore.updateStatus(sessionId, 'awaiting-input')
     const active = this.activeSessions.get(sessionId)
     this.sessionsPausedForUserInput.add(sessionId)
+    this.stopIdleHeartbeat(sessionId)
+    this.stopLiveDiff(sessionId)
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
 
@@ -769,6 +906,7 @@ export class SessionManager {
     let changedFiles: DiffProposal[] = []
 
     try {
+      active.liveDiffSignature = undefined
       const proposals = active.worktreePath
         ? await buildDiffProposals(active.worktreePath, active.repoPath)
         : active.localBaseline
@@ -924,6 +1062,7 @@ export class SessionManager {
     sessionId: string,
     active = this.activeSessions.get(sessionId),
   ): Promise<void> {
+    this.stopLiveDiff(sessionId)
     await worktreeManager.remove(sessionId, active?.repoPath)
   }
 
@@ -1012,6 +1151,7 @@ export class SessionManager {
     sessionsStore.addEvent(event)
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
+    this.stopIdleHeartbeat(sessionId)
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
@@ -1201,6 +1341,35 @@ function isProcessWarningPayload(payload: unknown): payload is {
     typeof record.detail === 'string' &&
     processWarningKey(record.detail).length > 0
   )
+}
+
+function shouldTriggerLiveLocalDiff(event: AgentEvent): boolean {
+  if (event.type !== 'activity') return false
+
+  const payload = event.payload
+  if (!payload || typeof payload !== 'object') return false
+
+  const kind = (payload as { kind?: unknown }).kind
+  return kind === 'file-change' || kind === 'tool-call' || kind === 'command'
+}
+
+function diffProposalSignature(proposals: readonly DiffProposal[]): string {
+  const hash = createHash('sha256')
+  for (const proposal of [...proposals].sort((left, right) =>
+    left.filePath.localeCompare(right.filePath),
+  )) {
+    hash.update(proposal.filePath)
+    hash.update('\0')
+    hash.update(proposal.changeType ?? '')
+    hash.update('\0')
+    hash.update(String(proposal.additions ?? 0))
+    hash.update('\0')
+    hash.update(String(proposal.deletions ?? 0))
+    hash.update('\0')
+    hash.update(proposal.proposedContent)
+    hash.update('\0')
+  }
+  return hash.digest('hex')
 }
 
 function errorMessage(error: unknown): string {

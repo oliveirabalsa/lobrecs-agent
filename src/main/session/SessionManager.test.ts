@@ -95,6 +95,44 @@ describe('SessionManager', () => {
     expect(manager.isActive(sessionId)).toBe(false)
   })
 
+  it('emits an idle heartbeat while an agent process is still running silently', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      idleHeartbeatMs: 10,
+    })
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'think for a while',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { title?: string }).title === 'Waiting for agent output',
+      ),
+    )
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+    await waitFor(() => sessionsStore.get(sessionId)?.status === 'done')
+    expect(manager.isActive(sessionId)).toBe(false)
+  })
+
   it('deduplicates identical process warning activities while preserving stderr events', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
@@ -658,6 +696,68 @@ describe('SessionManager', () => {
           (event.payload as { kind?: string }).kind === 'file-change',
       ),
     ).toBe(true)
+  })
+
+  it('emits live local diff snapshots after file-edit activity', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+      idleHeartbeatMs: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated locally\n', 'utf-8')
+    adapter.emit({
+      type: 'activity',
+      sessionId,
+      payload: {
+        kind: 'tool-call',
+        name: 'Edit',
+        input: { file_path: 'existing.ts' },
+        status: 'done',
+      },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some((event) => event.type === 'diff' && isLiveDiffPayload(event.payload)),
+    )
+
+    const liveDiff = broadcasts.find(
+      (event) => event.type === 'diff' && isLiveDiffPayload(event.payload),
+    )
+    const proposals = proposalsFromLiveDiffPayload(liveDiff?.payload)
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        filePath: path.join(repoPath, 'existing.ts'),
+        originalContent: 'original\n',
+        proposedContent: 'updated locally\n',
+        additions: 1,
+        deletions: 1,
+        status: 'applied',
+      }),
+    ])
+    expect(
+      sessionsStore.listEvents(sessionId).some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'diff-summary',
+      ),
+    ).toBe(false)
   })
 
   it('records a diagnostic activity when local completion produces no diff proposals', async () => {
@@ -1403,6 +1503,21 @@ function createProject(repoPath = '/repo/session') {
     agentId: 'claude-code',
     modelTier: 'balanced',
   })
+}
+
+function isLiveDiffPayload(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    (payload as { live?: unknown }).live === true
+  )
+}
+
+function proposalsFromLiveDiffPayload(payload: unknown): unknown[] {
+  if (!isLiveDiffPayload(payload)) return []
+
+  const proposals = (payload as { proposals?: unknown }).proposals
+  return Array.isArray(proposals) ? proposals : []
 }
 
 async function createGitRepo(tempDirs: string[]): Promise<string> {
