@@ -82,7 +82,6 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
         cloned.general.enableDesktopNotifications,
         true,
       ),
-      checkForUpdates: booleanOr(cloned.general.checkForUpdates, true),
     },
     agents: {
       defaultAgentId,

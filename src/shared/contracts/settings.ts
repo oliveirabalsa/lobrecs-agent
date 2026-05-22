@@ -42,7 +42,6 @@ export interface GeneralSettings {
   startOnLaunch: boolean
   openLastProjectOnLaunch: boolean
   enableDesktopNotifications: boolean
-  checkForUpdates: boolean
 }
 
 export interface AgentRuntimeSettings {

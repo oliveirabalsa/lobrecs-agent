@@ -304,7 +304,6 @@ function fallbackSettings(): AppSettings {
       startOnLaunch: false,
       openLastProjectOnLaunch: true,
       enableDesktopNotifications: true,
-      checkForUpdates: true,
     },
     agents: {
       defaultAgentId: 'claude-code',

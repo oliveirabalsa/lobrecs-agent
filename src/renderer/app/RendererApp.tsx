@@ -223,6 +223,10 @@ export function RendererApp() {
     setMobileSidebarOpen(false)
   }, [])
 
+  const handleCloseSettings = useCallback(() => {
+    setShellView('workspace')
+  }, [])
+
   useEffect(() => {
     if (!mobileSidebarOpen) return
 
@@ -233,6 +237,17 @@ export function RendererApp() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [mobileSidebarOpen])
+
+  useEffect(() => {
+    if (shellView !== 'settings') return
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setShellView('workspace')
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [shellView])
 
   return (
     <div className="app-shell flex w-full min-w-[320px] overflow-hidden bg-canvas text-primary">
@@ -315,6 +330,7 @@ export function RendererApp() {
             onOpenSidebar={() => setMobileSidebarOpen(true)}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
+            onClose={handleCloseSettings}
           />
         ) : (
           <WorkspaceView

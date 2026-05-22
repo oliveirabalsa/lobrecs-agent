@@ -18,7 +18,6 @@ import {
   Toggle,
 } from '../components/SettingsControls'
 import { useSettingsDraft } from '../hooks/useSettingsDraft'
-import { AppUpdatePanel } from '../../updates'
 import { THEME_IDS, THEME_META, useTheme } from '../../../hooks/useTheme'
 
 interface SettingsViewProps {
@@ -27,6 +26,7 @@ interface SettingsViewProps {
   onOpenSidebar?: () => void
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
+  onClose?: () => void
 }
 
 const sectionNav = [
@@ -59,6 +59,7 @@ export function SettingsView({
   onOpenSidebar,
   sidebarCollapsed = false,
   onToggleSidebar,
+  onClose,
 }: SettingsViewProps) {
   const settingsDraft = useSettingsDraft({ project: selectedProject })
   const draft = settingsDraft.draft
@@ -84,12 +85,13 @@ export function SettingsView({
 
   if (settingsDraft.loading || !draft) {
     return (
-      <main className="flex min-w-0 flex-1 flex-col bg-canvas text-primary">
+      <main className="motion-fade-up-in flex min-w-0 flex-1 flex-col bg-canvas text-primary">
         <SettingsTopBar
           leftInsetClass={leftInsetClass}
           onOpenSidebar={onOpenSidebar}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={onToggleSidebar}
+          onClose={onClose}
         />
         <div className="flex flex-1 items-center justify-center text-[13px] text-muted">
           Loading settings...
@@ -99,12 +101,13 @@ export function SettingsView({
   }
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas text-primary">
+    <main className="motion-fade-up-in flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas text-primary">
       <SettingsTopBar
         leftInsetClass={leftInsetClass}
         onOpenSidebar={onOpenSidebar}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={onToggleSidebar}
+        onClose={onClose}
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -209,17 +212,6 @@ export function SettingsView({
                   }
                 />
               </FieldRow>
-              <FieldRow label="Check for updates">
-                <Toggle
-                  checked={draft.general.checkForUpdates}
-                  onChange={(checkForUpdates) =>
-                    update('general', { ...draft.general, checkForUpdates })
-                  }
-                />
-              </FieldRow>
-              <div className="md:col-span-2">
-                <AppUpdatePanel />
-              </div>
             </SettingsSection>
 
             <SettingsSection id="agents" title="Agents & Models">
@@ -820,11 +812,13 @@ function SettingsTopBar({
   onOpenSidebar,
   sidebarCollapsed,
   onToggleSidebar,
+  onClose,
 }: {
   leftInsetClass: string
   onOpenSidebar?: () => void
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
+  onClose?: () => void
 }) {
   return (
     <div className={`drag flex h-11 shrink-0 items-center border-b border-hairline bg-canvas ${leftInsetClass} pr-2 gap-1`}>
@@ -847,6 +841,17 @@ function SettingsTopBar({
           className="no-drag hidden md:flex h-7 w-7 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary"
         >
           <SidebarToggleIcon collapsed={!!sidebarCollapsed} />
+        </button>
+      ) : null}
+      {onClose ? (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close settings"
+          title="Close settings (Esc)"
+          className="no-drag flex h-7 w-7 items-center justify-center rounded text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+        >
+          <CloseIcon />
         </button>
       ) : null}
     </div>
@@ -950,6 +955,25 @@ function MenuIcon() {
       <line x1="4" y1="6" x2="20" y2="6" />
       <line x1="4" y1="12" x2="20" y2="12" />
       <line x1="4" y1="18" x2="20" y2="18" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   )
 }

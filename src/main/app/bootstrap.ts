@@ -2,8 +2,6 @@ import { app, BrowserWindow } from 'electron'
 import { adapterRegistry } from '../agents'
 import { registerIpcHandlers } from '../ipc'
 import { cliEditorTerminalService } from '../modules/system/application/cliEditorTerminalService'
-import { appUpdateService } from '../modules/updates'
-import { settingsService } from '../modules/settings'
 import { processPool } from '../process/ProcessPool'
 import { sessionsStore, threadsStore } from '../store'
 import { getAppIconPath } from './appIcon'
@@ -20,9 +18,6 @@ export function bootstrapMainProcess(): void {
     backfillThreadsFromSessions()
     await logAdapterAvailability()
     mainWindow = createMainWindow()
-    appUpdateService.scheduleAutomaticCheck(
-      settingsService.getGlobal().general.checkForUpdates,
-    )
     registerAppShortcuts(() => mainWindow)
 
     app.on('activate', () => {

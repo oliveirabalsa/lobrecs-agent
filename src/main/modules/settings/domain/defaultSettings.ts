@@ -107,7 +107,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     startOnLaunch: false,
     openLastProjectOnLaunch: true,
     enableDesktopNotifications: true,
-    checkForUpdates: true,
   },
   agents: {
     defaultAgentId: 'claude-code',
