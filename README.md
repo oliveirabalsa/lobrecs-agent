@@ -1,9 +1,23 @@
-# 📦 Lobrecs Agent
+<p align="center">
+  <img src="resources/lobrecs-agent-logo.png" alt="Lobrecs Agent Logo" width="200" />
+</p>
 
-Lobrecs Agent is a powerful desktop application built with Electron, React, and TypeScript. It acts as a local harness for orchestrating multiple AI coding agents (such as Claude Code, OpenAI Codex, and OpenCode), dynamically routing tasks based on complexity and managing localized git-isolated workspaces.
+<h1 align="center">📦 Lobrecs Agent</h1>
 
-[![Releases](https://img.shields.io/github/v/release/oliveirabalsa/lobrecs-agent-releases?label=Latest%20Release&color=blue)](https://github.com/oliveirabalsa/lobrecs-agent-releases/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](#)
+<p align="center">
+  <strong>A local orchestrator and harness for multiple AI coding agents (Claude Code, Codex CLI, OpenCode).</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/oliveirabalsa/lobrecs-agent-releases/releases">
+    <img src="https://img.shields.io/github/v/release/oliveirabalsa/lobrecs-agent-releases?label=Latest%20Release&color=blue" alt="Latest Release" />
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License" />
+  </a>
+</p>
+
+Lobrecs Agent is a powerful desktop application built with Electron, React, and TypeScript. It acts as a local harness for orchestrating multiple AI coding agents, dynamically routing tasks based on complexity and managing localized git-isolated workspaces.
 
 ---
 
