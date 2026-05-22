@@ -49,11 +49,21 @@ describe('release.mjs', () => {
     const bumpTypes = ['patch', 'minor', 'major']
 
     function parseReleaseArgs(argv = []) {
+      const positionalArgs = []
+      let localPublish = false
+      let ci = false
+
+      for (const arg of argv) {
+        if (arg === '--local') { localPublish = true; continue }
+        if (arg === '--ci') { ci = true; continue }
+        positionalArgs.push(arg)
+      }
+
       let bumpType = 'patch'
       let version = null
 
-      if (argv.length > 0) {
-        const arg = argv[0]
+      if (positionalArgs.length > 0) {
+        const arg = positionalArgs[0]
         if (bumpTypes.includes(arg)) {
           bumpType = arg
         } else if (versionRegex.test(arg)) {
@@ -65,13 +75,15 @@ describe('release.mjs', () => {
         }
       }
 
-      return { bumpType, version }
+      return { bumpType, version, localPublish, ci }
     }
 
     it('defaults to patch bump with no args', () => {
-      const { bumpType, version } = parseReleaseArgs([])
+      const { bumpType, version, localPublish, ci } = parseReleaseArgs([])
       expect(bumpType).toBe('patch')
       expect(version).toBeNull()
+      expect(localPublish).toBe(false)
+      expect(ci).toBe(false)
     })
 
     it('parses bump type arguments', () => {
@@ -84,6 +96,24 @@ describe('release.mjs', () => {
       const { bumpType, version } = parseReleaseArgs(['0.2.0'])
       expect(version).toBe('0.2.0')
       expect(bumpType).toBe('patch')
+    })
+
+    it('parses --local flag', () => {
+      const { localPublish, bumpType } = parseReleaseArgs(['--local'])
+      expect(localPublish).toBe(true)
+      expect(bumpType).toBe('patch')
+    })
+
+    it('parses --ci flag', () => {
+      const { ci, bumpType } = parseReleaseArgs(['--ci'])
+      expect(ci).toBe(true)
+      expect(bumpType).toBe('patch')
+    })
+
+    it('parses --ci flag with bump type', () => {
+      const { ci, bumpType } = parseReleaseArgs(['--ci', 'minor'])
+      expect(ci).toBe(true)
+      expect(bumpType).toBe('minor')
     })
 
     it('rejects invalid arguments', () => {

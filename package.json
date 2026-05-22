@@ -24,6 +24,7 @@
     "build:mac:release": "node scripts/build-mac.mjs --publish",
     "build:mac:local": "node scripts/build-mac.mjs --allow-unsigned",
     "release": "node scripts/release.mjs",
+    "release:ci": "node scripts/release.mjs --ci",
     "release:local": "node scripts/release.mjs --local",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major",

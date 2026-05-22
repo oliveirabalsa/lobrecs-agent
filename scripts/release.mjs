@@ -162,7 +162,12 @@ function createRelease(newVersion, options = {}) {
   exec('git', ['push', 'origin', '--tags'])
   log('✓ Pushed to GitHub')
 
-  // Build and publish
+  if (options.ci) {
+    log('✓ Tag pushed — GitHub Actions will build macOS, Windows, and Linux artifacts')
+    return
+  }
+
+  // Local macOS build and publish
   log('Building and publishing...')
   exec('npm', ['run', 'build:mac:release'])
   log('✓ Build and publish complete')
@@ -192,32 +197,42 @@ Options:
   major         Bump major version (e.g., 0.1.2 → 1.0.0)
   X.Y.Z         Release as explicit version (e.g., 0.2.0)
   --local       Build unsigned macOS artifacts locally without tagging or publishing
+  --ci          Tag and push only; GitHub Actions builds macOS, Windows, and Linux
 
 Examples:
-  npm run release           # Default patch bump
+  npm run release           # Default patch bump (local macOS build)
+  npm run release:ci        # Patch bump, tag+push, CI handles all platforms
   npm run release:minor     # Bump minor version
   npm run release:major     # Bump major version
   npm run release 0.2.0     # Release as v0.2.0
-  npm run release -- --local # Local unsigned macOS build only
+  npm run release -- --local  # Local unsigned macOS build only
+  npm run release -- --ci     # CI-driven multi-platform release
 
 The release script will:
   1. Validate git state (clean, on main, up to date)
   2. Validate GitHub authentication
-  3. Validate macOS signing and notarization prerequisites
+  3. (Without --ci) Validate macOS signing and notarization prerequisites
   4. Update version in package.json and electron-builder.yml
   5. Commit and tag the version bump
   6. Push commits and tags to GitHub
-  7. Build, notarize, and publish to oliveirabalsa/lobrecs-agent-releases
+  7. (Without --ci) Build, notarize, and publish macOS to oliveirabalsa/lobrecs-agent-releases
+  7. (With --ci) GitHub Actions builds macOS, Windows (.exe), and Linux (.AppImage, .deb)
 `)
 }
 
 function parseReleaseArgs(argv = []) {
   const positionalArgs = []
   let localPublish = false
+  let ci = false
 
   for (const arg of argv) {
     if (arg === '--local') {
       localPublish = true
+      continue
+    }
+
+    if (arg === '--ci') {
+      ci = true
       continue
     }
 
@@ -250,6 +265,7 @@ function parseReleaseArgs(argv = []) {
     bumpType,
     version,
     localPublish,
+    ci,
   }
 }
 
@@ -262,7 +278,7 @@ export async function main(argv = process.argv.slice(2)) {
 
     log('Starting release process...')
 
-    const { bumpType, version, localPublish } = parseReleaseArgs(
+    const { bumpType, version, localPublish, ci } = parseReleaseArgs(
       argv.filter((arg) => arg !== '--help' && arg !== '-h'),
     )
 
@@ -275,7 +291,10 @@ export async function main(argv = process.argv.slice(2)) {
 
     validateGitState()
     validateGhToken()
-    validateMacReleaseEnvironment()
+
+    if (!ci) {
+      validateMacReleaseEnvironment()
+    }
 
     const currentVersion = readVersion()
     log(`Current version: ${currentVersion}`)
@@ -284,7 +303,7 @@ export async function main(argv = process.argv.slice(2)) {
     log(`New version: ${newVersion}`)
 
     updateVersion(newVersion)
-    createRelease(newVersion)
+    createRelease(newVersion, { ci })
     verifyRelease(newVersion)
 
     log('\n🎉 Release complete!')
