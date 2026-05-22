@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/oliveirabalsa/lobrecs-agent-releases/releases">
-    <img src="https://img.shields.io/github/v/release/oliveirabalsa/lobrecs-agent-releases?label=Latest%20Release&color=blue" alt="Latest Release" />
+  <a href="https://github.com/oliveirabalsa/lobrecs-agent/releases">
+    <img src="https://img.shields.io/github/v/release/oliveirabalsa/lobrecs-agent?label=Latest%20Release&color=blue" alt="Latest Release" />
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License" />
@@ -23,13 +23,13 @@ Lobrecs Agent is a powerful desktop application built with Electron, React, and 
 
 ## 🚀 Releases & Updates
 
-Production downloads, installable assets (DMG, ZIP, exe, AppImage, deb), and change histories are published to the dedicated public release repository:
+Production downloads, installable assets (DMG, ZIP, exe, AppImage, deb), and change histories are published directly to the repository releases page:
 
-👉 **[Download & Releases Repository](https://github.com/oliveirabalsa/lobrecs-agent-releases/releases)**
+👉 **[Download & Releases Repository](https://github.com/oliveirabalsa/lobrecs-agent/releases)**
 
 ### How Auto-Updates Work
 Lobrecs Agent uses `electron-updater` to keep instances current:
-1. The app periodically checks for updates against the public releases repository feed.
+1. The app periodically checks for updates against the repository's public releases feed.
 2. If a newer version is found, a subtle update banner appears in the application UI, and the assets download in the background.
 3. The user is prompted to click **Restart to update** to apply the release when convenient. Squirrel.Mac validates code signing and notarization certificates for macOS updates to ensure integrity.
 

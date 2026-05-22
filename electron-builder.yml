@@ -54,5 +54,5 @@ nsis:
 publish:
   provider: github
   owner: oliveirabalsa
-  repo: lobrecs-agent-releases
+  repo: lobrecs-agent
   releaseType: release

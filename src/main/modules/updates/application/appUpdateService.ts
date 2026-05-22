@@ -15,7 +15,7 @@ import { createMacosCodeSigningErrorPatch } from '../domain/codeSigningErrors'
 
 const AUTO_CHECK_DELAY_MS = 3_000
 const { autoUpdater } = electronUpdater
-const RELEASES_URL = 'https://github.com/oliveirabalsa/lobrecs-agent-releases/releases/latest'
+const RELEASES_URL = 'https://github.com/oliveirabalsa/lobrecs-agent/releases/latest'
 
 export interface CheckForUpdatesOptions {
   automatic?: boolean

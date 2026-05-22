@@ -177,10 +177,10 @@ function verifyRelease(newVersion) {
   log('Verifying release...')
 
   try {
-    const releaseUrl = `https://github.com/oliveirabalsa/lobrecs-agent-releases/releases/tag/v${newVersion}`
+    const releaseUrl = `https://github.com/oliveirabalsa/lobrecs-agent/releases/tag/v${newVersion}`
     log(`\n✓ Release created successfully!`)
     log(`\nRelease URL: ${releaseUrl}`)
-    log(`Feed URL: https://github.com/oliveirabalsa/lobrecs-agent-releases/releases.atom`)
+    log(`Feed URL: https://github.com/oliveirabalsa/lobrecs-agent/releases.atom`)
   } catch (err) {
     console.warn('Could not verify release. Please check manually.')
   }
@@ -215,7 +215,7 @@ The release script will:
   4. Update version in package.json and electron-builder.yml
   5. Commit and tag the version bump
   6. Push commits and tags to GitHub
-  7. (Without --ci) Build, notarize, and publish macOS to oliveirabalsa/lobrecs-agent-releases
+  7. (Without --ci) Build, notarize, and publish macOS to oliveirabalsa/lobrecs-agent
   7. (With --ci) GitHub Actions builds macOS, Windows (.exe), and Linux (.AppImage, .deb)
 `)
 }

@@ -30,7 +30,7 @@ The release script automates the entire process:
 4. **Bumps** the version in `package.json` and `electron-builder.yml` (defaults to patch)
 5. **Commits and tags** the version bump (`git commit` + `git tag v0.1.X`)
 6. **Pushes** commits and tags to GitHub
-7. **Builds, notarizes, and publishes** the DMG, ZIP, and metadata to `oliveirabalsa/lobrecs-agent-releases`
+7. **Builds, notarizes, and publishes** the DMG, ZIP, and metadata to `oliveirabalsa/lobrecs-agent`
 
 For local packaging tests, use `npm run build:mac` or
 `npm run release -- --local` (or `npm run release:local`). Local mode builds
@@ -41,7 +41,7 @@ Users on older installed versions can check, download, and restart from inside t
 
 ### Setup (first time only)
 
-If `oliveirabalsa/lobrecs-agent-releases` was created recently, seed it with an initial commit such as `README.md`. GitHub rejects releases for empty repositories.
+If the repository releases page hasn't been used yet, ensure it is set up. GitHub rejects releases for empty repositories.
 
 macOS auto-updates require a Developer ID signed and notarized app. The updater
 uses Squirrel.Mac, which validates the downloaded replacement `.app` before
@@ -75,7 +75,7 @@ local shell, keychain, or CI secret store used for the release command.
 The release workflow intentionally fails the macOS packaging step if signing or
 notarization secrets are missing, instead of publishing an update that installed
 apps cannot apply. Configure one signing source and one notarization source in
-the `lobrecs-agent-releases` workflow environment:
+the `lobrecs-agent` workflow environment:
 
 - `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD`, or `MAC_CSC_NAME`.
 - `APPLE_API_KEY` or `APPLE_API_KEY_BASE64`, plus `APPLE_API_KEY_ID` and
@@ -85,9 +85,8 @@ the `lobrecs-agent-releases` workflow environment:
 ## Feed Constraints
 
 The bundled publish provider currently points at
-`oliveirabalsa/lobrecs-agent-releases`. The source code repo can stay private,
-but the releases repo must stay public so installed apps can read the feed
-anonymously. Private GitHub update feeds require a GitHub token on the
-installed machine, which should not be stored in the app. For broader
-distribution, prefer a public releases-only repository or a generic static feed
-on a VPS/object store.
+`oliveirabalsa/lobrecs-agent`. Since the repository is public, installed apps can
+read the feed and download updates anonymously without any API keys or tokens.
+Private GitHub update feeds require a GitHub token on the installed machine,
+which should not be stored in the app. For broader distribution, prefer a
+public repository or a generic static feed on a VPS/object store.
