@@ -95,7 +95,7 @@ setTimeout(() => {
   if (process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE === '1') {
     console.error(
       '1277 | || (${R} === "string" && ${E} && ${E} == +${E})\n' +
-        'ENOENT: no such file or directory, lstat \'/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401\' path: "/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401", syscall: "lstat", errno: -2, code: "ENOENT" at cue (/Users/leonardooliveirabalsalobre/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs:1281:35133)\n' +
+        'ENOENT: no such file or directory, lstat \'/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401\' path: "/private/var/folders/mock/T/agentforge-36c16d57-51de-48-c7312401", syscall: "lstat", errno: -2, code: "ENOENT" at cue (/Users/example/.claude/plugins/cache/thedotmack/claude-mem/10.6.2/scripts/worker-service.cjs:1281:35133)\n' +
         'Bun v1.3.6 (macOS arm64)',
     )
   }
