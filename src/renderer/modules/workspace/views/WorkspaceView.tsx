@@ -34,6 +34,7 @@ import {
 } from '../components/MarkdownPreviewer'
 import { resolveBottomTerminalOpenAction } from '../components/bottomTerminalPanelState'
 import { CommitAndPushDialog } from '../components/CommitAndPushDialog'
+import { CreatePullRequestDialog } from '../components/CreatePullRequestDialog'
 import { Composer } from '../components/Composer'
 import { ProjectContextDialog } from '../components/ProjectContextDialog'
 import { QueueBanner } from '../components/QueueBanner'
@@ -214,6 +215,8 @@ export function WorkspaceView({
   const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
+  const [prDialogOpen, setPrDialogOpen] = useState(false)
+  const [gitMenuOpen, setGitMenuOpen] = useState(false)
   const [contextPercent, setContextPercent] = useState<number | null>(null)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
@@ -225,7 +228,28 @@ export function WorkspaceView({
   const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewState | null>(null)
   const terminalCountRef = useRef(0)
   const bottomPanelAddTabRef = useRef<((tab: TerminalTab) => void) | null>(null)
+  const gitMenuRef = useRef<HTMLDivElement | null>(null)
   const [bottomPanelInitialTab, setBottomPanelInitialTab] = useState<TerminalTab | null>(null)
+
+  useEffect(() => {
+    if (!gitMenuOpen) return
+
+    function onDocClick(event: MouseEvent) {
+      if (!gitMenuRef.current) return
+      if (!gitMenuRef.current.contains(event.target as Node)) setGitMenuOpen(false)
+    }
+
+    function onDocKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setGitMenuOpen(false)
+    }
+
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onDocKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onDocKeyDown)
+    }
+  }, [gitMenuOpen])
 
   // Keep the right panel mounted while opening, and during the close animation
   // so `data-state="closed"` exit keyframes can play before unmount.
@@ -636,35 +660,75 @@ export function WorkspaceView({
                               handleOpenCliEditor({ id: 'shell', name: 'Terminal', kind: 'cli' })
                             }
                           }}
-                          className={`flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors ${
+                          className={`flex h-8 w-8 items-center justify-center rounded border transition-colors ${
                             bottomPanelOpen
-                              ? 'bg-white/10 text-secondary'
-                              : 'text-muted hover:bg-white/5 hover:text-secondary'
+                              ? 'border-white/15 bg-white/10 text-secondary'
+                              : 'border-hairline text-muted hover:border-white/15 hover:bg-white/5 hover:text-secondary'
                           }`}
                           title="Toggle terminal"
+                          aria-label="Toggle terminal"
                         >
                           <QuickTerminalIcon />
-                          <span>Terminal</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
-                          className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
+                          className="flex h-8 w-8 items-center justify-center rounded border border-hairline text-muted transition-colors hover:border-white/15 hover:bg-white/5 hover:text-secondary"
                           title="Open Vim"
+                          aria-label="Open Vim"
                         >
                           <QuickVimIcon />
-                          <span>Vim</span>
                         </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setCommitDialogOpen(true)}
-                        className="flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-secondary"
-                        title="Commit and push all changes"
-                      >
-                        <QuickCommitIcon />
-                        <span>Commit & Push</span>
-                      </button>
+                      <div ref={gitMenuRef} className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setGitMenuOpen((value) => !value)}
+                          className={`flex h-8 w-8 items-center justify-center rounded border transition-colors ${
+                            gitMenuOpen
+                              ? 'border-white/15 bg-white/10 text-secondary'
+                              : 'border-hairline text-muted hover:border-white/15 hover:bg-white/5 hover:text-secondary'
+                          }`}
+                          title="Git actions"
+                          aria-label="Git actions"
+                          aria-haspopup="menu"
+                          aria-expanded={gitMenuOpen}
+                        >
+                          <QuickGitIcon />
+                        </button>
+
+                        {gitMenuOpen ? (
+                          <div
+                            role="menu"
+                            className="absolute bottom-10 right-0 z-50 w-44 overflow-hidden rounded-card border border-hairline bg-card-raised/95 py-1 shadow-xl shadow-black/40 backdrop-blur-md"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                setCommitDialogOpen(true)
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                            >
+                              <QuickCommitIcon />
+                              <span>Commit & Push</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                setPrDialogOpen(true)
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                            >
+                              <QuickPullRequestIcon />
+                              <span>Open PR</span>
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ) : mainView === 'costs' ? (
@@ -834,6 +898,11 @@ export function WorkspaceView({
               open={commitDialogOpen}
               onOpenChange={setCommitDialogOpen}
             />
+            <CreatePullRequestDialog
+              project={selectedProject}
+              open={prDialogOpen}
+              onOpenChange={setPrDialogOpen}
+            />
             <MarkdownPreviewer
               state={markdownPreview}
               onOpenChange={(open) => {
@@ -967,7 +1036,7 @@ const iconMinimize = (
 
 function QuickTerminalIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
@@ -976,20 +1045,43 @@ function QuickTerminalIcon() {
 
 function QuickVimIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 2L22 12L12 22L2 12Z" />
       <path d="M9 10L12 14.5L15 10" />
     </svg>
   )
 }
 
+function QuickGitIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M6 9v6" />
+      <path d="M8.6 7.5 15.4 16.5" />
+    </svg>
+  )
+}
+
 function QuickCommitIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="3" />
       <line x1="3" y1="12" x2="9" y2="12" />
       <line x1="15" y1="12" x2="21" y2="12" />
       <path d="M17 6l4 6-4 6" />
+    </svg>
+  )
+}
+
+function QuickPullRequestIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <path d="M11 18a2 2 0 0 1-2-2V9" />
     </svg>
   )
 }

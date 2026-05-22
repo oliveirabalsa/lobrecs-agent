@@ -6,6 +6,12 @@ import type {
   GitCommitPlanExecutionResult,
   GitDiffRequest,
   GitFileSelection,
+  GitRemoteInfo,
+  CreatePullRequestInput,
+  CreatePullRequestFromDraftInput,
+  CreatePullRequestResult,
+  GeneratePullRequestDraftInput,
+  GeneratePullRequestDraftResult,
 } from '../../shared/contracts/git'
 import type { IpcInvoker } from './ipc'
 
@@ -17,6 +23,12 @@ export interface GitApi {
   push(projectId: string): Promise<GitCommandResult>
   analyzeCommitPlan(projectId: string): Promise<GitCommitAnalysisResult>
   executeCommitPlan(input: GitCommitPlanExecutionInput): Promise<GitCommitPlanExecutionResult>
+  getRemote(projectId: string): Promise<GitRemoteInfo>
+  getPrTemplate(projectId: string): Promise<string>
+  getCurrentBranch(projectId: string): Promise<string>
+  generatePrDraft(input: GeneratePullRequestDraftInput): Promise<GeneratePullRequestDraftResult>
+  createPrFromDraft(input: CreatePullRequestFromDraftInput): Promise<CreatePullRequestResult>
+  createPr(input: CreatePullRequestInput): Promise<CreatePullRequestResult>
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
@@ -28,5 +40,11 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     push: (projectId) => ipcRenderer.invoke('git:push', projectId),
     analyzeCommitPlan: (projectId) => ipcRenderer.invoke('git:analyze-commit-plan', projectId),
     executeCommitPlan: (input) => ipcRenderer.invoke('git:execute-commit-plan', input),
+    getRemote: (projectId) => ipcRenderer.invoke('git:get-remote', projectId),
+    getPrTemplate: (projectId) => ipcRenderer.invoke('git:get-pr-template', projectId),
+    getCurrentBranch: (projectId) => ipcRenderer.invoke('git:get-current-branch', projectId),
+    generatePrDraft: (input) => ipcRenderer.invoke('git:generate-pr-draft', input),
+    createPrFromDraft: (input) => ipcRenderer.invoke('git:create-pr-from-draft', input),
+    createPr: (input) => ipcRenderer.invoke('git:create-pr', input),
   }
 }

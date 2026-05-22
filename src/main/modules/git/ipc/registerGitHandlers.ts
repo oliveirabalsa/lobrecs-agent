@@ -2,16 +2,21 @@ import { ipcMain } from 'electron'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
+import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
 import { runGit } from '../infrastructure/runGit'
 import type {
   GitCommitInput,
   GitDiffRequest,
   GitFileSelection,
   GitCommitPlanExecutionInput,
+  CreatePullRequestInput,
+  CreatePullRequestFromDraftInput,
+  GeneratePullRequestDraftInput,
 } from '../../../../shared/types'
 
 export function registerGitHandlers(context: MainIpcContext): void {
   const workflowService = new GitCommitWorkflowService(context)
+  const prWorkflowService = new PullRequestWorkflowService(context)
 
   ipcMain.handle('git:diff', async (_event, request: GitDiffRequest) => {
     const project = requireProject(request.projectId)
@@ -58,4 +63,36 @@ export function registerGitHandlers(context: MainIpcContext): void {
     async (_event, input: GitCommitPlanExecutionInput) =>
       workflowService.executeCommitPlan(input),
   )
+
+  ipcMain.handle('git:get-remote', async (_event, projectId: string) => {
+    return prWorkflowService.getRemoteInfo(projectId)
+  })
+
+  ipcMain.handle('git:get-current-branch', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    const result = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], project.repoPath)
+    if (result.exitCode !== 0) return ' HEAD'
+    return result.stdout.trim()
+  })
+
+  ipcMain.handle('git:get-pr-template', async (_event, projectId: string) => {
+    return prWorkflowService.resolveTemplate(projectId)
+  })
+
+  ipcMain.handle('git:generate-pr-draft', async (_event, input: GeneratePullRequestDraftInput) => {
+    return prWorkflowService.generatePrDraft(input)
+  })
+
+  ipcMain.handle('git:create-pr-from-draft', async (_event, input: CreatePullRequestFromDraftInput) => {
+    return prWorkflowService.createPrFromDraft(input)
+  })
+
+  ipcMain.handle('git:create-pr', async (_event, input: CreatePullRequestInput) => {
+    return prWorkflowService.createPullRequest(input.projectId, {
+      title: input.title,
+      body: input.body,
+      headBranch: input.headBranch,
+      baseBranch: input.baseBranch,
+    })
+  })
 }

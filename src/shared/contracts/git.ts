@@ -101,11 +101,51 @@ export interface WorktreeMetadata {
 }
 
 export interface PullRequestContext {
-  provider: 'github' | 'unknown'
+  provider: 'github' | 'azure' | 'unsupported'
   owner?: string
   repo?: string
   number?: number
   url?: string
   baseBranch?: string
   headBranch?: string
+}
+
+export type GitProviderType = 'github' | 'azure' | 'unsupported'
+
+export interface GitRemoteInfo {
+  url: string
+  provider: GitProviderType
+  owner: string
+  repo: string
+}
+
+export interface CreatePullRequestInput {
+  projectId: string
+  title: string
+  body: string
+  headBranch: string
+  baseBranch: string
+}
+
+export interface CreatePullRequestResult {
+  url: string
+  number: number
+}
+
+export interface GeneratePullRequestDraftInput {
+  projectId: string
+  headBranch: string
+  baseBranch: string
+}
+
+export interface GeneratePullRequestDraftResult {
+  title: string
+  body: string
+}
+
+export type CreatePullRequestFromDraftInput = CreatePullRequestInput
+
+export interface GitPrTemplateRequest {
+  projectId: string
+  provider: GitProviderType
 }
