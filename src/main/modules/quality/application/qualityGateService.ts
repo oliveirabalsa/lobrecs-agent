@@ -251,9 +251,10 @@ function runShellCommand(
   options: { timeoutMs: number; maxOutputBytes: number },
 ): Promise<QualityGateCommandResult> {
   return new Promise((resolve) => {
-    const child = spawn('zsh', ['-lc', command], {
+    const child = spawn(command, {
       cwd,
       env: buildProcessEnvironment(),
+      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let stdout = ''

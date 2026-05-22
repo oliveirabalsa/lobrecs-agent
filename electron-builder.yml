@@ -38,10 +38,14 @@ win:
     - nsis
 
 linux:
-  icon: resources/icon.png
+  icon: resources/linux-icons
   target:
     - AppImage
+    - deb
   category: Development
+  desktop:
+    entry:
+      StartupWMClass: lobrecs-agent
 
 nsis:
   oneClick: false
