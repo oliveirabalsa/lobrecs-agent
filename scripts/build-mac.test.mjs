@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -102,8 +103,8 @@ describe('createElectronBuilderEnv', () => {
       },
     )
 
-    expect(context.env.APPLE_API_KEY).toBe('/tmp/notary/AuthKey.p8')
-    expect(writeFile).toHaveBeenCalledWith('/tmp/notary/AuthKey.p8', privateKey, {
+    expect(context.env.APPLE_API_KEY).toBe(path.join('/tmp/notary', 'AuthKey.p8'))
+    expect(writeFile).toHaveBeenCalledWith(path.join('/tmp/notary', 'AuthKey.p8'), privateKey, {
       mode: 0o600,
     })
 

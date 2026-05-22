@@ -38,6 +38,9 @@ describe('agent adapters', () => {
     expect(adapterRegistry.get('antigravity')).toBeInstanceOf(AntigravityAdapter)
   })
 
+  // All tests below spawn Unix shebang scripts — EFTYPE on Windows; skip there.
+  describe.skipIf(process.platform === 'win32')('process-spawning adapters', () => {
+
   it('dispatches Claude Code with JSONL parsing and command override support', async () => {
     process.env.CLAUDE_COMMAND = claudeMock
     const adapter = new ClaudeCodeAdapter()
@@ -550,6 +553,8 @@ describe('agent adapters', () => {
       expect(argv).not.toContain(flag)
     }
   })
+
+  }) // end describe.skipIf win32
 })
 
 async function collectEvents(session: AgentSession): Promise<AgentEvent[]> {
