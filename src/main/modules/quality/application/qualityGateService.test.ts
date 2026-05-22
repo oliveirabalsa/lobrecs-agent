@@ -42,6 +42,56 @@ describe('runQualityGate', () => {
     )
   })
 
+  it('runs verification commands with the system shell when no custom runner is provided', async () => {
+    const activities: AgentActivity[] = []
+    const settings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      specs: {
+        ...DEFAULT_APP_SETTINGS.specs,
+        defaultVerificationRecipeIds: ['shell-smoke'],
+      },
+      verification: {
+        ...DEFAULT_APP_SETTINGS.verification,
+        requireCommandPrefix: false,
+        recipes: [
+          {
+            id: 'shell-smoke',
+            label: 'Shell Smoke',
+            command: 'node -e "process.stdout.write(\'quality-ok\')"',
+            scope: 'custom',
+          },
+        ],
+      },
+    }
+
+    await runQualityGate(
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        repoPath: process.cwd(),
+        changedFiles: [appliedProposal(`${process.cwd()}/src/main/app.ts`)],
+        attempt: 0,
+        emitActivity: (activity) => activities.push(activity),
+      },
+      {
+        getSettings: () => settings,
+        routeModel: vi.fn(),
+        dispatchRepair: vi.fn(),
+      },
+    )
+
+    expect(activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'step', title: 'Automated QA started' }),
+        expect.objectContaining({ kind: 'step', title: 'Automated QA passed' }),
+      ]),
+    )
+    expect(activities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'step', title: 'Automated QA failed' })]),
+    )
+  })
+
   it('dispatches one repair session when verification fails', async () => {
     const activities: AgentActivity[] = []
     const repairPrompts: string[] = []

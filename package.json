@@ -3,8 +3,13 @@
   "version": "0.4.6",
   "description": "Electron desktop harness for AI coding agents, model routing, and swarm orchestration.",
   "productName": "Lobrecs Agent",
+  "desktopName": "lobrecs-agent.desktop",
   "type": "module",
   "main": "./out/main/index.js",
+  "author": {
+    "name": "Lobrecs",
+    "email": "contato@lobrecs.com"
+  },
   "scripts": {
     "dev": "node scripts/ensure-electron-native.mjs && electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
@@ -21,7 +26,8 @@
     "release": "node scripts/release.mjs",
     "release:local": "node scripts/release.mjs --local",
     "release:minor": "node scripts/release.mjs minor",
-    "release:major": "node scripts/release.mjs major"
+    "release:major": "node scripts/release.mjs major",
+    "build:deb": "npm run build && electron-builder --linux deb"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
