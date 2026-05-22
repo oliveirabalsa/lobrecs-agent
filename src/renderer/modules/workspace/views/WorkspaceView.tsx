@@ -821,7 +821,7 @@ export function WorkspaceView({
                       onClick={() => setRightPanelFullscreen((value) => !value)}
                       aria-label={rightPanelFullscreen ? 'Exit full screen' : 'Full screen panel'}
                       title={rightPanelFullscreen ? 'Exit full screen' : 'Full screen'}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+                      className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
                     >
                       {rightPanelFullscreen ? iconMinimize : iconMaximize}
                     </button>
@@ -832,7 +832,7 @@ export function WorkspaceView({
                         setRightPanelOpenState(false)
                       }}
                       aria-label="Close panel"
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+                      className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
                     >
                       ×
                     </button>
@@ -981,7 +981,7 @@ function RightPanelTab({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${stateClasses}`}
+      className={`shrink-0 rounded px-2 py-1 text-[11px] font-medium transition-colors ${stateClasses}`}
     >
       {label}
     </button>
