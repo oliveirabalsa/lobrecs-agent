@@ -29,7 +29,12 @@ export function createMainWindow(): BrowserWindow {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    // Renderer content includes untrusted agent and terminal output, so a
+    // link could carry any scheme. Only hand web/mail URLs to the OS — drop
+    // file:, smb:, and custom app schemes that could trigger an OS handler.
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url)
+    }
     return { action: 'deny' }
   })
 
@@ -40,6 +45,16 @@ export function createMainWindow(): BrowserWindow {
   }
 
   return mainWindow
+}
+
+const SAFE_EXTERNAL_SCHEMES = new Set(['https:', 'http:', 'mailto:'])
+
+function isSafeExternalUrl(rawUrl: string): boolean {
+  try {
+    return SAFE_EXTERNAL_SCHEMES.has(new URL(rawUrl).protocol)
+  } catch {
+    return false // malformed URL — never forward it to the OS
+  }
 }
 
 function getPreloadPath(): string {
