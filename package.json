@@ -19,7 +19,7 @@
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3 -w node-pty",
     "rebuild:node": "npm rebuild better-sqlite3 node-pty",
     "build:mac": "node scripts/build-mac.mjs",
-    "build:win": "npm run build && electron-builder --win",
+    "build:win": "node scripts/build-win.mjs",
     "build:linux": "npm run build && electron-builder --linux",
     "build:mac:release": "node scripts/build-mac.mjs --publish",
     "build:mac:local": "node scripts/build-mac.mjs --allow-unsigned",
