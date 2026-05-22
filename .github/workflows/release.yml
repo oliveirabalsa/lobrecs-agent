@@ -49,8 +49,8 @@ jobs:
       - name: Build renderer and main
         run: npm run build
 
-      - name: Package and publish Lobrecs Agent (macOS)
-        if: matrix.platform == 'macOS'
+      - name: Package and publish Lobrecs Agent (macOS, signed)
+        if: matrix.platform == 'macOS' && secrets.MAC_CSC_LINK != ''
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -66,6 +66,13 @@ jobs:
           APPLE_KEYCHAIN: ${{ secrets.APPLE_KEYCHAIN }}
           APPLE_KEYCHAIN_PROFILE: ${{ secrets.APPLE_KEYCHAIN_PROFILE }}
         run: npm run build:mac:release
+
+      - name: Package and publish Lobrecs Agent (macOS, unsigned)
+        if: matrix.platform == 'macOS' && secrets.MAC_CSC_LINK == ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --mac --publish always
 
       - name: Package and publish Lobrecs Agent (Windows / Linux)
         if: matrix.platform != 'macOS'

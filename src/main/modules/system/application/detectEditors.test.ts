@@ -3,6 +3,9 @@ import { detectEditors, invalidateEditorCache } from './detectEditors'
 import { access } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 
+// detectEditors is macOS-only (uses mdfind and /Applications paths)
+const itOnMac = process.platform === 'darwin' ? it : it.skip
+
 vi.mock('node:fs/promises', () => ({
   access: vi.fn(),
 }))
@@ -33,7 +36,7 @@ describe('detectEditors', () => {
     invalidateEditorCache()
   })
 
-  it('detects standard virtual editors always', async () => {
+  itOnMac('detects standard virtual editors always', async () => {
     // Mock mdfind to return empty
     mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' })
 
@@ -52,7 +55,7 @@ describe('detectEditors', () => {
     expect(openInFolder?.kind).toBe('gui')
   })
 
-  it('detects GUI editors via mdfind', async () => {
+  itOnMac('detects GUI editors via mdfind', async () => {
     // Mock mdfind to return two apps: Cursor Personal and Xcode
     mockExecFileAsync.mockImplementation(async (file: string) => {
       if (file === '/usr/bin/mdfind') {
@@ -75,7 +78,7 @@ describe('detectEditors', () => {
     expect(xcode?.target).toBe('/Applications/Xcode.app')
   })
 
-  it('handles multiple instances of the same editor name and assigns unique IDs', async () => {
+  itOnMac('handles multiple instances of the same editor name and assigns unique IDs', async () => {
     mockExecFileAsync.mockImplementation(async (file: string) => {
       if (file === '/usr/bin/mdfind') {
         return { stdout: '/Applications/Cursor Personal.app\n/Applications/Cursor SpaceInch.app', stderr: '' }
@@ -94,7 +97,7 @@ describe('detectEditors', () => {
     expect(cursor2?.name).toBe('Cursor SpaceInch')
   })
 
-  it('uses fallback path checking if mdfind fails or is empty', async () => {
+  itOnMac('uses fallback path checking if mdfind fails or is empty', async () => {
     // Mock mdfind to fail
     mockExecFileAsync.mockImplementation(async (file: string) => {
       if (file === '/usr/bin/mdfind') {
