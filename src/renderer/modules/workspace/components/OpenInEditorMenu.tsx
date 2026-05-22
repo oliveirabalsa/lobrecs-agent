@@ -66,7 +66,7 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
         aria-label="Open project in editor"
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`flex h-7 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
+        className={`flex h-7 items-center gap-1 rounded px-2 text-[9px] font-medium transition-colors ${
           open
             ? 'bg-white/10 text-primary'
             : 'text-secondary hover:bg-white/5 hover:text-primary'
