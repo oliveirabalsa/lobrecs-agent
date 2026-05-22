@@ -27,6 +27,7 @@ import { UserMessage } from '../components/UserMessage'
 import { useAttentionSound } from '../hooks/useAttentionSound'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
+import { diffProposalsFromThreadEvents } from '../lib/threadDiffProposals'
 import type { StartedSessionSummary } from '../../sessions/types'
 import { Button, Modal } from '../../../components/ui'
 
@@ -118,6 +119,78 @@ export function RunWorkspace({
     onDiffProposals: handleSessionDiffProposals,
     onStatusChange,
   })
+
+  useEffect(() => {
+    if (!threadId) return
+
+    let cancelled = false
+    const sessionUnsubscribers = new Map<string, () => void>()
+
+    const subscribeToDiffEvents = (threadSession: { id: string; createdAt: number }) => {
+      if (sessionUnsubscribers.has(threadSession.id)) return
+
+      const unsubscribe = window.agentforge.on(`session:${threadSession.id}`, (event) => {
+        if (event.type !== 'diff') return
+
+        const proposals = diffProposalsFromThreadEvents([
+          {
+            sessionId: threadSession.id,
+            createdAt: threadSession.createdAt,
+            events: [event],
+          },
+        ])
+        if (proposals.length === 0) return
+
+        onDiffProposals(proposals, {
+          sessionId: event.sessionId,
+          threadId,
+        })
+      })
+      sessionUnsubscribers.set(threadSession.id, unsubscribe)
+    }
+
+    const syncThreadDiffs = async () => {
+      const threadSessions = await window.agentforge.sessions
+        .list(project.id)
+        .then((sessions) =>
+          sessions
+            .filter((session) => session.threadId === threadId)
+            .sort((left, right) => left.createdAt - right.createdAt),
+        )
+        .catch(() => [])
+
+      if (cancelled) return
+
+      threadSessions.forEach(subscribeToDiffEvents)
+
+      const eventBatches = await Promise.all(
+        threadSessions.map(async (threadSession) => ({
+          sessionId: threadSession.id,
+          createdAt: threadSession.createdAt,
+          events: await window.agentforge.sessions.listEvents(threadSession.id).catch(() => []),
+        })),
+      )
+
+      if (cancelled) return
+
+      const proposals = diffProposalsFromThreadEvents(eventBatches)
+      if (proposals.length > 0) {
+        onDiffProposals(proposals, { threadId })
+      }
+    }
+
+    void syncThreadDiffs()
+
+    const unsubscribeThreadUpdates = window.agentforge.threads.onUpdated((event) => {
+      if (event.thread.id === threadId) void syncThreadDiffs()
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribeThreadUpdates()
+      sessionUnsubscribers.forEach((unsubscribe) => unsubscribe())
+    }
+  }, [onDiffProposals, project.id, threadId])
 
   useEffect(() => {
     if (!onContextPercent) return

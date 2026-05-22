@@ -268,9 +268,13 @@ export function renderStreamItem(
       // Prefer live DiffProposals from the parent — they carry actual content
       // and additions/deletions. Fall back to the activity-derived rows when
       // no proposals are present yet.
-      const proposals = (ctx.diffProposals ?? []).filter((proposal) =>
-        item.items.some((change) => change.filePath === proposal.filePath),
-      )
+      const proposalsByPath = new Map<string, DiffProposal>()
+      for (const change of item.items) {
+        for (const proposal of matchingDiffProposals(ctx.diffProposals ?? [], change.filePath)) {
+          proposalsByPath.set(proposal.filePath, proposal)
+        }
+      }
+      const proposals = [...proposalsByPath.values()]
       const hasLiveProposals = hasLiveDiffProposals(proposals)
       const fallback = item.items.map((change) => ({
         filePath: change.filePath,

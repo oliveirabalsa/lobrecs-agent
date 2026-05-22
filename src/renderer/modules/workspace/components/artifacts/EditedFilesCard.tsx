@@ -7,6 +7,7 @@ import {
   languageFromPath,
   registerDraculaTheme,
 } from '../../../../lib/monaco'
+import { filePathsReferToSameFile } from '../../lib/diffProposalMatching'
 import { AnimatedDiffStat } from './AnimatedDiffStat'
 import { FileDiffModal } from './FileDiffModal'
 
@@ -27,11 +28,17 @@ export interface EditedFilesCardProps {
   onReview?: (filePath?: string) => void
 }
 
-interface FileEntry {
+export interface EditedFileEntry {
   filePath: string
   additions: number
   deletions: number
   proposal?: DiffProposal
+}
+
+const COLLAPSED_FILE_ROW_COUNT = 3
+
+type OrderedEditedFileEntry = EditedFileEntry & {
+  lastEditedIndex: number
 }
 
 /**
@@ -48,48 +55,21 @@ export function EditedFilesCard({
   fallbackFiles,
   onReview,
 }: EditedFilesCardProps) {
-  const entries = useMemo<FileEntry[]>(() => {
-    const fallbackByPath = new Map<string, FileEntry>()
-    for (const file of fallbackFiles ?? []) {
-      const existing = fallbackByPath.get(file.filePath)
-      if (existing) {
-        existing.additions += file.additions ?? 0
-        existing.deletions += file.deletions ?? 0
-        continue
-      }
-      fallbackByPath.set(file.filePath, {
-        filePath: file.filePath,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-      })
-    }
-
-    // Live proposals carry a whole-file diff — one per path, last wins.
-    if (proposals.length > 0) {
-      const byPath = new Map<string, FileEntry>()
-      for (const proposal of proposals) {
-        const stats = displayStatsForProposal(proposal)
-        const fallback = fallbackByPath.get(proposal.filePath)
-        byPath.set(proposal.filePath, {
-          filePath: proposal.filePath,
-          additions: fallback?.additions ?? stats.additions,
-          deletions: fallback?.deletions ?? stats.deletions,
-          proposal,
-        })
-      }
-      return [...byPath.values()]
-    }
-    // Fallback rows come from per-edit `file-change` activities, so the same
-    // file can appear several times in one turn — sum those into one row.
-    return [...fallbackByPath.values()]
-  }, [proposals, fallbackFiles])
+  const entries = useMemo(
+    () => buildEditedFileEntries(proposals, fallbackFiles),
+    [proposals, fallbackFiles],
+  )
 
   const totalAdditions = entries.reduce((sum, e) => sum + e.additions, 0)
   const totalDeletions = entries.reduce((sum, e) => sum + e.deletions, 0)
+  const hasVisibleStats = totalAdditions + totalDeletions > 0
   const count = entries.length
+  const [showAllRows, setShowAllRows] = useState(false)
+  const visibleEntries = visibleEditedFileEntries(entries, showAllRows)
+  const hiddenCount = Math.max(0, count - visibleEntries.length)
 
   // The file whose diff is shown full-screen. One modal serves every row.
-  const [modalEntry, setModalEntry] = useState<FileEntry | null>(null)
+  const [modalEntry, setModalEntry] = useState<EditedFileEntry | null>(null)
 
   if (count === 0) return null
 
@@ -104,11 +84,13 @@ export function EditedFilesCard({
             <div className="text-sm font-medium text-primary">
               Edited {count} file{count === 1 ? '' : 's'}
             </div>
-            <AnimatedDiffStat
-              additions={totalAdditions}
-              deletions={totalDeletions}
-              className="text-xs"
-            />
+            {hasVisibleStats ? (
+              <AnimatedDiffStat
+                additions={totalAdditions}
+                deletions={totalDeletions}
+                className="text-xs"
+              />
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {onReview ? (
@@ -120,7 +102,7 @@ export function EditedFilesCard({
         </header>
 
         <ul className="divide-y divide-hairline">
-          {entries.map((entry) => (
+          {visibleEntries.map((entry) => (
             <FileRow
               key={entry.filePath}
               entry={entry}
@@ -128,6 +110,34 @@ export function EditedFilesCard({
               onOpenDiff={setModalEntry}
             />
           ))}
+          {hiddenCount > 0 ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => setShowAllRows(true)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+              >
+                <span aria-hidden="true">{iconChevronDown}</span>
+                Show {hiddenCount} more file{hiddenCount === 1 ? '' : 's'}
+              </button>
+            </li>
+          ) : showAllRows && count > COLLAPSED_FILE_ROW_COUNT ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => setShowAllRows(false)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+              >
+                <span
+                  aria-hidden="true"
+                  style={{ display: 'inline-block', transform: 'rotate(180deg)' }}
+                >
+                  {iconChevronDown}
+                </span>
+                Show fewer files
+              </button>
+            </li>
+          ) : null}
         </ul>
       </article>
 
@@ -142,18 +152,95 @@ export function EditedFilesCard({
   )
 }
 
+export function visibleEditedFileEntries<T>(
+  entries: readonly T[],
+  showAllRows: boolean,
+): T[] {
+  return showAllRows ? [...entries] : entries.slice(0, COLLAPSED_FILE_ROW_COUNT)
+}
+
+export function buildEditedFileEntries(
+  proposals: readonly DiffProposal[],
+  fallbackFiles: EditedFilesCardProps['fallbackFiles'],
+): EditedFileEntry[] {
+  const fallbackByPath = new Map<string, OrderedEditedFileEntry>()
+  for (const [index, file] of (fallbackFiles ?? []).entries()) {
+    const existing = fallbackByPath.get(file.filePath)
+    if (existing) {
+      existing.additions += file.additions ?? 0
+      existing.deletions += file.deletions ?? 0
+      existing.lastEditedIndex = index
+      continue
+    }
+    fallbackByPath.set(file.filePath, {
+      filePath: file.filePath,
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      lastEditedIndex: index,
+    })
+  }
+
+  const fallbackEntries = [...fallbackByPath.values()]
+  if (proposals.length === 0) return newestEditedFilesFirst(fallbackEntries)
+
+  const byPath = new Map<string, OrderedEditedFileEntry>()
+  const consumedFallbackPaths = new Set<string>()
+  for (const [proposalIndex, proposal] of proposals.entries()) {
+    const stats = displayStatsForProposal(proposal)
+    const fallback = fallbackEntries.find((entry) =>
+      filePathsReferToSameFile(entry.filePath, proposal.filePath),
+    )
+    if (fallback) consumedFallbackPaths.add(fallback.filePath)
+    const visibleStats = statsWithFallback(stats, fallback)
+
+    byPath.set(proposal.filePath, {
+      filePath: proposal.filePath,
+      additions: visibleStats.additions,
+      deletions: visibleStats.deletions,
+      proposal,
+      lastEditedIndex: fallback?.lastEditedIndex ?? proposalIndex,
+    })
+  }
+
+  for (const fallback of fallbackEntries) {
+    if (!consumedFallbackPaths.has(fallback.filePath)) {
+      byPath.set(fallback.filePath, fallback)
+    }
+  }
+
+  return newestEditedFilesFirst([...byPath.values()])
+}
+
+function newestEditedFilesFirst(entries: OrderedEditedFileEntry[]): EditedFileEntry[] {
+  return entries
+    .filter(hasLineChanges)
+    .sort((a, b) => b.lastEditedIndex - a.lastEditedIndex)
+    .map(toEditedFileEntry)
+}
+
+function toEditedFileEntry(entry: OrderedEditedFileEntry): EditedFileEntry {
+  const editedFileEntry: EditedFileEntry = {
+    filePath: entry.filePath,
+    additions: entry.additions,
+    deletions: entry.deletions,
+  }
+  if (entry.proposal) editedFileEntry.proposal = entry.proposal
+  return editedFileEntry
+}
+
 function FileRow({
   entry,
   onReview,
   onOpenDiff,
 }: {
-  entry: FileEntry
+  entry: EditedFileEntry
   onReview?: (filePath?: string) => void
   /** Opens the full-screen diff modal for this file. */
-  onOpenDiff: (entry: FileEntry) => void
+  onOpenDiff: (entry: EditedFileEntry) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const { filePath, additions, deletions, proposal } = entry
+  const hasVisibleStats = additions + deletions > 0
 
   const handlePathClick = () => {
     if (resolveRowClick(entry) === 'modal') {
@@ -193,11 +280,13 @@ function FileRow({
         >
           {filePath}
         </button>
-        <AnimatedDiffStat
-          additions={additions}
-          deletions={deletions}
-          className="shrink-0 text-xs"
-        />
+        {hasVisibleStats ? (
+          <AnimatedDiffStat
+            additions={additions}
+            deletions={deletions}
+            className="shrink-0 text-xs"
+          />
+        ) : null}
         <button
           type="button"
           onClick={() => void window.agentforge.system.openInEditor(filePath)}
@@ -276,7 +365,7 @@ function InlineDiffPreview({ proposal }: { proposal: DiffProposal }) {
  * but routing every row to the modal can surface an empty diff. The 'editor'
  * fallback is the safe default — but the call is yours.
  */
-function resolveRowClick(entry: FileEntry): 'modal' | 'editor' {
+function resolveRowClick(entry: EditedFileEntry): 'modal' | 'editor' {
   // TODO(learning): replace this placeholder with your routing decision.
   return entry.proposal ? 'modal' : 'editor'
 }
@@ -296,6 +385,19 @@ function displayStatsForProposal(proposal: DiffProposal): {
   }
 
   return countChangedLines(proposal.originalContent, proposal.proposedContent)
+}
+
+function statsWithFallback(
+  proposalStats: { additions: number; deletions: number },
+  fallback?: EditedFileEntry,
+): { additions: number; deletions: number } {
+  if (!fallback) return proposalStats
+  if (hasLineChanges(fallback)) return fallback
+  return proposalStats
+}
+
+function hasLineChanges(entry: { additions: number; deletions: number }): boolean {
+  return entry.additions + entry.deletions > 0
 }
 
 function countChangedLines(
@@ -346,6 +448,12 @@ const iconFileEdit = (
 const iconChevronRight = (
   <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
     <path d="m6 4 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+const iconChevronDown = (
+  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 

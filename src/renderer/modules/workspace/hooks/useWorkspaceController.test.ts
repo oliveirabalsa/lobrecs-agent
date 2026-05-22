@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSwarmWorkspaceState,
+  nextScopedDiffProposalState,
   visibleDiffProposalsForActiveSession,
   type ScopedDiffProposalState,
 } from './useWorkspaceController'
@@ -98,8 +99,73 @@ describe('visibleDiffProposalsForActiveSession', () => {
     )
   })
 
-  it('hides proposals captured from another thread or session', () => {
+  it('hides proposals captured from another thread or session in visible state', () => {
     expect(visibleDiffProposalsForActiveSession(state, 'session-2', 'thread-1')).toEqual([])
     expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-2')).toEqual([])
+  })
+
+  it('accepts proposals captured from another swarm agent in the active thread', () => {
+    const next = nextScopedDiffProposalState(
+      null,
+      [
+        {
+          filePath: '/repo/swarm-agent.ts',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+      { sessionId: 'implementer-session', threadId: 'thread-1' },
+      'reviewer-session',
+      'thread-1',
+    )
+
+    expect(visibleDiffProposalsForActiveSession(next, 'reviewer-session', 'thread-1')).toEqual([
+      {
+        filePath: '/repo/swarm-agent.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
+      },
+    ])
+  })
+
+  it('merges same-thread proposals instead of replacing another agent edit', () => {
+    const current: ScopedDiffProposalState = {
+      sessionId: 'reviewer-session',
+      threadId: 'thread-1',
+      proposals: [
+        {
+          filePath: '/repo/first.ts',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+    }
+
+    expect(
+      nextScopedDiffProposalState(
+        current,
+        [
+          {
+            filePath: '/repo/second.ts',
+            originalContent: 'before',
+            proposedContent: 'after',
+          },
+        ],
+        { sessionId: 'implementer-session', threadId: 'thread-1' },
+        'reviewer-session',
+        'thread-1',
+      )?.proposals,
+    ).toEqual([
+      {
+        filePath: '/repo/first.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
+      },
+      {
+        filePath: '/repo/second.ts',
+        originalContent: 'before',
+        proposedContent: 'after',
+      },
+    ])
   })
 })

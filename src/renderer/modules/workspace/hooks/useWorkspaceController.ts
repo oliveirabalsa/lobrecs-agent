@@ -96,6 +96,54 @@ export function visibleDiffProposalsForActiveSession(
   return state.proposals
 }
 
+export function nextScopedDiffProposalState(
+  current: ScopedDiffProposalState | null,
+  proposals: readonly DiffProposal[],
+  source: DiffProposalScope,
+  activeSessionId: string | null,
+  activeThreadId: string | null,
+): ScopedDiffProposalState | null {
+  if (!activeSessionId) return current
+
+  const sourceSessionId = source.sessionId ?? activeSessionId
+  const sourceThreadId = source.threadId ?? activeThreadId
+  const sourceMatchesActiveThread =
+    activeThreadId !== null && (sourceThreadId ?? null) === activeThreadId
+  const sourceMatchesActiveSession =
+    sourceSessionId === activeSessionId && (sourceThreadId ?? null) === activeThreadId
+
+  if (!sourceMatchesActiveThread && !sourceMatchesActiveSession) return current
+
+  if (proposals.length === 0) return null
+
+  const currentProposals =
+    current?.sessionId === activeSessionId && current.threadId === activeThreadId
+      ? current.proposals
+      : []
+
+  return {
+    sessionId: activeSessionId,
+    threadId: activeThreadId,
+    proposals: mergeDiffProposals(currentProposals, proposals),
+  }
+}
+
+export function mergeDiffProposals(
+  current: readonly DiffProposal[],
+  incoming: readonly DiffProposal[],
+): DiffProposal[] {
+  const byPath = new Map<string, DiffProposal>()
+
+  for (const proposal of current) {
+    byPath.set(proposal.filePath, proposal)
+  }
+  for (const proposal of incoming) {
+    byPath.set(proposal.filePath, proposal)
+  }
+
+  return [...byPath.values()]
+}
+
 export function buildSwarmWorkspaceState(
   result: WorkspaceSwarmStartedResult,
   projectId: string,
@@ -310,17 +358,15 @@ export function useWorkspaceController() {
 
   const handleDiffProposals = useCallback(
     (proposals: DiffProposal[], source: DiffProposalScope = {}) => {
-      const sourceSessionId = source.sessionId ?? activeSessionId
-      const sourceThreadId = source.threadId ?? activeThreadId
-
-      if (!sourceSessionId || sourceSessionId !== activeSessionId) return
-      if ((sourceThreadId ?? null) !== activeThreadId) return
-
-      setDiffProposalState({
-        sessionId: sourceSessionId,
-        threadId: sourceThreadId ?? null,
-        proposals,
-      })
+      setDiffProposalState((current) =>
+        nextScopedDiffProposalState(
+          current,
+          proposals,
+          source,
+          activeSessionId,
+          activeThreadId,
+        ),
+      )
     },
     [activeSessionId, activeThreadId],
   )

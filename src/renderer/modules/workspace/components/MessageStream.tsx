@@ -137,19 +137,27 @@ export function editedFileCardsForFallbackFiles(
   liveProposals: readonly DiffProposal[],
   fallbackFiles: readonly CodeChangeFallback[],
 ): EditedFileCardModel[] {
-  return fallbackFiles.map((fallback) => {
-    const proposals = visibleProposalsForFallbackFiles(liveProposals, [fallback])
-    const normalizedFallback =
-      proposals.length === 1
-        ? [{ ...fallback, filePath: proposals[0].filePath }]
-        : [fallback]
+  if (fallbackFiles.length === 0) return []
 
-    return {
-      id: fallback.filePath,
-      proposals,
-      fallbackFiles: normalizedFallback,
+  const proposalsByPath = new Map<string, DiffProposal>()
+  const normalizedFallbacks = fallbackFiles.map((fallback) => {
+    const proposals = matchingDiffProposals(liveProposals, fallback.filePath)
+    for (const proposal of proposals) {
+      proposalsByPath.set(proposal.filePath, proposal)
     }
+
+    return proposals.length === 1
+      ? { ...fallback, filePath: proposals[0].filePath }
+      : fallback
   })
+
+  return [
+    {
+      id: editCardId('fallback', fallbackFiles.map((file) => file.filePath)),
+      proposals: [...proposalsByPath.values()],
+      fallbackFiles: normalizedFallbacks,
+    },
+  ]
 }
 
 /**
@@ -181,12 +189,39 @@ export function editedFileCards(
   const fallbackCards = editedFileCardsForFallbackFiles(liveProposals, fallbackFiles)
   if (!options.includeUnmatchedProposals) return fallbackCards
 
-  // TODO(you): return `fallbackCards` plus one card per live proposal that no
-  // fallback card already covers. A proposal is "covered" when it appears in
-  // some `fallbackCards[i].proposals`. A proposal-only card model looks like:
-  //   { id: proposal.filePath, proposals: [proposal], fallbackFiles: [] }
-  // See the guidance in the chat for the design trade-offs to weigh.
-  return fallbackCards
+  const coveredProposalPaths = new Set(
+    fallbackCards.flatMap((card) => card.proposals.map((proposal) => proposal.filePath)),
+  )
+  const unmatchedProposals = liveProposals.filter(
+    (proposal) => !coveredProposalPaths.has(proposal.filePath),
+  )
+  if (unmatchedProposals.length === 0) return fallbackCards
+
+  if (fallbackCards.length === 0) {
+    return [
+      {
+        id: editCardId('proposals', unmatchedProposals.map((proposal) => proposal.filePath)),
+        proposals: [...unmatchedProposals],
+        fallbackFiles: [],
+      },
+    ]
+  }
+
+  const [card] = fallbackCards
+  return [
+    {
+      ...card,
+      id: editCardId('mixed', [
+        ...card.fallbackFiles.map((file) => file.filePath),
+        ...unmatchedProposals.map((proposal) => proposal.filePath),
+      ]),
+      proposals: [...card.proposals, ...unmatchedProposals],
+    },
+  ]
+}
+
+function editCardId(prefix: string, paths: readonly string[]): string {
+  return `${prefix}:${paths.join('|')}`
 }
 
 /**

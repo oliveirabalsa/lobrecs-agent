@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StreamItem } from '../lib/groupTurns'
 import {
+  editedFileCards,
   editedFileCardsForFallbackFiles,
   flattenCodeChangeFallbacks,
   shouldPinMessageStream,
@@ -298,7 +299,7 @@ describe('visibleProposalsForFallbackFiles', () => {
 })
 
 describe('editedFileCardsForFallbackFiles', () => {
-  it('builds one card per edited file and keeps live counts beside matching proposals', () => {
+  it('builds one grouped card for the turn and keeps live counts beside matching proposals', () => {
     const htmlProposal = {
       filePath: '/Users/leo/project/index.html',
       originalContent: '<main>old</main>\n',
@@ -324,7 +325,7 @@ describe('editedFileCardsForFallbackFiles', () => {
       ]),
     ).toEqual([
       {
-        id: '/repo/index.html',
+        id: 'fallback:/repo/index.html|src/app.ts',
         proposals: [htmlProposal],
         fallbackFiles: [
           {
@@ -333,12 +334,6 @@ describe('editedFileCardsForFallbackFiles', () => {
             additions: 7,
             deletions: 0,
           },
-        ],
-      },
-      {
-        id: 'src/app.ts',
-        proposals: [],
-        fallbackFiles: [
           {
             filePath: 'src/app.ts',
             changeType: 'modified',
@@ -346,6 +341,75 @@ describe('editedFileCardsForFallbackFiles', () => {
             deletions: 1,
           },
         ],
+      },
+    ])
+  })
+})
+
+describe('editedFileCards', () => {
+  it('keeps proposal-only files in the same edited-files card for the last turn', () => {
+    const appProposal = {
+      filePath: '/Users/leo/project/src/app.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+    }
+    const configProposal = {
+      filePath: '/Users/leo/project/src/config.ts',
+      originalContent: 'export const old = true\n',
+      proposedContent: 'export const next = true\n',
+      additions: 1,
+      deletions: 1,
+    }
+
+    expect(
+      editedFileCards(
+        [appProposal, configProposal],
+        [{ filePath: 'src/app.ts', changeType: 'modified', additions: 1, deletions: 1 }],
+        { includeUnmatchedProposals: true },
+      ),
+    ).toEqual([
+      {
+        id: 'mixed:/Users/leo/project/src/app.ts|/Users/leo/project/src/config.ts',
+        proposals: [appProposal, configProposal],
+        fallbackFiles: [
+          {
+            filePath: '/Users/leo/project/src/app.ts',
+            changeType: 'modified',
+            additions: 1,
+            deletions: 1,
+          },
+        ],
+      },
+    ])
+  })
+
+  it('renders proposal-only edits as one grouped card when no file-change activity exists', () => {
+    const firstProposal = {
+      filePath: '/Users/leo/project/src/a.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+    }
+    const secondProposal = {
+      filePath: '/Users/leo/project/src/b.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 2,
+      deletions: 0,
+    }
+
+    expect(
+      editedFileCards([firstProposal, secondProposal], [], {
+        includeUnmatchedProposals: true,
+      }),
+    ).toEqual([
+      {
+        id: 'proposals:/Users/leo/project/src/a.ts|/Users/leo/project/src/b.ts',
+        proposals: [firstProposal, secondProposal],
+        fallbackFiles: [],
       },
     ])
   })
