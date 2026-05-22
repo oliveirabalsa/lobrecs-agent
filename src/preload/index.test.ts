@@ -334,6 +334,10 @@ describe('preload api shape', () => {
         expected: ['git:push', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.git.getPendingChanges('project-1'),
+        expected: ['git:get-pending-changes', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.git.analyzeCommitPlan('project-1'),
         expected: ['git:analyze-commit-plan', 'project-1'],
       },

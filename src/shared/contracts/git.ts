@@ -61,6 +61,17 @@ export interface GitCommitAnalysisResult {
   analysis: GitCommitAnalysisModel
 }
 
+/**
+ * Lightweight working-tree probe. Unlike `GitCommitAnalysisResult` this never
+ * runs an AI agent — it only counts changed files so the UI can decide whether
+ * a commit is even possible before opening the Commit & Push dialog.
+ */
+export interface GitPendingChanges {
+  projectId: string
+  fileCount: number
+  hasChanges: boolean
+}
+
 export interface GitCommitPlanExecutionInput {
   projectId: string
   fingerprint: string

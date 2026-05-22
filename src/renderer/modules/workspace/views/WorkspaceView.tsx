@@ -217,6 +217,14 @@ export function WorkspaceView({
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
   const [prDialogOpen, setPrDialogOpen] = useState(false)
   const [gitMenuOpen, setGitMenuOpen] = useState(false)
+  /** Number of uncommitted files in the working tree, from a lightweight `git status` probe. */
+  const [pendingChangeCount, setPendingChangeCount] = useState(0)
+  /**
+   * Monotonic id for in-flight pending-change probes. Several events can trigger
+   * a probe at once; without this a slow earlier probe could resolve last and
+   * overwrite a newer count. Only the most recent id is allowed to apply.
+   */
+  const pendingProbeRef = useRef(0)
   const [contextPercent, setContextPercent] = useState<number | null>(null)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
@@ -250,6 +258,57 @@ export function WorkspaceView({
       document.removeEventListener('keydown', onDocKeyDown)
     }
   }, [gitMenuOpen])
+
+  // Lightweight `git status` probe so the Commit & Push action reflects whether
+  // a commit is even possible. Stable per project; safe to call from any event.
+  const refreshPendingChanges = useCallback(() => {
+    const projectId = selectedProject?.id
+    if (!projectId) {
+      setPendingChangeCount(0)
+      return
+    }
+
+    const probeId = pendingProbeRef.current + 1
+    pendingProbeRef.current = probeId
+    void window.agentforge.git
+      .getPendingChanges(projectId)
+      .then((result) => {
+        if (pendingProbeRef.current === probeId) setPendingChangeCount(result.fileCount)
+      })
+      .catch(() => {
+        if (pendingProbeRef.current === probeId) setPendingChangeCount(0)
+      })
+  }, [selectedProject?.id])
+
+  // Re-probe on the discrete moments the working tree is likely to have moved:
+  // project switch, an agent session finishing (busy clears), the commit dialog
+  // closing, and each time the git menu opens — so the gated menu item is fresh
+  // at the instant of click.
+  useEffect(() => {
+    refreshPendingChanges()
+  }, [refreshPendingChanges, busy, commitDialogOpen, gitMenuOpen])
+
+  // Files also change outside the agent — via the integrated terminal and Vim.
+  // Re-probe (debounced) whenever a CLI-editor terminal emits output, and
+  // immediately when one exits, so the badge tracks those edits without polling.
+  useEffect(() => {
+    if (!selectedProject?.id) return
+
+    let debounce: ReturnType<typeof setTimeout> | undefined
+    function scheduleRefresh() {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(refreshPendingChanges, 1000)
+    }
+
+    const offData = window.agentforge.system.onCliEditorTerminalData(scheduleRefresh)
+    const offExit = window.agentforge.system.onCliEditorTerminalExit(refreshPendingChanges)
+
+    return () => {
+      if (debounce) clearTimeout(debounce)
+      offData()
+      offExit()
+    }
+  }, [refreshPendingChanges, selectedProject?.id])
 
   // Keep the right panel mounted while opening, and during the close animation
   // so `data-state="closed"` exit keyframes can play before unmount.
@@ -689,13 +748,26 @@ export function WorkspaceView({
                               ? 'border-white/15 bg-white/10 text-secondary'
                               : 'border-hairline text-muted hover:border-white/15 hover:bg-white/5 hover:text-secondary'
                           }`}
-                          title="Git actions"
+                          title={
+                            pendingChangeCount > 0
+                              ? `Git actions — ${pendingChangeCount} uncommitted file${pendingChangeCount === 1 ? '' : 's'}`
+                              : 'Git actions'
+                          }
                           aria-label="Git actions"
                           aria-haspopup="menu"
                           aria-expanded={gitMenuOpen}
                         >
                           <QuickGitIcon />
                         </button>
+
+                        {pendingChangeCount > 0 ? (
+                          <span
+                            className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-canvas bg-accent-primary px-1 text-[10px] font-semibold leading-none text-white"
+                            aria-hidden="true"
+                          >
+                            {pendingChangeCount > 9 ? '9+' : pendingChangeCount}
+                          </span>
+                        ) : null}
 
                         {gitMenuOpen ? (
                           <div
@@ -705,14 +777,20 @@ export function WorkspaceView({
                             <button
                               type="button"
                               role="menuitem"
+                              disabled={pendingChangeCount === 0}
                               onClick={() => {
                                 setGitMenuOpen(false)
                                 setCommitDialogOpen(true)
                               }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
                             >
                               <QuickCommitIcon />
-                              <span>Commit & Push</span>
+                              <span className="flex-1">Commit & Push</span>
+                              <span className="text-[10px] font-normal text-muted">
+                                {pendingChangeCount === 0
+                                  ? 'No changes'
+                                  : `${pendingChangeCount} file${pendingChangeCount === 1 ? '' : 's'}`}
+                              </span>
                             </button>
                             <button
                               type="button"

@@ -6,6 +6,7 @@ import type {
   GitCommitPlanExecutionResult,
   GitDiffRequest,
   GitFileSelection,
+  GitPendingChanges,
   GitRemoteInfo,
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
@@ -21,6 +22,7 @@ export interface GitApi {
   revert(request: GitFileSelection): Promise<GitCommandResult>
   commit(input: GitCommitInput): Promise<GitCommandResult>
   push(projectId: string): Promise<GitCommandResult>
+  getPendingChanges(projectId: string): Promise<GitPendingChanges>
   analyzeCommitPlan(projectId: string): Promise<GitCommitAnalysisResult>
   executeCommitPlan(input: GitCommitPlanExecutionInput): Promise<GitCommitPlanExecutionResult>
   getRemote(projectId: string): Promise<GitRemoteInfo>
@@ -38,6 +40,7 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     revert: (request) => ipcRenderer.invoke('git:revert', request),
     commit: (input) => ipcRenderer.invoke('git:commit', input),
     push: (projectId) => ipcRenderer.invoke('git:push', projectId),
+    getPendingChanges: (projectId) => ipcRenderer.invoke('git:get-pending-changes', projectId),
     analyzeCommitPlan: (projectId) => ipcRenderer.invoke('git:analyze-commit-plan', projectId),
     executeCommitPlan: (input) => ipcRenderer.invoke('git:execute-commit-plan', input),
     getRemote: (projectId) => ipcRenderer.invoke('git:get-remote', projectId),

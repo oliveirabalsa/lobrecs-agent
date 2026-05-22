@@ -54,6 +54,21 @@ export function registerGitHandlers(context: MainIpcContext): void {
     return runGit(['push'], project.repoPath)
   })
 
+  ipcMain.handle('git:get-pending-changes', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    const status = await runGit(['status', '--porcelain'], project.repoPath)
+    const fileCount =
+      status.exitCode === 0
+        ? status.stdout.split(/\r?\n/).filter((line) => line.trim()).length
+        : 0
+
+    return {
+      projectId,
+      fileCount,
+      hasChanges: fileCount > 0,
+    }
+  })
+
   ipcMain.handle('git:analyze-commit-plan', async (_event, projectId: string) =>
     workflowService.analyzeCommitPlan(projectId),
   )
