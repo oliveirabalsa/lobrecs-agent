@@ -22,6 +22,7 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
     delete process.env.CODEX_COMMAND
+    delete process.env.CODEX_MOCK_CAPACITY_MODEL
     delete process.env.ANTIGRAVITY_COMMAND
     delete process.env.ANTIGRAVITY_MOCK_MODE
     delete process.env.OPENCODE_COMMAND
@@ -248,6 +249,34 @@ describe('agent adapters', () => {
     expect(argv).not.toEqual(
       expect.arrayContaining(['--dangerously-bypass-approvals-and-sandbox']),
     )
+  })
+
+  it('retries Codex with the next model when the selected model is at capacity', async () => {
+    process.env.CODEX_COMMAND = codexMock
+    process.env.CODEX_MOCK_CAPACITY_MODEL = 'gpt-5.5'
+    const adapter = new CodexAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'codex-capacity-session',
+      prompt: 'Review the diff',
+      repoPath: process.cwd(),
+      model: 'gpt-5.5',
+      modelFallbacks: ['gpt-5.4', 'gpt-5.3-codex'],
+    })
+    const events = await collectEvents(session)
+    const retry = events.find(
+      (event) =>
+        event.type === 'activity' &&
+        payloadField(event, 'title') === 'Model at capacity',
+    )
+    const approval = events.find((event) => event.type === 'approval-request')
+
+    expect(payloadField(retry, 'detail')).toContain('Retrying with gpt-5.4')
+    expect(payloadField(approval, 'argv')).toEqual(
+      expect.arrayContaining(['--model', 'gpt-5.4']),
+    )
+    expect(events.some((event) => event.type === 'error')).toBe(false)
+    expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 
   it('dispatches OpenCode with run model args', async () => {

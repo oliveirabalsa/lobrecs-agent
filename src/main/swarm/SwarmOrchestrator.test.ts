@@ -203,6 +203,110 @@ describe('SwarmOrchestrator', () => {
     expect(dispatched[2].model).toBe('gpt-5.3-codex')
   })
 
+  it('delays managed reviewer and tester roles until planned implementers finish', async () => {
+    const { orchestrator, dispatched, completions, waitedSessionIds } = createManagedHarness()
+
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'implementer api',
+            agentId: 'codex',
+            promptSuffix: 'Implement the API changes.',
+          },
+          {
+            role: 'implementer ui',
+            agentId: 'claude-code',
+            promptSuffix: 'Implement the UI changes.',
+          },
+          {
+            role: 'implementer tests',
+            agentId: 'opencode',
+            promptSuffix: 'Add regression tests for the implementation.',
+          },
+          {
+            role: 'reviewer',
+            agentId: 'claude-code',
+            promptSuffix: 'Review the completed implementation.',
+          },
+          {
+            role: 'tester',
+            agentId: 'codex',
+            promptSuffix: 'Run verification and report failures.',
+          },
+        ],
+      }),
+    })
+
+    const result = await spawnPromise
+
+    expect(result.sessions.map((session) => session.role)).toEqual([
+      'manager',
+      'implementer api',
+      'implementer ui',
+      'implementer tests',
+    ])
+    expect(dispatched.map((call) => call.role)).toEqual([
+      'manager',
+      'implementer api',
+      'implementer ui',
+      'implementer tests',
+    ])
+    expect(dispatched.some((call) => call.role === 'reviewer' || call.role === 'tester')).toBe(
+      false,
+    )
+
+    completions.get(dispatched[1].sessionId)?.resolve({
+      status: 'done',
+      output: 'api implementation complete',
+    })
+    completions.get(dispatched[2].sessionId)?.resolve({
+      status: 'done',
+      output: 'ui implementation complete',
+    })
+    completions.get(dispatched[3].sessionId)?.resolve({
+      status: 'done',
+      output: 'test implementation complete',
+    })
+
+    await waitFor(() => dispatched.length === 6)
+
+    expect(dispatched.map((call) => call.role)).toEqual([
+      'manager',
+      'implementer api',
+      'implementer ui',
+      'implementer tests',
+      'reviewer',
+      'tester',
+    ])
+    expect(waitedSessionIds).toEqual([
+      dispatched[0].sessionId,
+      dispatched[1].sessionId,
+      dispatched[2].sessionId,
+      dispatched[3].sessionId,
+    ])
+    expect(dispatched[4].prompt).toContain('Completed implementation work to verify')
+    expect(dispatched[4].prompt).toContain('api implementation complete')
+    expect(dispatched[4].prompt).toContain('ui implementation complete')
+    expect(dispatched[5].prompt).toContain('test implementation complete')
+
+    const swarm = orchestrator.get(result.swarmId)
+    expect(swarm?.sessions.map((session) => session.role)).toEqual([
+      'manager',
+      'implementer api',
+      'implementer ui',
+      'implementer tests',
+      'reviewer',
+      'tester',
+    ])
+  })
+
   it('rejects invalid manager JSON before spawning workers', async () => {
     const { orchestrator, dispatched, completions } = createManagedHarness()
     const spawnPromise = orchestrator.spawn(managedConfig())

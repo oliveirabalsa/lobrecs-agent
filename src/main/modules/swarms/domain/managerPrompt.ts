@@ -36,6 +36,8 @@ export function buildManagerPrompt({
     '- Prefer "parallel" when the task can be split by file, module, concern, or review angle.',
     '- strategy must be "parallel" when independent work can run together.',
     '- Use "sequential" only when a later agent genuinely needs the exact output from an earlier agent.',
+    '- Reviewers, testers, QA, and verification agents must run only after implementers finish.',
+    '- Implementers may run in parallel with other implementers, but never in the same phase as reviewers or testers.',
     '- Do not add a planner step before implementation unless the implementation depends on that planner output.',
     '- promptSuffix must be specific enough for that agent to act without guessing.',
     '',

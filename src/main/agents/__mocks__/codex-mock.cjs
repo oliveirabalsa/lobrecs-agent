@@ -1,6 +1,19 @@
 #!/usr/bin/env node
 
 const emitOutput = () => {
+  const modelIndex = process.argv.indexOf('--model')
+  const model = modelIndex >= 0 ? process.argv[modelIndex + 1] : ''
+  if (process.env.CODEX_MOCK_CAPACITY_MODEL === model) {
+    console.log(
+      JSON.stringify({
+        type: 'error',
+        message: 'Selected model is at capacity. Please try a different model.',
+      }),
+    )
+    process.exitCode = 1
+    return
+  }
+
   console.error('Reading additional input from stdin...')
   console.error(
     '2026-05-17T21:43:46.783471Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Auth(TokenRefreshFailed("Failed to parse server response"))',

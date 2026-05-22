@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { modelTierFromModel } from '../../../router'
+import { capacityFallbackModelsForAgent } from '../../../router/modelCapacityFallbacks'
 import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { requireProject } from '../../projects/application/requireProject'
@@ -100,6 +101,12 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         prompt: params.prompt,
         agentId: decision.agentId,
         model: decision.model,
+        modelFallbacks: capacityFallbackModelsForAgent({
+          settings,
+          agentId: decision.agentId,
+          currentModel: decision.model,
+          requiresImageSupport: imageAttachments.length > 0,
+        }),
         repoPath: project.repoPath,
         imageAttachments,
         context: projectsStore.getContext(project.id),
@@ -240,6 +247,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       prompt: params.prompt,
       agentId: decision.agentId,
       model: decision.model,
+      modelFallbacks: capacityFallbackModelsForAgent({
+        settings,
+        agentId: decision.agentId,
+        currentModel: decision.model,
+      }),
       repoPath: project.repoPath,
       context: projectsStore.getContext(project.id),
       isolate: settings.execution.worktreeIsolation,

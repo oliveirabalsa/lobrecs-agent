@@ -15,6 +15,7 @@ export interface AgentDispatchParams {
   prompt: string
   repoPath: string
   model: string
+  modelFallbacks?: string[]
   context?: string
   imageAttachments?: ImageAttachment[]
   runtimeSettings?: AgentRuntimeSettings

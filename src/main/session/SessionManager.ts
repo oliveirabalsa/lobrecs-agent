@@ -48,6 +48,7 @@ export type AgentAdapter = {
     prompt: string
     repoPath: string
     model: string
+    modelFallbacks?: string[]
     context?: string | null
     imageAttachments?: ImageAttachment[]
     runtimeSettings?: AgentRuntimeSettings
@@ -59,6 +60,7 @@ export type DispatchSessionParams = {
   prompt: string
   agentId: AgentId
   model: string
+  modelFallbacks?: string[]
   repoPath: string
   context?: string | null
   /**
@@ -282,6 +284,7 @@ export class SessionManager {
         prompt: params.prompt,
         repoPath: worktreePath ?? params.repoPath,
         model: params.model,
+        modelFallbacks: params.modelFallbacks,
         context: adapterContext,
         imageAttachments: params.imageAttachments,
         runtimeSettings: params.runtimeSettings,
@@ -434,6 +437,7 @@ export class SessionManager {
     prompt: string
     agentId: AgentId
     model: string
+    modelFallbacks?: string[]
     repoPath: string
     context?: string | null
     imageAttachments?: ImageAttachment[]
@@ -457,6 +461,7 @@ export class SessionManager {
       prompt: params.prompt,
       agentId: params.agentId,
       model: params.model,
+      modelFallbacks: params.modelFallbacks,
       repoPath: params.repoPath,
       context: params.context,
       imageAttachments: params.imageAttachments,

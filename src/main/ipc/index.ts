@@ -21,9 +21,9 @@ import { registerSystemHandlers } from '../modules/system/ipc/registerSystemHand
 import { registerThreadHandlers } from '../modules/threads/ipc/registerThreadHandlers'
 import { registerUpdateHandlers } from '../modules/updates'
 import { ModelRouter } from '../router'
+import { capacityFallbackModelsForAgent } from '../router/modelCapacityFallbacks'
 import { sessionManager } from '../session'
 import { projectsStore, threadsStore } from '../store'
-import { askPlanPrompt } from '../swarm/planPrompt'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
 
 
@@ -92,6 +92,11 @@ function configureSessionManager(context: MainIpcContext): void {
           prompt: repairInput.prompt,
           agentId: repairInput.agentId,
           model: repairInput.model,
+          modelFallbacks: capacityFallbackModelsForAgent({
+            settings,
+            agentId: repairInput.agentId,
+            currentModel: repairInput.model,
+          }),
           repoPath: repairInput.repoPath,
           context: projectsStore.getContext(repairInput.projectId),
           isolate: settings.execution.worktreeIsolation,
@@ -116,6 +121,12 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         prompt: input.prompt,
         agentId: input.agentId,
         model: input.model,
+        modelFallbacks: capacityFallbackModelsForAgent({
+          settings,
+          agentId: input.agentId,
+          currentModel: input.model,
+          requiresImageSupport: (input.imageAttachments?.length ?? 0) > 0,
+        }),
         repoPath: input.repoPath,
         context: projectsStore.getContext(input.projectId),
         isolate: settings.execution.worktreeIsolation,
@@ -126,7 +137,6 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
       return { sessionId, threadId, status: 'running' }
     },
     cancelSession: (sessionId) => context.sessionManager.cancel(sessionId),
-    confirmPlan: (input) => askPlanPrompt(input),
     worktrees: context.worktreeManager,
     getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
   })
