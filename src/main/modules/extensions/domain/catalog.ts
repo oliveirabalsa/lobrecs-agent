@@ -8,6 +8,7 @@ type SkillsShCatalogInput = {
   publisher: string
   packageName: string
   skillName: string
+  cliSkillName?: string
   tags: string[]
   homepageUrl: string
   featured?: boolean
@@ -35,15 +36,15 @@ function skillsShSkill(input: SkillsShCatalogInput): MarketplaceExtension {
       'Lobrecs Agent sets DISABLE_TELEMETRY=1 for the install command.',
     ],
     permissions: ['Downloads skill files from the configured skills.sh source'],
-    artifacts: [
-      {
-        kind: 'skill',
-        skillName: input.skillName,
-        cliSkillName: input.skillName,
-        packageName: input.packageName,
-        installUrl: input.homepageUrl,
-        description: input.summary,
-      },
+      artifacts: [
+        {
+          kind: 'skill',
+          skillName: input.skillName,
+          cliSkillName: input.cliSkillName ?? input.skillName,
+          packageName: input.packageName,
+          installUrl: input.homepageUrl,
+          description: input.summary,
+        },
     ],
   }
   if (input.featured !== undefined) extension.featured = input.featured
@@ -444,8 +445,9 @@ export const EXTENSION_CATALOG: MarketplaceExtension[] = [
       publisher: 'Vercel Labs',
       packageName: 'vercel-labs/agent-skills',
       skillName: 'composition-patterns',
+      cliSkillName: 'vercel-composition-patterns',
       tags: ['react', 'architecture', 'components'],
-      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/composition-patterns',
+      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/vercel-composition-patterns',
     }),
     skillsShSkill({
       id: 'skills-sh-supabase-postgres-best-practices',

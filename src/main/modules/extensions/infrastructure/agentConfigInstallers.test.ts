@@ -96,6 +96,35 @@ describe('installArtifactForAgent', () => {
     })
   })
 
+  it('uses the explicit skills.sh CLI skill name when it differs from the catalog skill name', async () => {
+    await installArtifactForAgent({
+      artifact: {
+        kind: 'skill',
+        skillName: 'composition-patterns',
+        description: 'React composition patterns',
+        packageName: 'vercel-labs/agent-skills',
+        cliSkillName: 'vercel-composition-patterns',
+      },
+      agentId: 'codex',
+      scope: 'project',
+      projectPath: repoPath,
+    })
+
+    const [, args] = vi.mocked(execFile).mock.calls[0] ?? []
+    expect(args).toEqual([
+      '-y',
+      'skills',
+      'add',
+      'vercel-labs/agent-skills',
+      '--skill',
+      'vercel-composition-patterns',
+      '--agent',
+      'codex',
+      '--copy',
+      '--yes',
+    ])
+  })
+
   it('retries skills.sh installs with the login shell npx path when the app PATH is missing npx', async () => {
     const missingNpx = Object.assign(new Error('spawn npx ENOENT'), { code: 'ENOENT' })
     mockExecFileOnce(missingNpx)
