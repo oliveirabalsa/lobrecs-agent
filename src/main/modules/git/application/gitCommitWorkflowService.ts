@@ -3,8 +3,6 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { getModelForTier } from '../../../router/ModelRouter'
 import { deriveActivityEvents } from '../../../session/activity'
-import { sessionsStore } from '../../../store'
-import { extractSessionOutput } from '../../../store/sessionOutput'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import {
@@ -50,7 +48,6 @@ interface AssistantTranscriptState {
 
 const ANALYSIS_TIMEOUT_MS = 45_000
 const DIFF_REVIEW_TIMEOUT_MS = 180_000
-const ANALYSIS_POLL_INTERVAL_MS = 500
 const MAX_PROMPT_CHARS = 120_000
 const MAX_UNTRACKED_FILE_CHARS = 20_000
 
@@ -142,32 +139,22 @@ export class GitCommitWorkflowService {
     }
   }
 
-  async reviewCurrentDiff(projectId: string, threadId?: string): Promise<GitDiffReviewResult> {
+  async reviewCurrentDiff(projectId: string, _threadId?: string): Promise<GitDiffReviewResult> {
     const project = requireProject(projectId)
     const snapshot = await collectWorkingTreeSnapshot(project.repoPath)
     const selection = await selectAnalysisAgent(this.context, projectId)
     const prompt = buildDiffReviewPrompt(snapshot)
-    const analysis = threadId
-      ? await runVisibleDiffReviewAgent(this.context, selection, {
-          projectId,
-          repoPath: project.repoPath,
-          threadId,
-          prompt,
-        })
-      : {
-          responseText: await runCommitPlannerAgent(
-            this.context,
-            selection,
-            project.repoPath,
-            prompt,
-            {
-              timeoutMessage: 'Diff review analysis timed out.',
-              timeoutMs: DIFF_REVIEW_TIMEOUT_MS,
-            },
-          ),
-          sessionId: undefined,
-        }
-    const review = normalizeDiffReview(analysis.responseText, snapshot.changedFiles)
+    const responseText = await runCommitPlannerAgent(
+      this.context,
+      selection,
+      project.repoPath,
+      prompt,
+      {
+        timeoutMessage: 'Diff review analysis timed out.',
+        timeoutMs: DIFF_REVIEW_TIMEOUT_MS,
+      },
+    )
+    const review = normalizeDiffReview(responseText, snapshot.changedFiles)
 
     return {
       projectId,
@@ -180,7 +167,6 @@ export class GitCommitWorkflowService {
       analysis: {
         agentId: selection.agentId,
         model: selection.model,
-        sessionId: analysis.sessionId,
       },
     }
   }
@@ -615,100 +601,6 @@ async function runCommitPlannerAgent(
       settleWithSuccess(finalText)
     })
   })
-}
-
-async function runVisibleDiffReviewAgent(
-  context: MainIpcContext,
-  selection: AnalysisAgentSelection,
-  input: {
-    projectId: string
-    repoPath: string
-    threadId: string
-    prompt: string
-  },
-): Promise<{ responseText: string; sessionId: string }> {
-  const visiblePrompt = ['[Role: diff reviewer]', '', input.prompt].join('\n')
-  const { sessionId } = await context.sessionManager.dispatch({
-    projectId: input.projectId,
-    prompt: visiblePrompt,
-    agentId: selection.agentId,
-    model: selection.model,
-    repoPath: input.repoPath,
-    threadId: input.threadId,
-    isolate: false,
-    runtimeSettings: selection.runtimeSettings,
-  })
-
-  return {
-    sessionId,
-    responseText: await waitForAnalysisSessionOutput(context, sessionId),
-  }
-}
-
-async function waitForAnalysisSessionOutput(
-  context: MainIpcContext,
-  sessionId: string,
-): Promise<string> {
-  const deadline = Date.now() + DIFF_REVIEW_TIMEOUT_MS
-
-  while (Date.now() < deadline) {
-    const session = sessionsStore.get(sessionId)
-    const events = sessionsStore.listEvents(sessionId)
-
-    if (session?.status === 'done') {
-      const output =
-        extractSessionOutput(events, { maxChars: MAX_PROMPT_CHARS }) ??
-        lastCompletionMessage(events)
-      if (output) return output
-      if (!events.some((event) => event.type === 'session-complete')) {
-        await delay(ANALYSIS_POLL_INTERVAL_MS)
-        continue
-      }
-      throw new Error('The review agent returned an empty response.')
-    }
-
-    if (session?.status === 'error' || session?.status === 'cancelled') {
-      throw new Error(lastFailureMessage(events) ?? `Review agent ${session.status}.`)
-    }
-
-    await delay(ANALYSIS_POLL_INTERVAL_MS)
-  }
-
-  context.sessionManager.cancel(sessionId)
-  throw new Error('Diff review analysis timed out after 3 minutes.')
-}
-
-function lastCompletionMessage(events: readonly AgentEvent[]): string | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event.type !== 'session-complete') continue
-    const text = extractTextFromPayload(event.payload).trim()
-    if (text) return trimPromptSection(text)
-  }
-
-  return null
-}
-
-function lastFailureMessage(events: readonly AgentEvent[]): string | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    if (event.type !== 'error' && event.type !== 'stderr' && event.type !== 'session-complete') {
-      continue
-    }
-
-    if (event.type === 'session-complete' && !completionFailed(event.payload)) {
-      continue
-    }
-
-    const text = extractTextFromPayload(event.payload).trim()
-    if (text) return text
-  }
-
-  return null
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function extractTextFromPayload(payload: unknown): string {

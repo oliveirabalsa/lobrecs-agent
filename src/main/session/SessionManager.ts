@@ -266,6 +266,8 @@ export class SessionManager {
 
   async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
     const shouldIsolate = params.isolate ?? this.worktreeIsolation
+    const planModeSandbox = params.planMode === true
+    const shouldCreateWorktree = shouldIsolate || planModeSandbox
 
     const threadId = this.resolveOrCreateThread(params)
     const sessionId = randomUUID()
@@ -301,12 +303,31 @@ export class SessionManager {
         throw new Error(`Adapter not found: ${params.agentId}`)
       }
 
-      const worktreePath = shouldIsolate
-        ? await worktreeManager.create(session.id, params.repoPath)
-        : null
-      const localBaseline = worktreePath
-        ? null
-        : await captureLocalChangeBaseline(params.repoPath)
+      let worktreePath: string | null = null
+      let localBaseline: LocalChangeBaseline | null = null
+
+      // Plan mode prefers a disposable checkout so planning edits cannot leak
+      // back into the user's repo. If the path is not a git checkout, fall
+      // back to a local baseline so the plan can still be shown and approved
+      // in the test and non-git cases.
+      if (shouldCreateWorktree) {
+        try {
+          worktreePath = await worktreeManager.create(session.id, params.repoPath)
+        } catch (error) {
+          if (!planModeSandbox || shouldIsolate) throw error
+
+          this.emitSyntheticEvent(session.id, {
+            kind: 'step',
+            title: 'Plan mode could not create a disposable worktree',
+            detail: errorMessage(error),
+            status: 'done',
+          })
+        }
+      }
+
+      if (!worktreePath) {
+        localBaseline = await captureLocalChangeBaseline(params.repoPath)
+      }
 
       if (worktreePath) {
         this.emitSyntheticEvent(session.id, {

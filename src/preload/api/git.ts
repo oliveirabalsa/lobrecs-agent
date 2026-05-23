@@ -33,6 +33,11 @@ export interface GitApi {
   generatePrDraft(input: GeneratePullRequestDraftInput): Promise<GeneratePullRequestDraftResult>
   createPrFromDraft(input: CreatePullRequestFromDraftInput): Promise<CreatePullRequestResult>
   createPr(input: CreatePullRequestInput): Promise<CreatePullRequestResult>
+  createBranch(projectId: string, branchName: string): Promise<GitCommandResult>
+  checkoutBranch(projectId: string, branchName: string): Promise<GitCommandResult>
+  listBranches(projectId: string): Promise<string[]>
+  pull(projectId: string): Promise<GitCommandResult>
+  fetch(projectId: string): Promise<GitCommandResult>
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
@@ -53,5 +58,10 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     generatePrDraft: (input) => ipcRenderer.invoke('git:generate-pr-draft', input),
     createPrFromDraft: (input) => ipcRenderer.invoke('git:create-pr-from-draft', input),
     createPr: (input) => ipcRenderer.invoke('git:create-pr', input),
+    createBranch: (projectId, branchName) => ipcRenderer.invoke('git:create-branch', projectId, branchName),
+    checkoutBranch: (projectId, branchName) => ipcRenderer.invoke('git:checkout-branch', projectId, branchName),
+    listBranches: (projectId) => ipcRenderer.invoke('git:list-branches', projectId),
+    pull: (projectId) => ipcRenderer.invoke('git:pull', projectId),
+    fetch: (projectId) => ipcRenderer.invoke('git:fetch', projectId),
   }
 }
