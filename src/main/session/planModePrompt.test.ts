@@ -25,6 +25,14 @@ describe('buildPlanModeContext', () => {
     expect(context).toMatch(/planning the planning process/i)
     expect(context).toMatch(/this response is the plan/i)
   })
+
+  it('routes clarifying questions through the AskUserQuestion tool', () => {
+    const context = buildPlanModeContext(null)
+
+    // Agent must be told to use the structured question tool, not inline markdown.
+    expect(context).toContain('AskUserQuestion')
+    expect(context).toMatch(/do not inline questions/i)
+  })
 })
 
 describe('buildPlanExecutionPrompt', () => {
@@ -35,5 +43,17 @@ describe('buildPlanExecutionPrompt', () => {
     expect(prompt).toMatch(/approved/i)
     // The execution phase must NOT carry the planning phase's no-changes rule.
     expect(prompt).not.toMatch(/do not edit files/i)
+  })
+
+  it('includes edited plan text and suggestions when provided at approval time', () => {
+    const prompt = buildPlanExecutionPrompt({
+      editedPlanText: '1. Update composer state\n2. Add regression tests',
+      suggestionText: 'Prefer codex for final implementation and keep context intact.',
+    })
+
+    expect(prompt).toContain('Use this edited approved plan as the source of truth:')
+    expect(prompt).toContain('1. Update composer state')
+    expect(prompt).toContain('Additional user suggestions to apply while executing:')
+    expect(prompt).toContain('Prefer codex for final implementation')
   })
 })

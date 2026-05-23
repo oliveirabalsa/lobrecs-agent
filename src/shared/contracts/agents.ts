@@ -81,6 +81,51 @@ export interface AgentPlanReviewDecisionPayload {
    */
   sessionId: string
   decision: 'approve' | 'reject'
+  /**
+   * Optional agent override for the execution session. When this differs from
+   * the planning agent, `modelOverride` must name a model for this agent.
+   */
+  agentId?: SupportedAgentId
+  /**
+   * Optional user-edited plan text captured at approval time. When present,
+   * execution follows this edited version instead of relying only on the
+   * original assistant plan from thread history.
+   */
+  editedPlanText?: string
+  /**
+   * Optional user notes/suggestions to append to execution instructions.
+   */
+  suggestionText?: string
+  /**
+   * When set, overrides the model used by the execution session. Defaults to
+   * the model that ran the planning session when omitted.
+   */
+  modelOverride?: string
+}
+
+/**
+ * Renderer→main payload for resolving a `swarm-step-approval` activity. The
+ * orchestrator pauses between sequential swarm steps when the previous agent
+ * was configured with `requireApprovalAfter`. The user chooses to continue
+ * (optionally editing the next agent's promptSuffix or model) or cancel.
+ */
+export interface SwarmStepApprovalDecisionPayload {
+  /** Identifier echoed from the matching `swarm-step-approval` activity. */
+  approvalId: string
+  /** The session that just completed and emitted the approval prompt. */
+  sessionId: string
+  decision: 'continue' | 'cancel'
+  /**
+   * Optional override for the next agent's promptSuffix when continuing. When
+   * present and non-empty, the orchestrator replaces the planned suffix for
+   * the next step before dispatching it.
+   */
+  editedPromptSuffix?: string
+  /**
+   * Optional override for the next agent's model. Defaults to the next
+   * agent's configured model when omitted.
+   */
+  modelOverride?: string
 }
 
 export interface ImageAttachment {

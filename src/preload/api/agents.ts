@@ -8,6 +8,7 @@ import type {
   QueuedMessage,
   QueueStatusEvent,
   SteerParams,
+  SwarmStepApprovalDecisionPayload,
 } from '../../shared/contracts/agents'
 import type { IpcInvoker, IpcSubscriber } from './ipc'
 
@@ -27,6 +28,14 @@ export interface AgentApi {
   planReviewDecision(
     payload: AgentPlanReviewDecisionPayload,
   ): Promise<AgentDispatchResult | null>
+  /**
+   * Resolves a pending `swarm-step-approval` round-trip. `continue` releases
+   * the next sequential agent (optionally with edited promptSuffix/model);
+   * `cancel` stops the swarm at this step.
+   */
+  stepApprovalDecision(
+    payload: SwarmStepApprovalDecisionPayload,
+  ): Promise<boolean>
   /** Adds a message to a thread's pending queue. Returns the queued entry. */
   enqueue(params: EnqueueParams): Promise<QueuedMessage>
   /** Returns the current queue snapshot for a thread. */
@@ -54,6 +63,8 @@ export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentAp
     planDecision: (payload) => ipcRenderer.invoke('agent:plan-decision', payload),
     planReviewDecision: (payload) =>
       ipcRenderer.invoke('agent:plan-review-decision', payload),
+    stepApprovalDecision: (payload) =>
+      ipcRenderer.invoke('swarm:step-approval-decision', payload),
     enqueue: (params) => ipcRenderer.invoke('agent:enqueue', params),
     getQueue: (threadId) => ipcRenderer.invoke('agent:queue-status', threadId),
     dequeueItem: (threadId, messageId) =>

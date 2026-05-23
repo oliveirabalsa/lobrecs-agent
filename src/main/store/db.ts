@@ -240,6 +240,12 @@ const migrations: Migration[] = [
         ON project_context_chunks(project_id, updated_at DESC);
     `,
   },
+  {
+    version: 9,
+    up: `
+      ALTER TABLE sessions ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
@@ -279,12 +285,18 @@ export function runMigrations(db: Database.Database): void {
 
   // SQLite ADD COLUMN is not idempotent; wrap in try/catch so re-running on an
   // already-migrated database is safe regardless of schema_version state.
-  ensureSessionsThreadIdColumn(db)
+  ensureSessionsCompatibilityColumns(db)
 }
 
-function ensureSessionsThreadIdColumn(db: Database.Database): void {
+function ensureSessionsCompatibilityColumns(db: Database.Database): void {
   try {
     db.exec('ALTER TABLE sessions ADD COLUMN thread_id TEXT')
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0')
   } catch {
     // Column already exists.
   }

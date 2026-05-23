@@ -26,6 +26,7 @@ import { sessionManager } from '../session'
 import { projectsStore, sessionsStore, threadsStore } from '../store'
 import { extractSessionOutput } from '../store/sessionOutput'
 import type { PlanPromptOutcome } from './planPrompt'
+import { askStepApproval } from './stepApprovalPrompt'
 import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
 
 const DEFAULT_REVIEW_LOOP_MAX_ITERATIONS = 3
@@ -736,7 +737,34 @@ export class SwarmOrchestrator {
       if (completion.status !== 'done') return
       if (!this.swarms.has(input.swarmId)) return
 
-      if (isReviewerRole(agentConfig.role)) {
+      let effectiveAgentConfig = agentConfig
+      if (previousAgentConfig.requireApprovalAfter) {
+        const approval = await askStepApproval({
+          sessionId: previousSession.sessionId,
+          completedRole: previousAgentConfig.role,
+          nextRole: agentConfig.role,
+          nextAgentId: agentConfig.agentId,
+          nextModel: agentConfig.modelOverride ?? previousSession.model ?? '',
+          nextPromptSuffix: agentConfig.promptSuffix,
+        })
+
+        if (approval.outcome !== 'continue') return
+        if (!this.swarms.has(input.swarmId)) return
+
+        if (approval.editedPromptSuffix || approval.modelOverride) {
+          effectiveAgentConfig = {
+            ...agentConfig,
+            ...(approval.editedPromptSuffix
+              ? { promptSuffix: approval.editedPromptSuffix }
+              : {}),
+            ...(approval.modelOverride
+              ? { modelOverride: approval.modelOverride }
+              : {}),
+          }
+        }
+      }
+
+      if (isReviewerRole(effectiveAgentConfig.role)) {
         await this.runReviewCycle({
           swarmId: input.swarmId,
           threadId: input.threadId,
@@ -744,7 +772,7 @@ export class SwarmOrchestrator {
           repoPath: input.repoPath,
           basePrompt: input.basePrompt,
           implementerConfig: previousAgentConfig,
-          reviewerConfig: agentConfig,
+          reviewerConfig: effectiveAgentConfig,
           maxIterations: input.maxIterations,
           implementerOutput: previousOutput,
         })
@@ -752,7 +780,7 @@ export class SwarmOrchestrator {
       }
 
       const nextSession = await this.spawnAgent({
-        agentConfig,
+        agentConfig: effectiveAgentConfig,
         basePrompt: input.basePrompt,
         projectId: input.projectId,
         repoPath: input.repoPath,
@@ -763,7 +791,7 @@ export class SwarmOrchestrator {
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
       previousSession = nextSession
-      previousAgentConfig = agentConfig
+      previousAgentConfig = effectiveAgentConfig
       previousOutput = nextSession.output ?? previousOutput
     }
 

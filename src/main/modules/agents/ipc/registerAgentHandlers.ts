@@ -5,6 +5,7 @@ import { modelTierFromModel } from '../../../router'
 import { capacityFallbackModelsForAgent } from '../../../router/modelCapacityFallbacks'
 import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
+import { submitStepApprovalDecision } from '../../../swarm/stepApprovalPrompt'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { runtimeSettingsWithApprovalMode } from '../domain/approvalMode'
@@ -18,6 +19,7 @@ import type {
   ImageAttachment,
   QueuedMessage,
   SteerParams,
+  SwarmStepApprovalDecisionPayload,
 } from '../../../../shared/types'
 
 async function normalizeImageAttachments(
@@ -140,7 +142,42 @@ export function registerAgentHandlers(context: MainIpcContext): void {
   ipcMain.handle(
     'agent:plan-review-decision',
     async (_event, payload: AgentPlanReviewDecisionPayload) => {
-      return context.sessionManager.resolvePlanReview(payload)
+      const review = context.sessionManager.getPendingPlanReview(payload.reviewId)
+      if (payload.decision !== 'approve' || !review) {
+        return context.sessionManager.resolvePlanReview(payload)
+      }
+
+      const executionAgentId = isSupportedAgentId(payload.agentId)
+        ? payload.agentId
+        : isSupportedAgentId(review.agentId)
+          ? review.agentId
+          : null
+      if (!executionAgentId) {
+        return context.sessionManager.resolvePlanReview(payload)
+      }
+
+      const settings = context.settingsService.getEffective(review.projectId).settings
+      const executionModel = payload.modelOverride ?? review.model
+      const runtimeSettings = runtimeSettingsWithApprovalMode(
+        settings.agents.runtimes[executionAgentId],
+        undefined,
+        review.runtimePermissionMode ?? settings.execution.defaultApprovalMode,
+      )
+
+      return context.sessionManager.resolvePlanReview(payload, {
+        runtimeSettings,
+        modelFallbacks: capacityFallbackModelsForAgent({
+          settings,
+          agentId: executionAgentId,
+          currentModel: executionModel,
+        }),
+      })
+    },
+  )
+  ipcMain.handle(
+    'swarm:step-approval-decision',
+    async (_event, payload: SwarmStepApprovalDecisionPayload) => {
+      return submitStepApprovalDecision(payload)
     },
   )
 

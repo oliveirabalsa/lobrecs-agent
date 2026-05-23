@@ -17,6 +17,7 @@ export interface Session {
   model: string
   prompt: string
   imageAttachments?: ImageAttachment[]
+  planMode?: boolean
   status: SessionStatus
   tokensIn: number
   tokensOut: number
@@ -118,12 +119,41 @@ export type AgentActivity =
       kind: 'plan-review'
       /** Identifier echoed back in `AgentPlanReviewDecisionPayload`. */
       reviewId: string
+      /** Agent that produced the plan — used by the review card to scope the model picker. */
+      agentId: string
+      /** Model that produced the plan — used as the default in the review card's model picker. */
+      model: string
     }
   | {
       kind: 'user-question'
       promptId: string
       title: string
       questions: UserQuestionPromptQuestion[]
+    }
+  | {
+      /**
+       * Emitted by the swarm orchestrator after a sequential step finishes
+       * when the step had `requireApprovalAfter: true`. The renderer renders
+       * an inline Continue/Cancel card; the orchestrator does not dispatch
+       * the next agent until the user responds via
+       * `swarm:step-approval-decision`.
+       */
+      kind: 'swarm-step-approval'
+      /** Identifier echoed back in `SwarmStepApprovalDecisionPayload`. */
+      approvalId: string
+      /** The just-completed agent's role (e.g. "planner"). */
+      completedRole: string
+      /** The next agent's role (e.g. "implementer"). */
+      nextRole: string
+      /** Next agent id — used by the model picker. */
+      nextAgentId: string
+      /** Next agent model — used as the model picker default. */
+      nextModel: string
+      /**
+       * The next agent's planned promptSuffix. Surfaced in the editor so the
+       * user can refine instructions before continuing.
+       */
+      nextPromptSuffix?: string
     }
 
 export interface AgentEvent {

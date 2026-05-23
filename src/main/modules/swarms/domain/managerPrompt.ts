@@ -40,6 +40,9 @@ export function buildManagerPrompt({
     '- Implementers may run in parallel with other implementers, but never in the same phase as reviewers or testers.',
     '- Do not add a planner step before implementation unless the implementation depends on that planner output.',
     '- promptSuffix must be specific enough for that agent to act without guessing.',
+    '- requireApprovalAfter is optional and only meaningful in sequential plans.',
+    '- Set requireApprovalAfter: true on a planner step ONLY when the next step is an implementer — this lets the user review the plan before implementation begins.',
+    '- Do not set requireApprovalAfter on any other transition.',
     '',
     'JSON schema:',
     '{',
@@ -49,7 +52,8 @@ export function buildManagerPrompt({
     '      "role": "planner | implementer | reviewer | tester | security analyzer | ...",',
     '      "agentId": "claude-code | codex | opencode | antigravity",',
     '      "modelOverride": "optional model id",',
-    '      "promptSuffix": "role-specific instructions"',
+    '      "promptSuffix": "role-specific instructions",',
+    '      "requireApprovalAfter": false',
     '    }',
     '  ]',
     '}',
@@ -92,12 +96,43 @@ function normalizeManagerPlan(value: unknown, input: ManagerPromptInput): Manage
     throw new Error(`Manager plan exceeds the swarm agent limit of ${input.maxAgents}`)
   }
 
+  const agents = record.agents.map((agent, index) =>
+    normalizeManagerPlanAgent(agent, index, input.supportedAgentIds),
+  )
+
   return {
     strategy,
-    agents: record.agents.map((agent, index) =>
-      normalizeManagerPlanAgent(agent, index, input.supportedAgentIds),
+    agents: agents.map((agent, index) =>
+      gateApprovalFlag(agent, agents[index + 1], strategy),
     ),
   }
+}
+
+function gateApprovalFlag(
+  current: ManagerPlanAgent,
+  next: ManagerPlanAgent | undefined,
+  strategy: ManagerPlanStrategy,
+): ManagerPlanAgent {
+  if (!current.requireApprovalAfter) return current
+
+  const allowed =
+    strategy === 'sequential' &&
+    isPlannerRole(current.role) &&
+    next !== undefined &&
+    isImplementerRole(next.role)
+
+  if (allowed) return current
+
+  const { requireApprovalAfter: _, ...rest } = current
+  return rest
+}
+
+function isPlannerRole(role: string): boolean {
+  return /\bplan(ner|ning)?\b/i.test(role)
+}
+
+function isImplementerRole(role: string): boolean {
+  return /(implement|build|coder?|develop|writ|refactor)/i.test(role)
 }
 
 function normalizeManagerPlanAgent(
@@ -119,12 +154,14 @@ function normalizeManagerPlanAgent(
 
   const modelOverride = optionalString(record.modelOverride)
   const promptSuffix = optionalString(record.promptSuffix)
+  const requireApprovalAfter = record.requireApprovalAfter === true
 
   return {
     role,
     agentId: agentId as SupportedAgentId,
     ...(modelOverride ? { modelOverride } : {}),
     ...(promptSuffix ? { promptSuffix } : {}),
+    ...(requireApprovalAfter ? { requireApprovalAfter: true } : {}),
   }
 }
 

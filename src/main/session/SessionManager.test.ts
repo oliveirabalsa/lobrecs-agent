@@ -1116,6 +1116,211 @@ describe('SessionManager', () => {
     expect(adapter.dispatches[1]?.prompt).toBe(buildPlanExecutionPrompt())
   })
 
+  it('dispatches execution with edited plan instructions when approval includes edits', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+    await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+      editedPlanText: '1. Add UI control\n2. Add tests',
+      suggestionText: 'Keep execution on the same thread context.',
+    })
+
+    expect(adapter.dispatches).toHaveLength(2)
+    expect(adapter.dispatches[1]?.prompt).toBe(
+      buildPlanExecutionPrompt({
+        editedPlanText: '1. Add UI control\n2. Add tests',
+        suggestionText: 'Keep execution on the same thread context.',
+      }),
+    )
+  })
+
+  it('dispatches execution with the implementation agent and model selected at approval time', async () => {
+    const project = createProject()
+    const planningAdapter = new FakeAdapter('claude-code')
+    const implementationAdapter = new FakeAdapter('codex')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [planningAdapter, implementationAdapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    planningAdapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+    const execution = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+      agentId: 'codex',
+      modelOverride: 'gpt-5.3-codex',
+    })
+
+    expect(execution).not.toBeNull()
+    expect(execution?.threadId).toBe(planning.threadId)
+    expect(planningAdapter.dispatches).toHaveLength(1)
+    expect(implementationAdapter.dispatches).toHaveLength(1)
+    expect(implementationAdapter.dispatches[0]).toMatchObject({
+      prompt: buildPlanExecutionPrompt(),
+      model: 'gpt-5.3-codex',
+    })
+  })
+
+  it('applies execution overrides when approving a plan with a different implementation model', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+      runtimeSettings: {
+        enabled: true,
+        command: 'claude',
+        permissionMode: 'ask-for-approval',
+        extraArgs: [],
+      },
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+    await manager.resolvePlanReview(
+      {
+        reviewId,
+        sessionId: planning.sessionId,
+        decision: 'approve',
+        modelOverride: 'claude-opus-4-7',
+      },
+      {
+        runtimeSettings: {
+          enabled: true,
+          command: 'claude',
+          permissionMode: 'dangerous',
+          extraArgs: ['--verbose'],
+        },
+        modelFallbacks: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+      },
+    )
+
+    expect(adapter.dispatches[1]).toMatchObject({
+      model: 'claude-opus-4-7',
+      modelFallbacks: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+      runtimeSettings: {
+        command: 'claude',
+        permissionMode: 'dangerous',
+        extraArgs: ['--verbose'],
+      },
+    })
+  })
+
+  it('keeps a plan review pending when approval dispatch fails so the user can retry', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const planning = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: planning.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    const reviewId = await waitForPlanReviewId(broadcasts)
+    await expect(
+      manager.resolvePlanReview({
+        reviewId,
+        sessionId: planning.sessionId,
+        decision: 'approve',
+        agentId: 'codex',
+        modelOverride: 'gpt-5.3-codex',
+      }),
+    ).rejects.toThrow('Adapter not found: codex')
+
+    expect(manager.getPendingPlanReview(reviewId)).toMatchObject({
+      reviewId,
+      planningSessionId: planning.sessionId,
+    })
+
+    const retry = await manager.resolvePlanReview({
+      reviewId,
+      sessionId: planning.sessionId,
+      decision: 'approve',
+    })
+
+    expect(retry).not.toBeNull()
+    expect(adapter.dispatches).toHaveLength(2)
+    expect(manager.getPendingPlanReview(reviewId)).toBeNull()
+  })
+
   it('does not dispatch an execution session when the plan is rejected', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
@@ -1470,13 +1675,17 @@ describe('SessionManager', () => {
 })
 
 class FakeAdapter implements AgentAdapter {
-  id = 'claude-code' as const
+  id: AgentAdapter['id']
   events = new EventEmitter()
   approve = vi.fn()
   reject = vi.fn()
   cancel = vi.fn()
   dispatchedParams: Parameters<AgentAdapter['dispatch']>[0] | null = null
   dispatches: Array<Parameters<AgentAdapter['dispatch']>[0]> = []
+
+  constructor(id: AgentAdapter['id'] = 'claude-code') {
+    this.id = id
+  }
 
   async dispatch(params: Parameters<AgentAdapter['dispatch']>[0]): Promise<AgentSession> {
     this.dispatchedParams = params

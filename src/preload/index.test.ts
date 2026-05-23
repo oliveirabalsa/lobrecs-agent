@@ -190,6 +190,26 @@ describe('preload api shape', () => {
         expected: ['agent:approve', 'session-1'],
       },
       {
+        call: (agentforge) =>
+          agentforge.agent.planReviewDecision({
+            reviewId: 'review-1',
+            sessionId: 'session-1',
+            decision: 'approve',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.3-codex',
+          }),
+        expected: [
+          'agent:plan-review-decision',
+          {
+            reviewId: 'review-1',
+            sessionId: 'session-1',
+            decision: 'approve',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.3-codex',
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.agent.reject('session-1'),
         expected: ['agent:reject', 'session-1'],
       },

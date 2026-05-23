@@ -6,6 +6,7 @@ import { processPool } from '../process/ProcessPool'
 import { sessionsStore, threadsStore } from '../store'
 import { getAppIconPath } from './appIcon'
 import { createMainWindow } from './createWindow'
+import { setApplicationMenu } from './menu'
 import { registerAppShortcuts, unregisterAppShortcuts } from './shortcuts'
 
 let mainWindow: BrowserWindow | null = null
@@ -13,6 +14,7 @@ let mainWindow: BrowserWindow | null = null
 export function bootstrapMainProcess(): void {
   app.whenReady().then(async () => {
     setDockIcon()
+    setApplicationMenu()
     registerIpcHandlers()
     cancelInterruptedSessions()
     backfillThreadsFromSessions()

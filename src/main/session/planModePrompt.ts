@@ -29,7 +29,15 @@ const PLAN_MODE_CONTEXT = [
   'Your response must be the implementation plan itself. Start directly with',
   'the concrete implementation steps for the requested change, then list the',
   'files you expect to create or modify, verification you will run, and any',
-  'real risks or open questions worth flagging.',
+  'real risks worth flagging.',
+  '',
+  'If you have ANY clarifying question whose answer would change the plan',
+  '(naming, scope, UX trade-offs, ambiguous requirements), you MUST call the',
+  '`AskUserQuestion` tool to ask the user before producing the plan, then',
+  'incorporate the answers into the plan. Do NOT inline questions as numbered',
+  'bullets or an "Open questions" section in the plan markdown — the user',
+  'cannot answer those inline. Only the `AskUserQuestion` tool produces an',
+  'answerable prompt. If you have no question, skip the tool and write the plan.',
   '',
   'Do not create a plan for drafting another plan, asking for approval,',
   'collecting approval, or planning the planning process. Do not answer with',
@@ -56,14 +64,43 @@ export function buildPlanModeContext(
 
 /**
  * Prompt for the execution session dispatched once the user approves a plan.
- * The plan itself arrives via replayed thread history, so this only needs to
- * release the agent to act on it.
+ * The base plan arrives via replayed thread history; optional edited plan text
+ * and user suggestions can be appended at approval time.
  */
-export function buildPlanExecutionPrompt(): string {
-  return [
+export function buildPlanExecutionPrompt(options?: {
+  editedPlanText?: string
+  suggestionText?: string
+}): string {
+  const editedPlanText = normalizePlanModeText(options?.editedPlanText)
+  const suggestionText = normalizePlanModeText(options?.suggestionText)
+
+  const lines = [
     `${PLAN_MODE_HEADER} Your plan has been approved.`,
     'Execute it now in full: make the file changes and run the steps you',
     'described in the plan above. Follow the plan as written; if you must',
     'deviate, briefly explain why.',
-  ].join('\n')
+  ]
+
+  if (editedPlanText) {
+    lines.push(
+      '',
+      'Use this edited approved plan as the source of truth:',
+      editedPlanText,
+    )
+  }
+
+  if (suggestionText) {
+    lines.push(
+      '',
+      'Additional user suggestions to apply while executing:',
+      suggestionText,
+    )
+  }
+
+  return lines.join('\n')
+}
+
+function normalizePlanModeText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
 }

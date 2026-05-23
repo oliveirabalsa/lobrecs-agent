@@ -152,6 +152,18 @@ type PlanReviewRecord = {
   baseContext?: string | null
 }
 
+export type PlanReviewSnapshot = Pick<
+  PlanReviewRecord,
+  'reviewId' | 'planningSessionId' | 'projectId' | 'agentId' | 'model'
+> & {
+  runtimePermissionMode?: AgentRuntimeSettings['permissionMode']
+}
+
+export type PlanReviewExecutionOptions = {
+  runtimeSettings?: AgentRuntimeSettings
+  modelFallbacks?: string[]
+}
+
 type PendingQueuedMessage = QueuedMessage & {
   runtimeSettings?: AgentRuntimeSettings
 }
@@ -240,6 +252,7 @@ export class SessionManager {
         model: params.model,
         prompt: params.prompt,
         imageAttachments: params.imageAttachments,
+        planMode: params.planMode ?? false,
         status: 'running',
         threadId,
       })
@@ -484,6 +497,7 @@ export class SessionManager {
    */
   async resolvePlanReview(
     payload: AgentPlanReviewDecisionPayload,
+    executionOptions: PlanReviewExecutionOptions = {},
   ): Promise<DispatchSessionResult | null> {
     const record = this.pendingPlanReviews.get(payload.reviewId)
     if (!record) return null
@@ -494,9 +508,8 @@ export class SessionManager {
     // decision can still resolve it.
     if (payload.sessionId !== record.planningSessionId) return null
 
-    this.pendingPlanReviews.delete(payload.reviewId)
-
     if (payload.decision === 'reject') {
+      this.pendingPlanReviews.delete(payload.reviewId)
       // The plan is discarded, but the planning turn is over. Release the
       // thread by draining its queue so follow-ups enqueued while the plan
       // was pending are not stranded. `dispatchNextQueued` only drains an
@@ -510,21 +523,45 @@ export class SessionManager {
       return null
     }
 
-    return this.dispatch({
+    if (payload.agentId && payload.agentId !== record.agentId && !payload.modelOverride) {
+      throw new Error('Plan approval selected a different agent without an implementation model')
+    }
+
+    const execution = await this.dispatch({
       projectId: record.projectId,
-      prompt: buildPlanExecutionPrompt(),
+      prompt: buildPlanExecutionPrompt({
+        editedPlanText: payload.editedPlanText,
+        suggestionText: payload.suggestionText,
+      }),
       // The agent prompt is generic, so retrieve repo context with the
       // original task instead; base context is replayed for parity with the
       // planning session.
       contextQuery: record.taskPrompt,
       context: record.baseContext,
-      agentId: record.agentId,
-      model: record.model,
+      agentId: payload.agentId ?? record.agentId,
+      model: payload.modelOverride ?? record.model,
+      modelFallbacks: executionOptions.modelFallbacks,
       repoPath: record.repoPath,
       threadId: record.threadId,
       isolate: record.isolate,
-      runtimeSettings: record.runtimeSettings,
+      runtimeSettings: executionOptions.runtimeSettings ?? record.runtimeSettings,
     })
+    this.pendingPlanReviews.delete(payload.reviewId)
+    return execution
+  }
+
+  getPendingPlanReview(reviewId: string): PlanReviewSnapshot | null {
+    const record = this.pendingPlanReviews.get(reviewId)
+    if (!record) return null
+
+    return {
+      reviewId: record.reviewId,
+      planningSessionId: record.planningSessionId,
+      projectId: record.projectId,
+      agentId: record.agentId,
+      model: record.model,
+      runtimePermissionMode: record.runtimeSettings?.permissionMode,
+    }
   }
 
   /**
@@ -585,7 +622,7 @@ export class SessionManager {
     this.recordEvent({
       type: 'activity',
       sessionId,
-      payload: { kind: 'plan-review', reviewId },
+      payload: { kind: 'plan-review', reviewId, agentId: session.agentId, model: session.model },
       timestamp: Date.now(),
     })
   }

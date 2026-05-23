@@ -46,6 +46,21 @@ describe('sessionsStore', () => {
     ])
   })
 
+  it('persists whether a session is a plan-mode planning turn', () => {
+    const project = createProject()
+
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      prompt: 'plan first',
+      planMode: true,
+    })
+
+    expect(session.planMode).toBe(true)
+    expect(sessionsStore.get(session.id)?.planMode).toBe(true)
+  })
+
   it('updates terminal status timestamps and clears them for non-terminal states', () => {
     vi.useFakeTimers()
     const project = createProject()

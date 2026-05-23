@@ -28,6 +28,10 @@ export function createMainWindow(): BrowserWindow {
     },
   })
 
+  mainWindow.webContents.on('context-menu', (event) => {
+    event.preventDefault()
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // Renderer content includes untrusted agent and terminal output, so a
     // link could carry any scheme. Only hand web/mail URLs to the OS — drop

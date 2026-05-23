@@ -18,6 +18,7 @@ type SessionRow = {
   model: string
   prompt: string
   image_attachments: string | null
+  plan_mode: number
   status: SessionStatus
   tokens_in: number
   tokens_out: number
@@ -42,6 +43,7 @@ export type CreateSessionInput = {
   model: string
   prompt: string
   imageAttachments?: ImageAttachment[] | null
+  planMode?: boolean
   status?: SessionStatus
   tokensIn?: number
   tokensOut?: number
@@ -65,6 +67,7 @@ function rowToSession(row: SessionRow): Session {
     model: row.model,
     prompt: row.prompt,
     imageAttachments: parseImageAttachments(row.image_attachments),
+    planMode: row.plan_mode === 1,
     status: row.status,
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
@@ -107,9 +110,9 @@ export const sessionsStore = {
         `
           INSERT INTO sessions (
             id, project_id, agent_id, model, prompt, status,
-            image_attachments, tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
+            image_attachments, plan_mode, tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -120,6 +123,7 @@ export const sessionsStore = {
         data.prompt,
         status,
         serializeImageAttachments(data.imageAttachments),
+        data.planMode ? 1 : 0,
         data.tokensIn ?? 0,
         data.tokensOut ?? 0,
         data.costUsd ?? 0,

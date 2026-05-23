@@ -10,6 +10,14 @@ export interface SwarmAgentConfig {
   agentId: SupportedAgentId
   modelOverride?: string
   promptSuffix?: string
+  /**
+   * When true and the swarm strategy is `sequential`, the orchestrator pauses
+   * after this agent finishes and waits for the user to approve continuing
+   * (optionally editing the next agent's promptSuffix or model). The flag is
+   * ignored for parallel / fan-out strategies — there is no meaningful "next
+   * step" to gate.
+   */
+  requireApprovalAfter?: boolean
 }
 
 export interface SwarmConfig {
