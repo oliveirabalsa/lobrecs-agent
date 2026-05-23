@@ -8,7 +8,7 @@ import type {
   SwarmConfig,
   SwarmResult,
 } from '../../../shared/types'
-import { Spinner } from '../ui'
+import { Button } from '../ui'
 import { AgentRow } from './AgentRow'
 import {
   buildDefaultSwarmAgents,
@@ -333,25 +333,48 @@ export function SwarmBuilder({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 backdrop-blur-sm">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="swarm-builder-title"
-        className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-4xl flex-col rounded-card border border-hairline bg-card shadow-2xl"
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-5 py-4">
-          <h2 id="swarm-builder-title" className="text-base font-semibold text-zinc-100">
-            Swarm Builder
-          </h2>
-          <fieldset className="flex items-center gap-1">
+        <header className="flex shrink-0 items-center gap-3 border-b border-hairline px-4 py-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-card border border-accent-primary/30 bg-accent-primary/15 text-accent-primary">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="5" r="2" />
+              <circle cx="19" cy="12" r="2" />
+              <circle cx="12" cy="19" r="2" />
+              <path d="M7 12h4m1-5v4m1 3h4m-5 1v4" />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <h2 id="swarm-builder-title" className="text-[13px] font-semibold text-primary">
+              Swarm Builder
+            </h2>
+            <p className="text-[11px] text-muted">Configure and launch a multi-agent task</p>
+          </div>
+          <fieldset className="ml-auto flex items-center gap-0.5 rounded-pill border border-hairline bg-card-raised p-0.5">
+            <legend className="sr-only">Strategy</legend>
             {STRATEGY_OPTIONS.map((nextStrategy) => (
               <label
                 key={nextStrategy}
-                className={`cursor-pointer rounded px-3 py-1.5 text-xs ${
+                className={`cursor-pointer rounded-pill px-3 py-1 text-[11px] font-medium capitalize transition-colors ${
                   strategy === nextStrategy
-                    ? 'bg-zinc-700 text-zinc-100'
-                    : 'text-zinc-400 hover:bg-zinc-900'
+                    ? 'bg-accent-primary/90 text-white shadow-sm shadow-accent-primary/20'
+                    : 'text-secondary hover:bg-white/5 hover:text-primary'
                 }`}
               >
                 <input
@@ -368,81 +391,98 @@ export function SwarmBuilder({
           </fieldset>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
           <div className="grid gap-4">
-            <div className="rounded-md border border-zinc-800 bg-zinc-900 focus-within:border-zinc-600">
-              {attachments.length > 0 || attaching ? (
-                <div className="flex flex-wrap items-center gap-2 px-3 pt-2">
-                  {attachments.map((image) => (
-                    <div
-                      key={image.id}
-                      className="group relative h-12 w-12 shrink-0 overflow-hidden rounded border border-zinc-700"
-                      title={image.attachment.name}
-                    >
-                      <img
-                        src={image.previewUrl}
-                        alt={image.attachment.name ?? 'Attached image'}
-                        className="h-full w-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAttachments((current) =>
-                            current.filter((a) => a.id !== image.id),
-                          )
-                        }
-                        className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white group-hover:flex"
-                        aria-label={`Remove ${image.attachment.name ?? 'image'}`}
+            <div className="grid gap-1.5">
+              <label
+                htmlFor="swarm-prompt"
+                className="text-[11px] font-medium text-secondary"
+              >
+                Task
+              </label>
+              <div className="overflow-hidden rounded-card border border-hairline bg-card-raised transition focus-within:border-accent-primary/40 focus-within:ring-2 focus-within:ring-accent-primary/20">
+                {attachments.length > 0 || attaching ? (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-hairline px-3 pb-2 pt-2.5">
+                    {attachments.map((image) => (
+                      <div
+                        key={image.id}
+                        className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-card border border-hairline"
+                        title={image.attachment.name}
                       >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  {attaching ? (
-                    <span className="text-xs text-zinc-500">Attaching…</span>
-                  ) : null}
-                </div>
-              ) : null}
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onPaste={(event) => void handlePaste(event)}
-                className="h-28 w-full resize-none bg-transparent px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
-                placeholder="Describe the swarm task…"
-                aria-label="Swarm prompt"
-              />
+                        <img
+                          src={image.previewUrl}
+                          alt={image.attachment.name ?? 'Attached image'}
+                          className="h-full w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAttachments((current) =>
+                              current.filter((a) => a.id !== image.id),
+                            )
+                          }
+                          className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-black/80 text-[10px] text-white group-hover:flex"
+                          aria-label={`Remove ${image.attachment.name ?? 'image'}`}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {attaching ? (
+                      <span className="text-xs text-muted">Attaching…</span>
+                    ) : null}
+                  </div>
+                ) : null}
+                <textarea
+                  id="swarm-prompt"
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onPaste={(event) => void handlePaste(event)}
+                  className="h-28 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-primary outline-none placeholder:text-muted"
+                  placeholder="Describe what the swarm should do…"
+                  aria-label="Swarm prompt"
+                />
+              </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {templates.map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900"
-                  onClick={() => {
-                    autoManageAgentsRef.current = false
-                    setStrategy(template.strategy)
-                    setAgents(
-                      normalizeSwarmAgents(template.agents, availableAgents, {
-                        spreadDuplicates: true,
-                      }),
-                    )
-                  }}
-                >
-                  {template.label}
-                </button>
-              ))}
+            <div className="grid gap-1.5">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                Quick start
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-pill border border-hairline bg-card-raised px-2.5 py-1 text-[11px] text-secondary transition-colors hover:border-accent-primary/30 hover:bg-accent-primary/10 hover:text-primary"
+                    onClick={() => {
+                      autoManageAgentsRef.current = false
+                      setStrategy(template.strategy)
+                      setAgents(
+                        normalizeSwarmAgents(template.agents, availableAgents, {
+                          spreadDuplicates: true,
+                        }),
+                      )
+                    }}
+                  >
+                    <span aria-hidden="true" className="text-muted">
+                      {strategyGlyph(template.strategy)}
+                    </span>
+                    {template.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {!isManaged ? (
-              <section className="rounded-md border border-zinc-800">
-                <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-                  <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <section className="rounded-card border border-hairline">
+                <div className="flex items-center justify-between border-b border-hairline px-3 py-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-muted">
                     Agents
                   </div>
-                  <button
-                    type="button"
-                    className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={agents.length >= maxAgents || availableAgents.length === 0}
                     onClick={() =>
                       setAgents((current) => {
@@ -461,9 +501,9 @@ export function SwarmBuilder({
                     }
                   >
                     + Add agent
-                  </button>
+                  </Button>
                 </div>
-                <div className="px-3">
+                <div className="divide-y divide-hairline px-3">
                   {agents.map((agent, index) => (
                     <AgentRow
                       key={index}
@@ -508,40 +548,45 @@ export function SwarmBuilder({
           </div>
         </div>
 
-        <footer className="flex shrink-0 items-center justify-between border-t border-zinc-800 px-5 py-4">
-          <div className="text-xs text-zinc-500">
+        <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-hairline px-4 py-3">
+          <div className="min-w-0 text-[11px] text-muted">
             Estimate {costEstimate}
-            {error ? <span className="ml-3 text-red-400">{error}</span> : null}
+            {error ? (
+              <span className="ml-3 text-accent-del">{error}</span>
+            ) : null}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-900"
-              onClick={onClose}
-              disabled={launching}
-            >
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={launching}>
               Cancel
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-950 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => void handleLaunch()}
               disabled={!canLaunch}
+              loading={launching}
             >
               {launching ? (
-                <>
-                  <Spinner size={12} className="text-zinc-600" />
-                  Launching agents…
-                </>
+                'Launching…'
               ) : (
-                'Launch Swarm ⌘⇧↵'
+                <span className="flex items-center gap-1.5">
+                  Launch Swarm
+                  <kbd className="font-sans text-[10px] opacity-60">⌘⇧↵</kbd>
+                </span>
               )}
-            </button>
+            </Button>
           </div>
         </footer>
       </section>
     </div>
   )
+}
+
+function strategyGlyph(strategy: Strategy): string {
+  if (strategy === 'managed') return '◆'
+  if (strategy === 'parallel') return '⟨⟩'
+  if (strategy === 'sequential') return '→'
+  return '⤴'
 }
 
 function estimateCost(agents: SwarmAgentConfig[], strategy: Strategy): string {
