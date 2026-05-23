@@ -17,6 +17,7 @@ interface ModelPickerModalProps {
   onSelect: (selection: ModelSelection) => void
   onClose: () => void
   allowAuto?: boolean
+  showThinkingControl?: boolean
 }
 
 /**
@@ -32,6 +33,7 @@ export function ModelPopover({
   onSelect,
   onClose,
   allowAuto = true,
+  showThinkingControl = true,
 }: ModelPickerModalProps) {
   const tabs = useMemo(() => {
     const providerTabs = groups.map((g) => ({
@@ -90,7 +92,9 @@ export function ModelPopover({
           .find((g) => g.agentId === selection.agentId)
           ?.options.find((o) => o.modelId === selection.modelId) ?? null
       : null
-  const showThinking = autoActive ? true : selectedOption ? supportsThinking(selectedOption.tier) : false
+  const showThinking =
+    showThinkingControl &&
+    (autoActive ? true : selectedOption ? supportsThinking(selectedOption.tier) : false)
 
   return (
     <Modal
