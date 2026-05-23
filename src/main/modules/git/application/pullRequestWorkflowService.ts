@@ -1,6 +1,8 @@
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
+import { buildProcessEnvironment } from '../../../process/environment'
 import { runGit } from '../infrastructure/runGit'
+import { buildGhPrCreateArgs, resolveGhCommand } from '../infrastructure/githubCli'
 import type {
   GitRemoteInfo,
   CreatePullRequestInput,
@@ -11,6 +13,8 @@ import type {
   GitProviderType,
 } from '../../../../shared/contracts/git'
 import { getProviderType, isGitHubRemote, isAzureRemote } from '../domain/pullRequest'
+import { buildPrDraftPrompt, createDraftTitle } from '../domain/prDraft'
+import { loadPrTemplate } from '../domain/prTemplate'
 
 export class PullRequestWorkflowService {
   constructor(private readonly context: MainIpcContext) {}
@@ -70,14 +74,13 @@ export class PullRequestWorkflowService {
     const commits = commitsResult.stdout.trim()
     const diffStat = diffStatResult.stdout.trim()
 
-    const prompt = [
-      'Generate a pull request title and description for these Git changes.',
-      `Source branch: ${input.headBranch}  →  Target: ${input.baseBranch}`,
-      commits ? `\nRecent commits:\n${commits}` : '',
-      diffStat ? `\nChanged files:\n${diffStat}` : '',
-      '\nRespond with ONLY a JSON object (no markdown fences, no extra text):',
-      '{"title":"concise PR title under 72 chars","body":"markdown PR description with ## Summary and ## Changes sections"}',
-    ].filter(Boolean).join('\n')
+    const prompt = buildPrDraftPrompt({
+      headBranch: input.headBranch,
+      baseBranch: input.baseBranch,
+      commits,
+      diffStat,
+      template,
+    })
 
     try {
       const { runCommandText, resolveCommand } = await import('../../../agents/command')
@@ -118,41 +121,7 @@ export class PullRequestWorkflowService {
   async resolveTemplate(projectId: string): Promise<string> {
     const project = requireProject(projectId)
     const remoteInfo = await this.getRemoteInfo(projectId)
-
-    const candidates =
-      remoteInfo.provider === 'github'
-        ? [
-            '.github/PULL_REQUEST_TEMPLATE.md',
-            '.github/pull_request_template.md',
-            'docs/pull_request_template.md',
-            'pull_request_template.md',
-          ]
-        : remoteInfo.provider === 'azure'
-          ? [
-              '.azuredevops/pull_request_template.md',
-              'docs/pull_request_template.md',
-              'pull_request_template.md',
-            ]
-          : []
-
-    const { promises: fs } = await import('node:fs')
-    for (const candidate of candidates) {
-      const fullPath = `${project.repoPath}/${candidate}`
-      try {
-        const stat = await fs.stat(fullPath)
-        if (stat.isFile()) {
-          return (await fs.readFile(fullPath, 'utf-8')).trim()
-        }
-      } catch {
-        continue
-      }
-    }
-
-    return remoteInfo.provider === 'github'
-      ? this.defaultGitHubTemplate()
-      : remoteInfo.provider === 'azure'
-        ? this.defaultAzureTemplate()
-        : ''
+    return loadPrTemplate(project.repoPath, remoteInfo.provider)
   }
 
   private detectRemote(remoteUrl: string, providerType: GitProviderType): GitRemoteInfo {
@@ -233,12 +202,14 @@ export class PullRequestWorkflowService {
     input: Omit<CreatePullRequestInput, 'projectId'>,
   ): Promise<CreatePullRequestResult> {
     const { spawn } = await import('node:child_process')
+    const command = resolveGhCommand()
+    const env = buildProcessEnvironment()
 
     return new Promise((resolve, reject) => {
       const child = spawn(
-        'gh',
-        ['pr', 'create', '--title', input.title, '--body', input.body, '--base', input.baseBranch],
-        { cwd: repoPath, stdio: ['pipe', 'pipe', 'pipe'] },
+        command,
+        buildGhPrCreateArgs(input),
+        { cwd: repoPath, env, stdio: ['pipe', 'pipe', 'pipe'] },
       )
 
       let stdout = ''
@@ -250,8 +221,15 @@ export class PullRequestWorkflowService {
       child.stderr?.on('data', (chunk: Buffer) => {
         stderr += chunk.toString()
       })
-      child.on('error', (error) => {
-        reject(new Error(`gh CLI not found: ${error.message}`))
+      child.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          reject(new Error(
+            'GitHub CLI was not found from the app process. Install `gh`, set GH_COMMAND to its full path, or set GITHUB_TOKEN/GH_TOKEN.',
+          ))
+          return
+        }
+
+        reject(new Error(error.message))
       })
       child.on('close', (code) => {
         if (code !== 0) {
@@ -313,69 +291,4 @@ export class PullRequestWorkflowService {
     return { url: data.remoteUrl, number: data.pullRequestId }
   }
 
-  private defaultGitHubTemplate(): string {
-    return `## Description
-
-<!-- Provide a brief description of the changes -->
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-
-<!-- Describe testing performed -->
-
-## Checklist
-
-- [ ] Code follows project style
-- [ ] Tests pass
-- [ ] Documentation updated
-`
-  }
-
-  private defaultAzureTemplate(): string {
-    return `## Description
-
-<!-- Describe your changes here -->
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactoring
-
-## Related Work Items
-
-<!-- Link to Azure DevOps work items if applicable -->
-
-## Testing
-
-<!-- Describe testing performed -->
-`
-  }
-}
-
-function createDraftTitle(headBranch: string, baseBranch: string): string {
-  const normalized = headBranch
-    .trim()
-    .replace(/^refs\/heads\//, '')
-    .replace(/^[a-z]+\/+/i, '')
-    .replace(/[-_]+/g, ' ')
-    .trim()
-
-  const summary = normalized.length > 0
-    ? normalized
-    : `changes from ${headBranch || 'current branch'}`
-
-  const sentence = capitalize(summary)
-  return `feat: ${sentence} -> ${baseBranch.trim() || 'main'}`
-}
-
-function capitalize(value: string): string {
-  if (!value) return value
-  return value.charAt(0).toUpperCase() + value.slice(1)
 }
