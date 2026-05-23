@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter } from '../../../agents'
 import type { SupportedAgentId } from '../../../../shared/types'
-import { listProviderUsage } from './providerUsage'
+import { listProviderUsage, parseClaudeUsage, parseCodexRateLimits } from './providerUsage'
 
 describe('listProviderUsage', () => {
   it('aggregates current-month usage by supported provider', async () => {
@@ -127,6 +127,77 @@ describe('listProviderUsage', () => {
     } finally {
       db.close()
     }
+  })
+})
+
+describe('provider usage CLI parsers', () => {
+  it('maps Codex app-server rate-limit buckets into visible reset telemetry', () => {
+    const limit = parseCodexRateLimits({
+      rateLimits: {
+        limitId: 'codex',
+        primary: { usedPercent: 37, windowDurationMins: 300, resetsAt: 1779522567 },
+        secondary: { usedPercent: 22, windowDurationMins: 10080, resetsAt: 1779824197 },
+        credits: { hasCredits: false, unlimited: false, balance: '0' },
+        planType: 'prolite',
+        rateLimitReachedType: null,
+      },
+      rateLimitsByLimitId: {
+        codex_spark: {
+          limitId: 'codex_spark',
+          limitName: 'GPT-5.3-Codex-Spark',
+          primary: { usedPercent: 19, windowDurationMins: 300, resetsAt: 1779520394 },
+          secondary: { usedPercent: 16, windowDurationMins: 10080, resetsAt: 1779824495 },
+        },
+      },
+    })
+
+    expect(limit).toMatchObject({
+      status: 'available',
+      label: '37% used in 5h window',
+      resetsAt: 1779522567 * 1000,
+      usedPercent: 37,
+      source: 'codex app-server',
+    })
+    expect(limit.detail).toContain('Weekly 7d 22% used')
+    expect(limit.detail).toContain('Plan prolite')
+    expect(limit.detail).toContain('GPT-5.3-Codex-Spark')
+  })
+
+  it('keeps Claude context-window usage out of the subscription quota meter', () => {
+    const limit = parseClaudeUsage(
+      JSON.stringify({
+        result: 'You are currently using your subscription to power your Claude Code usage',
+      }),
+      JSON.stringify({
+        result: '## Context Usage\n\n**Tokens:** 38.7k / 1m (4%)\n',
+      }),
+    )
+
+    expect(limit).toMatchObject({
+      status: 'available',
+      label: 'Subscription usage loaded',
+      usedPercent: null,
+      source: 'claude /usage',
+    })
+    expect(limit.detail).toContain('Context window, not subscription quota: 38.7k / 1m (4%)')
+  })
+
+  it('uses Claude usage percentage only when /usage itself exposes one', () => {
+    const limit = parseClaudeUsage(
+      JSON.stringify({
+        result: 'Weekly usage: 72% used. Resets soon.',
+      }),
+      JSON.stringify({
+        result: '## Context Usage\n\n**Tokens:** 38.7k / 1m (4%)\n',
+      }),
+    )
+
+    expect(limit).toMatchObject({
+      status: 'available',
+      label: '72% used',
+      usedPercent: 72,
+      source: 'claude /usage',
+    })
   })
 })
 
