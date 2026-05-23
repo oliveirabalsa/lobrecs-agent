@@ -17,6 +17,7 @@ interface ProjectTreeItemProps {
   onToggleExpand: (project: Project) => void
   onSelectProject: (project: Project) => void
   onSelectThread: (project: Project, thread: Thread) => void
+  onSelectThreadAgent?: (project: Project, thread: Thread, sessionId: string) => void
   onDeleteThread?: (project: Project, thread: Thread) => void
   onContextMenu?: (event: MouseEvent, project: Project) => void
   onNewChat?: (project: Project) => void
@@ -33,6 +34,7 @@ export function ProjectTreeItem({
   onToggleExpand,
   onSelectProject,
   onSelectThread,
+  onSelectThreadAgent,
   onDeleteThread,
   onContextMenu,
   onNewChat,
@@ -155,6 +157,11 @@ export function ProjectTreeItem({
                     thread={thread}
                     active={activeThreadId === thread.id}
                     onSelect={(t) => onSelectThread(project, t)}
+                    onSelectAgent={
+                      onSelectThreadAgent
+                        ? (t, sessionId) => onSelectThreadAgent(project, t, sessionId)
+                        : undefined
+                    }
                     onDelete={onDeleteThread ? (t) => onDeleteThread(project, t) : undefined}
                   />
                 </div>

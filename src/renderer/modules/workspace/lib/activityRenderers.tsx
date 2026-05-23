@@ -14,12 +14,14 @@ import {
   CommandsGroup,
   CompletionFooter,
   EditedFilesCard,
+  ModelRecoveryCard,
   PlanReviewCard,
   RanCommandsPill,
   SwarmStepApprovalCard,
   UserQuestionPromptCard,
 } from '../components/artifacts'
 import type { UserQuestionActivity } from '../components/artifacts'
+import type { StartedSessionSummary } from '../../sessions/types'
 import type { StreamItem } from './groupTurns'
 import { matchingDiffProposals } from './diffProposalMatching'
 import {
@@ -44,6 +46,7 @@ export interface RendererContext {
   onApproveApproval?: () => void | Promise<void>
   onRejectApproval?: () => void | Promise<void>
   onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
+  onSessionStarted?: (session: StartedSessionSummary) => void
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
   /** The plan text shown above an inline plan-review control, when present. */
@@ -250,6 +253,17 @@ export function renderStreamItem(
           key={key}
           approval={item}
           sessionId={ctx.sessionId}
+        />
+      )
+
+    case 'model-recovery':
+      if (!ctx.sessionId) return null
+      return (
+        <ModelRecoveryCard
+          key={key}
+          recovery={item}
+          sessionId={ctx.sessionId}
+          onSessionStarted={ctx.onSessionStarted}
         />
       )
 

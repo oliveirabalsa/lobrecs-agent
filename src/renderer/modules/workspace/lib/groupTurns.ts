@@ -424,7 +424,10 @@ function isPostCompletionArtifact(activity: AgentActivity): boolean {
     activity.kind === 'plan-review' ||
     // Swarm step approval gates the next sequential step; same lifecycle as
     // plan-review — emitted after completion, must stick to this turn.
-    activity.kind === 'swarm-step-approval'
+    activity.kind === 'swarm-step-approval' ||
+    // Provider-limit recovery pauses the failed turn and lets the user start a
+    // replacement model on the same thread.
+    activity.kind === 'model-recovery'
   )
 }
 

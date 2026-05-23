@@ -23,6 +23,7 @@ interface ProjectsSectionProps {
   onToggleExpand: (project: Project) => void
   onSelectProject: (project: Project) => void
   onSelectThread: (project: Project, thread: Thread) => void
+  onSelectThreadAgent?: (project: Project, thread: Thread, sessionId: string) => void
   onDeleteThread?: (project: Project, thread: Thread) => void
   onCreateProject: () => void
   onRenameProject?: (project: Project) => void
@@ -43,6 +44,7 @@ export function ProjectsSection({
   onToggleExpand,
   onSelectProject,
   onSelectThread,
+  onSelectThreadAgent,
   onDeleteThread,
   onCreateProject,
   onRenameProject,
@@ -115,6 +117,7 @@ export function ProjectsSection({
               onToggleExpand={onToggleExpand}
               onSelectProject={onSelectProject}
               onSelectThread={onSelectThread}
+              onSelectThreadAgent={onSelectThreadAgent}
               onDeleteThread={onDeleteThread}
               onContextMenu={openContextMenu}
               onNewChat={onNewChatForProject}

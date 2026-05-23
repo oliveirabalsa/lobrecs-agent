@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type {
+  AgentActivity,
   AgentEvent,
   Project,
   Session,
@@ -13,8 +14,17 @@ interface SwarmGraphPanelProps {
   threadId: string | null
   activeSessionId: string | null
   activeSessionStatus: SessionStatus | null
+  onOpenSession: (session: Session) => void | Promise<void>
   onPauseSession: (sessionId: string) => void | Promise<void>
   onResumeWithEdit: (prompt: string, node: SwarmGraphNode) => void | Promise<void>
+}
+
+interface ActivityPreview {
+  id: string
+  label: string
+  detail: string
+  tone: 'neutral' | 'success' | 'warn' | 'danger' | 'info'
+  timestamp: number
 }
 
 export function SwarmGraphPanel({
@@ -22,6 +32,7 @@ export function SwarmGraphPanel({
   threadId,
   activeSessionId,
   activeSessionStatus,
+  onOpenSession,
   onPauseSession,
   onResumeWithEdit,
 }: SwarmGraphPanelProps) {
@@ -123,6 +134,13 @@ export function SwarmGraphPanel({
     return graph.nodes.find((node) => node.id === activeSessionId) ?? graph.nodes.at(-1) ?? null
   }, [activeSessionId, graph.nodes, selectedNodeId])
 
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selectedNode?.id) ?? null,
+    [selectedNode?.id, sessions],
+  )
+  const selectedEvents = selectedNode ? eventsBySession.get(selectedNode.id) ?? [] : []
+  const activityPreview = useMemo(() => buildActivityPreview(selectedEvents), [selectedEvents])
+
   useEffect(() => {
     if (!selectedNode) {
       setSelectedNodeId(null)
@@ -141,6 +159,12 @@ export function SwarmGraphPanel({
 
   const canPauseSelected = selectedNode ? isBlockingStatus(selectedNode.status) : false
   const canResume = Boolean(selectedNode && draft.trim() && graph.activeCount === 0)
+
+  function selectNode(node: SwarmGraphNode) {
+    setSelectedNodeId(node.id)
+    const session = sessions.find((item) => item.id === node.id)
+    if (session) void onOpenSession(session)
+  }
 
   async function pauseSelected() {
     if (!selectedNode || !canPauseSelected) return
@@ -179,7 +203,7 @@ export function SwarmGraphPanel({
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas">
       <header className="shrink-0 border-b border-hairline px-4 py-3">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-semibold text-primary">Swarm Graph</div>
             <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
@@ -191,89 +215,81 @@ export function SwarmGraphPanel({
               ) : null}
             </div>
           </div>
-          {loading ? <span className="text-[11px] text-muted">Syncing</span> : null}
+          <div className="flex items-center gap-2 text-[11px] text-muted">
+            {selectedNode ? (
+              <span className="hidden sm:inline">
+                {selectedNode.agentLabel} / {selectedNode.model}
+              </span>
+            ) : null}
+            {loading ? <span>Syncing</span> : null}
+          </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3">
-        <div className="mx-auto w-full max-w-3xl">
-          {graph.nodes.length === 0 ? (
-            <div className="rounded-card border border-dashed border-hairline px-4 py-8 text-center text-[12px] text-muted">
-              No sessions in this thread yet.
-            </div>
-          ) : (
-            <div className="grid min-w-0 gap-0">
-              {graph.nodes.map((node, index) => (
-                <GraphNodeRow
-                  key={node.id}
-                  node={node}
-                  selected={node.id === selectedNode?.id}
-                  active={node.id === activeSessionId}
-                  edge={index > 0 ? graph.edges[index - 1] : null}
-                  onSelect={() => setSelectedNodeId(node.id)}
-                />
-              ))}
-            </div>
-          )}
+      {graph.nodes.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+          <div className="rounded-card border border-dashed border-hairline px-4 py-8 text-center text-[12px] text-muted">
+            No sessions in this thread yet.
+          </div>
         </div>
-      </div>
-
-      <section className="shrink-0 border-t border-hairline bg-card/40 px-3 py-3">
-        {selectedNode ? (
-          <div className="mx-auto grid w-full max-w-3xl gap-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-[12px] font-semibold text-primary">
-                  {selectedNode.role}
-                </div>
-                <div className="mt-0.5 truncate text-[11px] text-muted">
-                  {selectedNode.agentLabel} / {selectedNode.model}
-                </div>
+      ) : (
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(360px,0.9fr)_minmax(460px,1.1fr)]">
+          <section className="min-h-0 overflow-y-auto border-b border-hairline px-3 py-3 xl:border-b-0 xl:border-r">
+            <div className="grid gap-2">
+              <RunSummary graph={graph} />
+              <div className="grid gap-0">
+                {graph.nodes.map((node, index) => (
+                  <GraphNodeRow
+                    key={node.id}
+                    node={node}
+                    selected={node.id === selectedNode?.id}
+                    active={node.id === activeSessionId}
+                    edge={index > 0 ? graph.edges[index - 1] : null}
+                    onSelect={() => selectNode(node)}
+                  />
+                ))}
               </div>
-              <StatusPill status={selectedNode.status} />
             </div>
+          </section>
 
-            <textarea
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              className="min-h-24 resize-y rounded-card border border-hairline bg-canvas px-3 py-2 text-[12px] leading-5 text-secondary outline-none placeholder:text-muted/70 focus:border-accent-primary/60"
-              placeholder="Edit the handoff..."
-              aria-label="Edited swarm handoff"
-            />
+          <AgentWorkspaceInspector
+            node={selectedNode}
+            session={selectedSession}
+            events={activityPreview}
+            draft={draft}
+            actionError={actionError}
+            canPause={canPauseSelected}
+            canResume={canResume}
+            busyAction={busyAction}
+            onDraftChange={setDraft}
+            onPause={() => void pauseSelected()}
+            onResume={() => void resumeWithEdit()}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
 
-            {actionError ? (
-              <div className="rounded-card border border-accent-del/30 bg-accent-del/10 px-3 py-2 text-[11px] text-accent-del">
-                {actionError}
-              </div>
-            ) : null}
+function RunSummary({ graph }: { graph: ReturnType<typeof buildSwarmGraph> }) {
+  const totalEvents = graph.nodes.reduce((total, node) => total + node.eventCount, 0)
+  const fileChanges = graph.nodes.reduce((total, node) => total + node.fileChangeCount, 0)
+  const commands = graph.nodes.reduce((total, node) => total + node.commandCount, 0)
 
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                size="sm"
-                variant="chip"
-                disabled={!canPauseSelected || busyAction !== null}
-                loading={busyAction === 'pause'}
-                onClick={() => void pauseSelected()}
-              >
-                Pause current
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                disabled={!canResume || busyAction !== null}
-                loading={busyAction === 'resume'}
-                onClick={() => void resumeWithEdit()}
-              >
-                Resume with edit
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="mx-auto w-full max-w-3xl text-[12px] text-muted">
-            Select an agent node.
-          </div>
-        )}
-      </section>
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <MetricCard label="Activity" value={totalEvents} />
+      <MetricCard label="Commands" value={commands} />
+      <MetricCard label="Files" value={fileChanges} />
+    </div>
+  )
+}
+
+function MetricCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-card border border-hairline bg-card/60 px-3 py-2">
+      <div className="text-[10px] font-medium uppercase text-muted">{label}</div>
+      <div className="mt-1 text-[16px] font-semibold tabular-nums text-primary">{value}</div>
     </div>
   )
 }
@@ -308,17 +324,19 @@ function GraphNodeRow({
       <button
         type="button"
         onClick={onSelect}
-        className={`grid w-full grid-cols-[36px_minmax(0,1fr)] gap-3 rounded-card border px-3 py-3 text-left transition-colors ${
+        className={`grid w-full grid-cols-[40px_minmax(0,1fr)] gap-3 rounded-card border px-3 py-3 text-left transition-colors ${
           selected
-            ? 'border-accent-primary/50 bg-accent-primary/10'
-            : 'border-hairline bg-card hover:bg-card-raised'
+            ? 'border-accent-primary/60 bg-accent-primary/10 shadow-[0_0_0_1px_rgba(137,164,255,0.18)]'
+            : 'border-hairline bg-card hover:border-white/15 hover:bg-card-raised'
         }`}
       >
         <div
-          className={`flex h-9 w-9 items-center justify-center rounded-card border text-[12px] font-semibold ${
+          className={`flex h-10 w-10 items-center justify-center rounded-card border text-[12px] font-semibold ${
             active
               ? 'border-accent-primary/50 bg-accent-primary/15 text-accent-primary'
-              : 'border-hairline bg-canvas text-secondary'
+              : selected
+                ? 'border-accent-primary/40 bg-canvas text-accent-primary'
+                : 'border-hairline bg-canvas text-secondary'
           }`}
         >
           {node.index + 1}
@@ -330,8 +348,14 @@ function GraphNodeRow({
             </div>
             <StatusPill status={node.status} />
           </div>
-          <div className="mt-1 truncate text-[11px] text-muted">
-            {node.agentLabel} / {node.model}
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+            <span className="truncate">{node.agentLabel} / {node.model}</span>
+            {node.durationMs !== null ? <span>{formatDuration(node.durationMs)}</span> : null}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <TinyStat label="msg" value={node.messageCount} />
+            <TinyStat label="cmd" value={node.commandCount} />
+            <TinyStat label="files" value={node.fileChangeCount} />
           </div>
           {node.outputPreview || node.inputPreview ? (
             <div className="mt-2 line-clamp-2 break-words text-[11px] leading-4 text-secondary">
@@ -340,6 +364,163 @@ function GraphNodeRow({
           ) : null}
         </div>
       </button>
+    </div>
+  )
+}
+
+function TinyStat({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[10px] text-muted">
+      {value} {label}
+    </span>
+  )
+}
+
+function AgentWorkspaceInspector({
+  node,
+  session,
+  events,
+  draft,
+  actionError,
+  canPause,
+  canResume,
+  busyAction,
+  onDraftChange,
+  onPause,
+  onResume,
+}: {
+  node: SwarmGraphNode | null
+  session: Session | null
+  events: ActivityPreview[]
+  draft: string
+  actionError: string | null
+  canPause: boolean
+  canResume: boolean
+  busyAction: 'pause' | 'resume' | null
+  onDraftChange: (value: string) => void
+  onPause: () => void
+  onResume: () => void
+}) {
+  if (!node) {
+    return (
+      <section className="flex min-h-0 items-center justify-center px-6 text-center text-[12px] text-muted">
+        Select an agent node.
+      </section>
+    )
+  }
+
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden bg-card/20">
+      <div className="shrink-0 border-b border-hairline px-4 py-3">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold text-primary">{node.role}</div>
+            <div className="mt-0.5 truncate text-[11px] text-muted">
+              {node.agentLabel} / {node.model}
+            </div>
+          </div>
+          <StatusPill status={node.status} />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <MetricCard label="Events" value={node.eventCount} />
+          <MetricCard label="Input" value={node.tokensIn} />
+          <MetricCard label="Output" value={node.tokensOut} />
+          <MetricCard label="Cost" value={Math.round(node.costUsd * 1000) / 1000} />
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="grid gap-3">
+          <WorkspaceBlock title="Prompt">
+            <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-secondary">
+              {session?.prompt ?? node.inputPreview}
+            </pre>
+          </WorkspaceBlock>
+
+          <WorkspaceBlock title="Activity">
+            {events.length > 0 ? (
+              <div className="grid gap-2">
+                {events.map((event) => (
+                  <ActivityRow key={event.id} event={event} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-card border border-dashed border-hairline px-3 py-5 text-center text-[11px] text-muted">
+                No activity captured yet.
+              </div>
+            )}
+          </WorkspaceBlock>
+
+          <WorkspaceBlock title="Handoff">
+            <textarea
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+              className="min-h-32 w-full resize-y rounded-card border border-hairline bg-canvas px-3 py-2 text-[12px] leading-5 text-secondary outline-none placeholder:text-muted/70 focus:border-accent-primary/60"
+              placeholder="Edit the handoff..."
+              aria-label="Edited swarm handoff"
+            />
+          </WorkspaceBlock>
+
+          {actionError ? (
+            <div className="rounded-card border border-accent-del/30 bg-accent-del/10 px-3 py-2 text-[11px] text-accent-del">
+              {actionError}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="shrink-0 border-t border-hairline px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            size="sm"
+            variant="chip"
+            disabled={!canPause || busyAction !== null}
+            loading={busyAction === 'pause'}
+            onClick={onPause}
+          >
+            Pause current
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!canResume || busyAction !== null}
+            loading={busyAction === 'resume'}
+            onClick={onResume}
+          >
+            Resume with edit
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function WorkspaceBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="rounded-card border border-hairline bg-card/65 p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase text-muted">{title}</div>
+      {children}
+    </section>
+  )
+}
+
+function ActivityRow({ event }: { event: ActivityPreview }) {
+  return (
+    <div className="grid grid-cols-[10px_minmax(0,1fr)] gap-2 rounded-card border border-hairline bg-canvas px-3 py-2">
+      <span className={`mt-1.5 h-2 w-2 rounded-full ${dotClassForTone(event.tone)}`} />
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="truncate text-[11px] font-semibold text-primary">{event.label}</div>
+          <div className="shrink-0 text-[10px] text-muted tabular-nums">
+            {formatClock(event.timestamp)}
+          </div>
+        </div>
+        {event.detail ? (
+          <div className="mt-1 line-clamp-3 break-words text-[11px] leading-4 text-secondary">
+            {event.detail}
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -386,6 +567,163 @@ function statusFromEvent(event: AgentEvent): SessionStatus | null {
   return 'done'
 }
 
+function buildActivityPreview(events: readonly AgentEvent[]): ActivityPreview[] {
+  return events.slice(-24).reverse().map((event, index) => {
+    const activity = event.type === 'activity' && isAgentActivity(event.payload)
+      ? event.payload
+      : null
+    const baseId = `${event.sessionId}:${event.timestamp}:${index}`
+
+    if (activity) {
+      return {
+        id: baseId,
+        timestamp: event.timestamp,
+        ...activityPreviewFromActivity(activity),
+      }
+    }
+
+    if (event.type === 'approval-request') {
+      return {
+        id: baseId,
+        label: 'Approval requested',
+        detail: textFromUnknown(event.payload),
+        tone: 'warn',
+        timestamp: event.timestamp,
+      }
+    }
+
+    if (event.type === 'diff') {
+      return {
+        id: baseId,
+        label: 'Diff received',
+        detail: textFromUnknown(event.payload, 'Code changes applied'),
+        tone: 'info',
+        timestamp: event.timestamp,
+      }
+    }
+
+    if (event.type === 'error') {
+      return {
+        id: baseId,
+        label: 'Error',
+        detail: textFromUnknown(event.payload),
+        tone: 'danger',
+        timestamp: event.timestamp,
+      }
+    }
+
+    return {
+      id: baseId,
+      label: event.type === 'session-complete' ? 'Completed' : event.type,
+      detail: textFromUnknown(event.payload),
+      tone: event.type === 'session-complete' ? 'success' : 'neutral',
+      timestamp: event.timestamp,
+    }
+  })
+}
+
+function activityPreviewFromActivity(
+  activity: AgentActivity,
+): Omit<ActivityPreview, 'id' | 'timestamp'> {
+  switch (activity.kind) {
+    case 'message':
+      return { label: 'Message', detail: activity.text, tone: 'info' }
+    case 'step':
+      return {
+        label: activity.title,
+        detail: activity.detail ?? activity.status,
+        tone: toneFromActivityStatus(activity.status),
+      }
+    case 'tool-call':
+      return {
+        label: `Tool: ${activity.name}`,
+        detail: activity.status,
+        tone: toneFromActivityStatus(activity.status),
+      }
+    case 'tool-result':
+      return {
+        label: `${activity.name} result`,
+        detail: activity.output ?? activity.status,
+        tone: toneFromActivityStatus(activity.status),
+      }
+    case 'command':
+      return {
+        label: 'Command',
+        detail: activity.command,
+        tone: toneFromActivityStatus(activity.status),
+      }
+    case 'file-change':
+      return {
+        label: `${activity.changeType} file`,
+        detail: activity.filePath,
+        tone: activity.status === 'conflict' || activity.status === 'rejected' ? 'danger' : 'info',
+      }
+    case 'approval':
+      return { label: 'Approval', detail: activity.status, tone: 'warn' }
+    case 'diff-summary':
+      return {
+        label: `${activity.filesChanged} files changed`,
+        detail: activity.summary,
+        tone: 'info',
+      }
+    case 'completion':
+      return {
+        label: 'Completion',
+        detail: activity.summary,
+        tone: toneForStatus(activity.status),
+      }
+    case 'compaction':
+      return { label: 'Compaction', detail: 'Context compacted', tone: 'neutral' }
+    case 'plan-prompt':
+      return { label: activity.title, detail: `${activity.options.length} options`, tone: 'warn' }
+    case 'plan-review':
+      return { label: 'Plan ready', detail: `${activity.agentId} / ${activity.model}`, tone: 'warn' }
+    case 'user-question':
+      return { label: activity.title, detail: `${activity.questions.length} questions`, tone: 'warn' }
+    case 'swarm-step-approval':
+      return {
+        label: 'Step approval',
+        detail: `${activity.completedRole} -> ${activity.nextRole}`,
+        tone: 'warn',
+      }
+    case 'model-recovery':
+      return {
+        label: 'Model recovery',
+        detail: `${activity.failedAgentId} / ${activity.failedModel}`,
+        tone: 'warn',
+      }
+  }
+}
+
+function toneFromActivityStatus(status: 'pending' | 'running' | 'done' | 'error') {
+  if (status === 'done') return 'success'
+  if (status === 'error') return 'danger'
+  if (status === 'running') return 'info'
+  return 'neutral'
+}
+
+function textFromUnknown(payload: unknown, fallback = ''): string {
+  if (typeof payload === 'string') return payload
+  if (!payload || typeof payload !== 'object') return fallback
+
+  const value = payload as Record<string, unknown>
+  for (const key of ['text', 'message', 'summary', 'error', 'output', 'status']) {
+    const candidate = value[key]
+    if (typeof candidate === 'string' && candidate.trim()) return candidate
+  }
+
+  return fallback
+}
+
+function isAgentActivity(payload: unknown): payload is AgentActivity {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'kind' in payload &&
+    typeof (payload as { kind?: unknown }).kind === 'string'
+  )
+}
+
 function isSessionStatus(value: unknown): value is SessionStatus {
   return (
     value === 'running' ||
@@ -395,4 +733,35 @@ function isSessionStatus(value: unknown): value is SessionStatus {
     value === 'error' ||
     value === 'cancelled'
   )
+}
+
+function dotClassForTone(tone: ActivityPreview['tone']): string {
+  switch (tone) {
+    case 'success':
+      return 'bg-accent-add'
+    case 'warn':
+      return 'bg-accent-warn'
+    case 'danger':
+      return 'bg-accent-del'
+    case 'info':
+      return 'bg-accent-primary'
+    case 'neutral':
+      return 'bg-muted'
+  }
+}
+
+function formatClock(timestamp: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp)
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1_000) return '<1s'
+  const seconds = Math.round(ms / 1_000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.round(minutes / 60)}h`
 }

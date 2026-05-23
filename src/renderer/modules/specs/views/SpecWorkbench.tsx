@@ -12,6 +12,8 @@ import type {
   AdapterCapability,
   CreateSpecInput,
   Project,
+  RunAuditPhase,
+  RunAuditRecord,
   RunMode,
   Spec,
   SpecSettings,
@@ -70,8 +72,10 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   const [recipes, setRecipes] = useState<VerificationRecipe[]>([])
   const [specSettings, setSpecSettings] = useState<SpecSettings | null>(null)
   const [comparison, setComparison] = useState<SpecRunComparison | null>(null)
+  const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
   const [running, setRunning] = useState(false)
   const [verifyingCommand, setVerifyingCommand] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -152,6 +156,48 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   async function refreshComparison(specId: string) {
     const nextComparison = await window.agentforge.runs.compare(specId)
     setComparison(nextComparison)
+
+    const latest = [...nextComparison.runs].sort((a, b) => b.createdAt - a.createdAt)[0]
+    if (latest) {
+      try {
+        const records = await window.agentforge.runs.listAuditRecords(latest.id)
+        setAuditRecords(records)
+      } catch {
+        setAuditRecords([])
+      }
+    } else {
+      setAuditRecords([])
+    }
+  }
+
+  async function suggestDraft() {
+    if (!draft.title.trim() || !draft.goal.trim()) return
+
+    setSuggesting(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const suggestion = await window.agentforge.specs.suggestDraft(
+        project.id,
+        draft.title,
+        draft.goal,
+      )
+
+      setDraft((prev) => ({
+        ...prev,
+        constraints: suggestion.constraints,
+        requirements: suggestion.requirements.join('\n'),
+        acceptanceCriteria: suggestion.acceptanceCriteria.join('\n'),
+        targetFiles: suggestion.targetFiles.join('\n'),
+      }))
+
+      setNotice('AI spec draft generated successfully.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to suggest spec draft')
+    } finally {
+      setSuggesting(false)
+    }
   }
 
   async function saveSpec(event?: FormEvent) {
@@ -362,6 +408,35 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
               />
             </Field>
 
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+              <span className="text-xs text-zinc-400">
+                Provide a Title and Goal first, then let the AI draft constraints, requirements, criteria, and target files.
+              </span>
+              <button
+                type="button"
+                disabled={!draft.title.trim() || !draft.goal.trim() || suggesting}
+                onClick={suggestDraft}
+                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:pointer-events-none disabled:opacity-40"
+              >
+                {suggesting ? (
+                  <>
+                    <svg className="h-3.5 w-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Suggesting...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                    <span>Draft with AI</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <div className="grid gap-4 lg:grid-cols-2">
               <Field label="Context">
                 <textarea
@@ -510,6 +585,8 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
                 </div>
               </div>
 
+              <AuditTimeline records={auditRecords} />
+
               <div className="mt-5 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-3">
                 <div className="text-xs font-semibold uppercase text-zinc-500">Ship Gate</div>
                 <div className="mt-2 text-sm text-zinc-300">
@@ -600,6 +677,66 @@ function RunSummary({
           ))}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+const phaseLabel: Record<RunAuditPhase, string> = {
+  'recipe-started': 'Started',
+  'recipe-passed': 'Passed',
+  'recipe-failed': 'Failed',
+  'repair-dispatched': 'Repair started',
+  'repair-skipped': 'Skipped',
+  'gate-passed': 'QA done',
+  'gate-stopped': 'Stopped',
+}
+
+const phaseTone: Record<RunAuditPhase, string> = {
+  'recipe-started': 'border-zinc-700 bg-zinc-900 text-zinc-300',
+  'recipe-passed': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+  'recipe-failed': 'border-red-500/40 bg-red-500/10 text-red-200',
+  'repair-dispatched': 'border-violet-500/40 bg-violet-500/10 text-violet-200',
+  'repair-skipped': 'border-zinc-700 bg-zinc-900 text-zinc-400',
+  'gate-passed': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+  'gate-stopped': 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+}
+
+function AuditTimeline({ records }: { records: RunAuditRecord[] }) {
+  if (records.length === 0) return null
+
+  return (
+    <div className="mt-5">
+      <div className="text-xs font-semibold uppercase text-zinc-500">Audit Timeline</div>
+      <ol className="mt-2 flex flex-col gap-2">
+        {records.map((record) => (
+          <li
+            key={record.id}
+            className={`rounded-md border px-3 py-2 text-xs ${phaseTone[record.phase]}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">
+                {phaseLabel[record.phase]}
+                {record.recipeLabel ? ` · ${record.recipeLabel}` : ''}
+              </span>
+              <span className="text-[11px] text-zinc-500">
+                attempt {record.attempt}
+                {record.exitCode !== undefined ? ` · exit ${record.exitCode}` : ''}
+              </span>
+            </div>
+            {record.command ? (
+              <div className="mt-1 truncate text-[11px] text-zinc-500">{record.command}</div>
+            ) : null}
+            {record.stopReason ? (
+              <div className="mt-1 text-[11px] text-zinc-400">stop: {record.stopReason}</div>
+            ) : null}
+            {record.outputTail ? (
+              <pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-zinc-500">
+                {record.outputTail.slice(0, 600)}
+              </pre>
+            ) : null}
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

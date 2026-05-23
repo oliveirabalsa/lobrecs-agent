@@ -191,7 +191,7 @@ type ProcessWarningState = {
 
 function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
   if (event.type === 'activity' && isAgentActivity(event.payload)) {
-    if (userQuestionFromActivity(event.payload)) {
+    if (userQuestionFromActivity(event.payload) || event.payload.kind === 'model-recovery') {
       options.onStatusChange?.('awaiting-input')
     }
     return

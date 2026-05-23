@@ -7,6 +7,7 @@ import type {
   EditorInfo,
   Project,
   QueuedMessage,
+  Session,
   SessionStatus,
 } from '../../../../shared/types'
 import { DiffViewer } from '../../../components/DiffViewer'
@@ -74,6 +75,7 @@ interface WorkspaceViewProps {
   onStatusChange: (status: SessionStatus) => void
   onApproveApproval: () => void | Promise<void>
   onRejectApproval: () => void | Promise<void>
+  onOpenSession: (session: Session) => void | Promise<void>
   onSessionStarted: (session: StartedSessionSummary) => void
   onProjectUpdated?: (project: Project) => void
   onSwarmStarted: (result: {
@@ -108,6 +110,12 @@ interface WorkspaceViewProps {
 }
 
 const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations', 'memory']
+const MAIN_VIEW_LABELS: Record<MainView, string> = {
+  workspace: 'Workspace',
+  costs: 'Usage',
+  automations: 'Automations',
+  memory: 'Memory',
+}
 const RIGHT_PANEL_FULLSCREEN_CLASS =
   'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
 const RIGHT_PANEL_DOCKED_CLASS =
@@ -175,6 +183,7 @@ export function WorkspaceView({
   onStatusChange,
   onApproveApproval,
   onRejectApproval,
+  onOpenSession,
   onSessionStarted,
   onProjectUpdated,
   onSwarmStarted,
@@ -419,6 +428,11 @@ export function WorkspaceView({
     setFocusFilePath(filePath ?? null)
   }, [])
 
+  const openAgentPanel = useCallback(() => {
+    setRightPanelOpenState(true)
+    setRightPanelModeState('swarm')
+  }, [])
+
   const openMarkdownDocument = useCallback((document: MarkdownPreviewDocument) => {
     setMarkdownPreview({ kind: 'ready', document })
   }, [])
@@ -615,7 +629,7 @@ export function WorkspaceView({
                       : 'text-muted hover:bg-white/5 hover:text-secondary'
                   }`}
                 >
-                  {view}
+                  {MAIN_VIEW_LABELS[view]}
                 </button>
               ))}
               <div className="flex-1" />
@@ -664,6 +678,7 @@ export function WorkspaceView({
                         onRejectApproval={onRejectApproval}
                         onSessionStarted={onSessionStarted}
                         onReviewFile={openDiffPanel}
+                        onOpenAgentPanel={openAgentPanel}
                         onOpenMarkdown={openMarkdownLink}
                         onPreviewMarkdown={openMarkdownDocument}
                         onContextPercent={setContextPercent}
@@ -933,12 +948,14 @@ export function WorkspaceView({
                         threadId={activeThreadId}
                         activeSessionId={activeSessionId}
                         activeSessionStatus={activeSession?.status ?? null}
+                        onOpenSession={onOpenSession}
                         onPauseSession={onCancelSession}
                         onResumeWithEdit={handleResumeSwarmWithEdit}
                       />
                     ) : rightPanelMode === 'context' ? (
                       <ContextExplorer
                         project={selectedProject}
+                        activeSessionId={activeSessionId}
                         onEditProjectContext={openProjectContextDialog}
                       />
                     ) : (
@@ -996,14 +1013,18 @@ export function WorkspaceView({
               isMac={isMac}
               onOpenSidebar={onOpenSidebar}
             />
-            <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden p-6">
-              <div className="max-w-sm text-center">
-                <div className="text-[15px] font-semibold text-primary">Select a project</div>
-                <p className="mt-2 text-[13px] leading-6 text-muted">
-                  Choose a repository from the sidebar or add one with the plus button.
-                </p>
+            {mainView === 'costs' ? (
+              <CostDashboard project={null} />
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden p-6">
+                <div className="max-w-sm text-center">
+                  <div className="text-[15px] font-semibold text-primary">Select a project</div>
+                  <p className="mt-2 text-[13px] leading-6 text-muted">
+                    Choose a repository from the sidebar or add one with the plus button.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </section>

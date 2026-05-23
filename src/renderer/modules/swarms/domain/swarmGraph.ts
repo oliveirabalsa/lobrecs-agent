@@ -9,10 +9,18 @@ export interface SwarmGraphNode {
   status: SessionStatus
   startedAt: number
   completedAt?: number
+  durationMs: number | null
+  tokensIn: number
+  tokensOut: number
+  costUsd: number
   inputPreview: string
   outputPreview: string
   outputDraft: string
   eventCount: number
+  messageCount: number
+  commandCount: number
+  fileChangeCount: number
+  approvalCount: number
 }
 
 export interface SwarmGraphEdge {
@@ -41,10 +49,13 @@ export function buildSwarmGraph(
   const nodes = orderedSessions.map((session, index): SwarmGraphNode => {
     const events = eventsBySession.get(session.id) ?? []
     const outputDraft = latestMeaningfulOutput(events)
+    const activityCounts = summarizeActivities(events)
     const status =
       activeOverride?.sessionId === session.id && activeOverride.status
         ? activeOverride.status
         : session.status
+    const lastEventAt = events.at(-1)?.timestamp
+    const endAt = session.completedAt ?? lastEventAt
 
     return {
       id: session.id,
@@ -55,10 +66,15 @@ export function buildSwarmGraph(
       status,
       startedAt: session.createdAt,
       completedAt: session.completedAt,
+      durationMs: endAt ? Math.max(0, endAt - session.createdAt) : null,
+      tokensIn: session.tokensIn,
+      tokensOut: session.tokensOut,
+      costUsd: session.costUsd,
       inputPreview: preview(removeRoleHeader(session.prompt), 220),
       outputPreview: preview(outputDraft, 220),
       outputDraft,
       eventCount: events.length,
+      ...activityCounts,
     }
   })
 
@@ -161,6 +177,8 @@ function textFromActivity(activity: AgentActivity): string {
       return activity.title
     case 'swarm-step-approval':
       return `Continue to ${activity.nextRole}?`
+    case 'model-recovery':
+      return `Model recovery needed: ${activity.failedAgentId} / ${activity.failedModel}`
   }
 }
 
@@ -176,6 +194,42 @@ function textFromUnknown(payload: unknown, fallback = ''): string {
 
   if (typeof value.status === 'string') return value.status
   return fallback
+}
+
+function summarizeActivities(events: readonly AgentEvent[]) {
+  const counts = {
+    messageCount: 0,
+    commandCount: 0,
+    fileChangeCount: 0,
+    approvalCount: 0,
+  }
+
+  for (const event of events) {
+    if (event.type === 'approval-request') counts.approvalCount += 1
+    if (event.type !== 'activity' || !isAgentActivity(event.payload)) continue
+
+    switch (event.payload.kind) {
+      case 'message':
+        counts.messageCount += 1
+        break
+      case 'command':
+        counts.commandCount += 1
+        break
+      case 'file-change':
+      case 'diff-summary':
+        counts.fileChangeCount += 1
+        break
+      case 'approval':
+      case 'plan-review':
+      case 'plan-prompt':
+      case 'user-question':
+      case 'swarm-step-approval':
+        counts.approvalCount += 1
+        break
+    }
+  }
+
+  return counts
 }
 
 function edgeLabel(from: SwarmGraphNode, to: SwarmGraphNode): string {

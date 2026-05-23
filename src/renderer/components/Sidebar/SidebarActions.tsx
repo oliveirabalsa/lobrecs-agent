@@ -39,7 +39,7 @@ export function SidebarActions({
       {onPlugins ? (
         <ActionRow
           icon={<PluginsIcon />}
-          label="Plugins"
+          label="Extensions"
           onClick={onPlugins}
         />
       ) : null}

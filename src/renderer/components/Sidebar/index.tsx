@@ -19,6 +19,7 @@ interface SidebarProps {
   onForward: () => void
   onSelectProject: (project: Project) => void
   onSelectThread: (project: Project, thread: Thread) => void
+  onSelectThreadAgent?: (project: Project, thread: Thread, sessionId: string) => void
   onNewChat: () => void
   onNewChatForProject?: (project: Project) => void
   onSelectedProjectDeleted?: () => void
@@ -26,8 +27,10 @@ interface SidebarProps {
   onSearch?: () => void
   onPlugins?: () => void
   onAutomations?: () => void
+  onOpenUsage?: () => void
   onOpenSettings?: () => void
   settingsActive?: boolean
+  usageActive?: boolean
   /**
    * Optional slot overrides — if provided, these replace the corresponding
    * section. Use sparingly; defaults cover the Codex-shaped sidebar.
@@ -62,6 +65,7 @@ export function Sidebar({
   onForward,
   onSelectProject,
   onSelectThread,
+  onSelectThreadAgent,
   onNewChat,
   onNewChatForProject,
   onSelectedProjectDeleted,
@@ -69,8 +73,10 @@ export function Sidebar({
   onSearch,
   onPlugins,
   onAutomations,
+  onOpenUsage,
   onOpenSettings,
   settingsActive,
+  usageActive,
   slots,
 }: SidebarProps) {
   const tree = useProjectTree()
@@ -185,6 +191,7 @@ export function Sidebar({
         onToggleExpand={(project) => tree.toggleExpand(project.id)}
         onSelectProject={onSelectProject}
         onSelectThread={onSelectThread}
+        onSelectThreadAgent={onSelectThreadAgent}
         onDeleteThread={(project, thread) => void handleDeleteThread(project, thread)}
         onCreateProject={() => void handleCreateProject()}
         onRenameProject={(project) => void handleRenameProject(project)}
@@ -207,7 +214,9 @@ export function Sidebar({
     slots?.footer ?? (
       <SidebarFooter
         onOpenSettings={onOpenSettings}
+        onOpenUsage={onOpenUsage}
         settingsActive={settingsActive}
+        usageActive={usageActive}
       />
     )
 

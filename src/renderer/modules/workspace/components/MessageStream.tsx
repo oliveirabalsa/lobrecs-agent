@@ -30,6 +30,7 @@ export interface MessageStreamProps {
 }
 
 const STICKY_THRESHOLD_PX = 80
+const EDITED_FILES_CARD_ID = 'edited-files'
 
 interface AutoPinState {
   loading: boolean
@@ -153,7 +154,7 @@ export function editedFileCardsForFallbackFiles(
 
   return [
     {
-      id: editCardId('fallback', fallbackFiles.map((file) => file.filePath)),
+      id: EDITED_FILES_CARD_ID,
       proposals: [...proposalsByPath.values()],
       fallbackFiles: normalizedFallbacks,
     },
@@ -200,7 +201,7 @@ export function editedFileCards(
   if (fallbackCards.length === 0) {
     return [
       {
-        id: editCardId('proposals', unmatchedProposals.map((proposal) => proposal.filePath)),
+        id: EDITED_FILES_CARD_ID,
         proposals: [...unmatchedProposals],
         fallbackFiles: [],
       },
@@ -211,17 +212,10 @@ export function editedFileCards(
   return [
     {
       ...card,
-      id: editCardId('mixed', [
-        ...card.fallbackFiles.map((file) => file.filePath),
-        ...unmatchedProposals.map((proposal) => proposal.filePath),
-      ]),
+      id: EDITED_FILES_CARD_ID,
       proposals: [...card.proposals, ...unmatchedProposals],
     },
   ]
-}
-
-function editCardId(prefix: string, paths: readonly string[]): string {
-  return `${prefix}:${paths.join('|')}`
 }
 
 /**
@@ -493,6 +487,8 @@ function TrailingEditedFilesCard({
   ctx: RendererContext
   trailingCodeChanges: StreamItem[]
 }) {
+  if (!isLast) return null
+
   const liveProposals = ctx.diffProposals ?? []
   const fallbackFiles = flattenCodeChangeFallbacks(trailingCodeChanges)
 
@@ -500,7 +496,7 @@ function TrailingEditedFilesCard({
   // that lack a `file-change` activity, so the same file is not rendered once
   // per turn.
   const cards = editedFileCards(liveProposals, fallbackFiles, {
-    includeUnmatchedProposals: isLast,
+    includeUnmatchedProposals: true,
   })
   if (cards.length === 0) return null
 

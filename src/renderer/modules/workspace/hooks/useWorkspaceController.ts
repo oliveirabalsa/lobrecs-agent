@@ -616,6 +616,7 @@ export function useWorkspaceController() {
       const thread = event.thread
       if (thread.id !== activeThreadId || thread.projectId !== selectedProject.id) return
       if (!thread.lastSessionId || thread.lastSessionId === activeSessionId) return
+      if (activeSessionId) return
 
       void window.agentforge.sessions
         .get(thread.lastSessionId)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
+  PromptEvidenceRecord,
   Project,
   RepositoryContextChunk,
   RepositoryContextIndexResult,
@@ -14,6 +15,7 @@ import {
 
 interface ContextExplorerProps {
   project: Project
+  activeSessionId?: string | null
   onEditProjectContext?: () => void
 }
 
@@ -28,9 +30,22 @@ type SearchState =
   | { kind: 'ready'; query: string; results: RepositoryContextChunk[] }
   | { kind: 'error'; query: string; message: string }
 
-export function ContextExplorer({ project, onEditProjectContext }: ContextExplorerProps) {
+type PromptEvidenceState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; evidence: PromptEvidenceRecord | null }
+  | { kind: 'error'; message: string }
+
+export function ContextExplorer({
+  project,
+  activeSessionId,
+  onEditProjectContext,
+}: ContextExplorerProps) {
   const [statusState, setStatusState] = useState<StatusState>({ kind: 'loading' })
   const [searchState, setSearchState] = useState<SearchState>({ kind: 'idle' })
+  const [promptEvidenceState, setPromptEvidenceState] = useState<PromptEvidenceState>({
+    kind: 'idle',
+  })
   const [query, setQuery] = useState('')
   const [indexing, setIndexing] = useState(false)
 
@@ -50,6 +65,33 @@ export function ContextExplorer({ project, onEditProjectContext }: ContextExplor
   useEffect(() => {
     void loadStatus()
   }, [loadStatus])
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setPromptEvidenceState({ kind: 'idle' })
+      return
+    }
+
+    let cancelled = false
+    setPromptEvidenceState({ kind: 'loading' })
+
+    void window.agentforge.runs
+      .getPromptEvidence(activeSessionId)
+      .then((evidence) => {
+        if (!cancelled) setPromptEvidenceState({ kind: 'ready', evidence })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setPromptEvidenceState({
+          kind: 'error',
+          message: error instanceof Error ? error.message : 'Failed to load prompt evidence.',
+        })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId])
 
   const indexState = useMemo<ContextIndexState | null>(() => {
     if (statusState.kind !== 'ready') return null
@@ -140,6 +182,8 @@ export function ContextExplorer({ project, onEditProjectContext }: ContextExplor
             onReindex={() => void handleReindex()}
           />
 
+          <PromptEvidencePanel state={promptEvidenceState} />
+
           <form
             className="rounded-card border border-hairline bg-card p-3"
             onSubmit={(event) => {
@@ -179,6 +223,76 @@ export function ContextExplorer({ project, onEditProjectContext }: ContextExplor
         </div>
       </div>
     </section>
+  )
+}
+
+function PromptEvidencePanel({ state }: { state: PromptEvidenceState }) {
+  if (state.kind === 'idle') return null
+
+  if (state.kind === 'loading') {
+    return (
+      <div className="flex items-center gap-2 rounded-card border border-hairline bg-card p-3 text-[12px] text-muted">
+        <Spinner size={12} />
+        Loading session prompt evidence...
+      </div>
+    )
+  }
+
+  if (state.kind === 'error') {
+    return (
+      <div className="rounded-card border border-accent-del/40 bg-accent-del/10 p-3">
+        <div className="text-[12px] font-medium text-accent-del">
+          Prompt evidence unavailable
+        </div>
+        <p className="mt-1 text-[12px] leading-5 text-accent-del/90">{state.message}</p>
+      </div>
+    )
+  }
+
+  if (!state.evidence) return null
+
+  return (
+    <details className="rounded-card border border-hairline bg-card">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="text-[12px] font-medium text-primary">Session prompt evidence</div>
+          <div className="mt-0.5 text-[11px] text-muted">
+            Context captured before the CLI session started.
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-[11px] text-secondary">
+          {state.evidence.redacted ? (
+            <span className="rounded border border-accent-warn/40 bg-accent-warn/10 px-2 py-0.5 text-accent-warn">
+              redacted
+            </span>
+          ) : null}
+          <span className="rounded border border-hairline bg-card-raised px-2 py-0.5">
+            {formatBytes(state.evidence.contextBytes)}
+          </span>
+        </div>
+      </summary>
+      <div className="border-t border-hairline px-3 py-3">
+        <EvidenceBlock title="Resolved context" value={state.evidence.resolvedContext} />
+        <EvidenceBlock title="Final adapter context" value={state.evidence.adapterContext} />
+      </div>
+    </details>
+  )
+}
+
+function EvidenceBlock({ title, value }: { title: string; value?: string }) {
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1 text-[11px] font-medium uppercase text-muted">{title}</div>
+      {value?.trim() ? (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-card border border-hairline bg-card-raised px-3 py-2 text-[11px] leading-5 text-secondary">
+          {value}
+        </pre>
+      ) : (
+        <div className="rounded-card border border-hairline bg-card-raised px-3 py-2 text-xs text-muted">
+          No context was injected.
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -330,6 +444,11 @@ function SnippetCard({ result }: { result: RepositoryContextChunk }) {
       </pre>
     </article>
   )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  return `${Math.round(bytes / 102.4) / 10} KB`
 }
 
 function ProjectNotesCard({

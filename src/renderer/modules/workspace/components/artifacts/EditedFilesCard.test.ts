@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  areFileRowPropsEqual,
   buildEditedFileEntries,
   visibleEditedFileEntries,
 } from './EditedFilesCard'
+import type { DiffProposal } from '../../../../../shared/types'
 
 describe('visibleEditedFileEntries', () => {
   it('shows the first three already-ordered edited files by default', () => {
@@ -255,5 +257,131 @@ describe('buildEditedFileEntries', () => {
     }
 
     expect(buildEditedFileEntries([proposal], undefined)).toEqual([])
+  })
+})
+
+describe('areFileRowPropsEqual', () => {
+  const onOpenDiff = () => undefined
+  const onReview = () => undefined
+
+  it('keeps an unchanged row memoized when its entry object is rebuilt', () => {
+    expect(
+      areFileRowPropsEqual(
+        {
+          entry: {
+            filePath: 'src/app.ts',
+            additions: 2,
+            deletions: 1,
+          },
+          onReview,
+          onOpenDiff,
+        },
+        {
+          entry: {
+            filePath: 'src/app.ts',
+            additions: 2,
+            deletions: 1,
+          },
+          onReview,
+          onOpenDiff,
+        },
+      ),
+    ).toBe(true)
+  })
+
+  it('keeps an unchanged proposal-backed row memoized when the proposal object is rebuilt', () => {
+    const proposal: DiffProposal = {
+      filePath: '/Users/leo/project/src/app.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+      status: 'pending',
+    }
+
+    expect(
+      areFileRowPropsEqual(
+        {
+          entry: {
+            filePath: proposal.filePath,
+            additions: 1,
+            deletions: 1,
+            proposal,
+          },
+          onReview,
+          onOpenDiff,
+        },
+        {
+          entry: {
+            filePath: proposal.filePath,
+            additions: 1,
+            deletions: 1,
+            proposal: { ...proposal },
+          },
+          onReview,
+          onOpenDiff,
+        },
+      ),
+    ).toBe(true)
+  })
+
+  it('marks only the edited row as changed when its stats change', () => {
+    expect(
+      areFileRowPropsEqual(
+        {
+          entry: {
+            filePath: 'src/app.ts',
+            additions: 2,
+            deletions: 1,
+          },
+          onReview,
+          onOpenDiff,
+        },
+        {
+          entry: {
+            filePath: 'src/app.ts',
+            additions: 3,
+            deletions: 1,
+          },
+          onReview,
+          onOpenDiff,
+        },
+      ),
+    ).toBe(false)
+  })
+
+  it('updates a row when rebuilt proposal content changes', () => {
+    const proposal: DiffProposal = {
+      filePath: '/Users/leo/project/src/app.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+    }
+
+    expect(
+      areFileRowPropsEqual(
+        {
+          entry: {
+            filePath: proposal.filePath,
+            additions: 1,
+            deletions: 1,
+            proposal,
+          },
+          onReview,
+          onOpenDiff,
+        },
+        {
+          entry: {
+            filePath: proposal.filePath,
+            additions: 1,
+            deletions: 1,
+            proposal: { ...proposal, proposedContent: 'newer\n' },
+          },
+          onReview,
+          onOpenDiff,
+        },
+      ),
+    ).toBe(false)
   })
 })

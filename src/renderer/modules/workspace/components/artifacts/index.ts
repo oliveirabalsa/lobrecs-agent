@@ -41,7 +41,10 @@ export type {
 } from './SwarmStepApprovalCard'
 
 export { AgentModelPicker, shortAgentModelLabel } from './AgentModelPicker'
-export type { AgentModelPickerProps } from './AgentModelPicker'
+export type { AgentModelPickerProps, AgentModelSelection } from './AgentModelPicker'
+
+export { ModelRecoveryCard } from './ModelRecoveryCard'
+export type { ModelRecoveryActivity, ModelRecoveryCardProps } from './ModelRecoveryCard'
 
 export { UserQuestionPromptCard } from './UserQuestionPromptCard'
 export type {
@@ -51,3 +54,12 @@ export type {
 
 export { CompletionFooter } from './CompletionFooter'
 export type { CompletionFooterProps } from './CompletionFooter'
+
+export { RunAuditTimelineCard } from './RunAuditTimelineCard'
+export type { RunAuditTimelineCardProps } from './RunAuditTimelineCard'
+
+export { PromptEvidenceCard } from './PromptEvidenceCard'
+export type { PromptEvidenceCardProps } from './PromptEvidenceCard'
+
+export { DiffReviewCard } from './DiffReviewCard'
+export type { DiffReviewCardProps } from './DiffReviewCard'

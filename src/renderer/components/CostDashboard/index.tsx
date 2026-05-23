@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { CostSummary, PeriodCostRow, Project } from '../../../shared/types'
+import type {
+  CostSummary,
+  PeriodCostRow,
+  Project,
+  ProviderUsageRow,
+  ProviderUsageSummary,
+  SupportedAgentId,
+} from '../../../shared/types'
 
 type CostDashboardProps = {
   project: Pick<Project, 'id' | 'name'> | null
@@ -30,6 +37,18 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
 })
 
 const integerFormatter = new Intl.NumberFormat('en-US')
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+const providerInitials: Record<SupportedAgentId, string> = {
+  codex: 'CX',
+  'claude-code': 'CC',
+  opencode: 'OC',
+  antigravity: 'AG',
+}
 
 function formatCurrency(value: number | null | undefined): string {
   return currencyFormatter.format(Number(value ?? 0))
@@ -155,8 +174,40 @@ export function CostDashboard({ project }: CostDashboardProps) {
   const [period, setPeriod] = useState<PeriodOption>(30)
   const [summary, setSummary] = useState<CostSummary>(emptySummary)
   const [rows, setRows] = useState<PeriodCostRow[]>([])
+  const [providerUsage, setProviderUsage] = useState<ProviderUsageSummary | null>(null)
   const [loading, setLoading] = useState(false)
+  const [providerLoading, setProviderLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [providerError, setProviderError] = useState<string | null>(null)
+  const [providerRefreshKey, setProviderRefreshKey] = useState(0)
+
+  useEffect(() => {
+    let isActive = true
+
+    setProviderLoading(true)
+    setProviderError(null)
+
+    window.agentforge.cost
+      .providerUsage()
+      .then((nextSummary) => {
+        if (isActive) setProviderUsage(nextSummary)
+      })
+      .catch((reason: unknown) => {
+        if (!isActive) return
+
+        setProviderUsage(null)
+        setProviderError(
+          reason instanceof Error ? reason.message : 'Unable to load provider usage.',
+        )
+      })
+      .finally(() => {
+        if (isActive) setProviderLoading(false)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [providerRefreshKey])
 
   useEffect(() => {
     if (!project) {
@@ -215,9 +266,9 @@ export function CostDashboard({ project }: CostDashboardProps) {
     <section className="flex h-full min-h-0 flex-col bg-canvas text-primary">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-primary">Cost Dashboard</h2>
+          <h2 className="text-base font-semibold text-primary">Usage</h2>
           <div className="mt-1 truncate text-xs text-muted">
-            {project ? project.name : 'No project selected'}
+            Provider subscription usage and local cost tracking
             {loading ? <span className="ml-2 text-accent-primary">Refreshing</span> : null}
           </div>
         </div>
@@ -252,9 +303,24 @@ export function CostDashboard({ project }: CostDashboardProps) {
 
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {!project ? (
-          <EmptyState message="Select a project to load cost data." />
+          <div className="space-y-5">
+            <ProviderUsageSection
+              summary={providerUsage}
+              loading={providerLoading}
+              error={providerError}
+              onRefresh={() => setProviderRefreshKey((value) => value + 1)}
+            />
+            <EmptyState message="Select a project to load local session costs." />
+          </div>
         ) : (
           <div className="space-y-5">
+            <ProviderUsageSection
+              summary={providerUsage}
+              loading={providerLoading}
+              error={providerError}
+              onRefresh={() => setProviderRefreshKey((value) => value + 1)}
+            />
+
             {error ? (
               <div className="rounded-md border border-accent-del/40 bg-accent-del/10 px-4 py-3 text-sm text-accent-del">
                 {error}
@@ -332,3 +398,185 @@ export function CostDashboard({ project }: CostDashboardProps) {
 }
 
 export default CostDashboard
+
+function ProviderUsageSection({
+  summary,
+  loading,
+  error,
+  onRefresh,
+}: {
+  summary: ProviderUsageSummary | null
+  loading: boolean
+  error: string | null
+  onRefresh: () => void
+}) {
+  const totals = useMemo(() => summarizeProviders(summary?.providers ?? []), [summary])
+
+  return (
+    <section className="rounded-md border border-hairline bg-card/60 p-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-primary">CLI Usage</h3>
+          <div className="mt-1 text-xs text-muted">
+            {summary
+              ? `Updated ${dateTimeFormatter.format(summary.generatedAt)}`
+              : 'Loads subscription and token telemetry from installed CLIs'}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right text-xs text-muted">
+            <span className="font-semibold tabular-nums text-secondary">
+              {formatCurrency(totals.cost)}
+            </span>{' '}
+            local spend
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="rounded-md border border-hairline px-3 py-2 text-xs font-medium text-secondary transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="rounded-md border border-accent-del/40 bg-accent-del/10 px-4 py-3 text-sm text-accent-del">
+          {error}
+        </div>
+      ) : loading && !summary ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {[0, 1, 2, 3].map((index) => (
+            <div key={index} className="rounded-md border border-hairline bg-sidebar p-4">
+              <div className="h-4 w-32 animate-pulse rounded bg-card-raised" />
+              <div className="mt-3 h-3 w-52 animate-pulse rounded bg-card-raised" />
+              <div className="mt-4 h-2 w-full animate-pulse rounded bg-card-raised" />
+            </div>
+          ))}
+        </div>
+      ) : summary ? (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {summary.providers.map((provider) => (
+            <ProviderUsageCard key={provider.agentId} provider={provider} />
+          ))}
+        </div>
+      ) : (
+        <EmptyState message="No provider usage loaded yet." />
+      )}
+    </section>
+  )
+}
+
+function ProviderUsageCard({ provider }: { provider: ProviderUsageRow }) {
+  const tokens = provider.tokensIn + provider.tokensOut
+  const percent = provider.limit.usedPercent
+  const barPercent =
+    typeof percent === 'number' && Number.isFinite(percent)
+      ? Math.min(100, Math.max(0, percent))
+      : null
+
+  return (
+    <article className="rounded-md border border-hairline bg-sidebar p-4">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded border text-[10px] font-semibold ${providerIconClass(
+            provider.agentId,
+          )}`}
+          aria-hidden="true"
+        >
+          {providerInitials[provider.agentId]}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-primary">{provider.name}</div>
+              <div className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    provider.installed ? 'bg-accent-add' : 'bg-muted'
+                  }`}
+                  aria-hidden="true"
+                />
+                <span>{provider.installed ? 'Installed' : 'Not installed'}</span>
+                {provider.limit.source ? <span>via {provider.limit.source}</span> : null}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-sm font-semibold tabular-nums text-primary">
+                {formatCurrency(provider.totalCostUsd)}
+              </div>
+              <div className="text-[11px] text-muted">{formatInteger(provider.sessions)} runs</div>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className={`text-xs font-semibold ${limitToneClass(provider.limit.status)}`}>
+                {provider.limit.label}
+              </div>
+              {provider.limit.resetsAt ? (
+                <div className="text-[11px] text-muted">
+                  Resets {dateTimeFormatter.format(provider.limit.resetsAt)}
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-card-raised">
+              <div
+                className={`h-2 rounded-full transition-all ${limitBarClass(provider.limit.status)}`}
+                style={{ width: `${barPercent ?? 0}%` }}
+              />
+            </div>
+            <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted">
+              {provider.limit.detail}
+            </p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <MetricPill label="Tokens" value={formatInteger(tokens)} />
+            <MetricPill label="Input" value={formatInteger(provider.tokensIn)} />
+            <MetricPill label="Output" value={formatInteger(provider.tokensOut)} />
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded border border-hairline bg-canvas/60 px-2 py-1">
+      <div className="text-[9px] uppercase tracking-wide text-muted">{label}</div>
+      <div className="truncate text-[11px] font-medium tabular-nums text-secondary">{value}</div>
+    </div>
+  )
+}
+
+function summarizeProviders(providers: ProviderUsageRow[]): { cost: number; sessions: number } {
+  return providers.reduce(
+    (total, provider) => ({
+      cost: total.cost + provider.totalCostUsd,
+      sessions: total.sessions + provider.sessions,
+    }),
+    { cost: 0, sessions: 0 },
+  )
+}
+
+function providerIconClass(agentId: SupportedAgentId): string {
+  if (agentId === 'codex') return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+  if (agentId === 'claude-code') return 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+  if (agentId === 'opencode') return 'border-sky-400/30 bg-sky-400/10 text-sky-200'
+  return 'border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-200'
+}
+
+function limitToneClass(status: ProviderUsageRow['limit']['status']): string {
+  if (status === 'available') return 'text-accent-add'
+  if (status === 'error') return 'text-accent-del'
+  return 'text-muted'
+}
+
+function limitBarClass(status: ProviderUsageRow['limit']['status']): string {
+  if (status === 'available') return 'bg-accent-add'
+  if (status === 'error') return 'bg-accent-del'
+  return 'bg-muted'
+}

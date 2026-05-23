@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEven
 import type { ThreadSearchResult } from '../../shared/types'
 import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
+import { ExtensionMarketplaceView } from '../modules/extensions'
 import { SettingsView, useSettings } from '../modules/settings'
 import { AppUpdateBanner } from '../modules/updates'
 import { useWorkspaceController } from '../modules/workspace'
@@ -42,7 +43,7 @@ export function RendererApp() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [shellView, setShellView] = useState<'workspace' | 'settings'>('workspace')
+  const [shellView, setShellView] = useState<'workspace' | 'settings' | 'extensions'>('workspace')
   const [openTerminalOnMount, setOpenTerminalOnMount] = useState(false)
 
   // Keep the mobile drawer mounted while opening, and during the close
@@ -115,6 +116,23 @@ export function RendererApp() {
     [history, workspace],
   )
 
+  const handleSelectThreadAgent = useCallback(
+    async (
+      project: Parameters<typeof workspace.handleProjectSelect>[0],
+      thread: Thread,
+      sessionId: string,
+    ) => {
+      const session = await window.agentforge.sessions.get(sessionId).catch(() => null)
+      if (session) {
+        workspace.handleOpenSession(session, project)
+        history.push(thread.id)
+        setMobileSidebarOpen(false)
+        setShellView('workspace')
+      }
+    },
+    [history, workspace],
+  )
+
   const handleSelectProject = useCallback(
     (project: Parameters<typeof workspace.handleProjectSelect>[0]) => {
       workspace.handleProjectSelect(project)
@@ -154,6 +172,11 @@ export function RendererApp() {
     setMobileSidebarOpen(false)
     setShellView('workspace')
   }, [workspace])
+
+  const handleOpenExtensions = useCallback(() => {
+    setShellView('extensions')
+    setMobileSidebarOpen(false)
+  }, [])
 
   const handleOpenSearchResult = useCallback(
     async (result: ThreadSearchResult) => {
@@ -223,6 +246,12 @@ export function RendererApp() {
     setMobileSidebarOpen(false)
   }, [])
 
+  const handleOpenUsage = useCallback(() => {
+    workspace.setMainView('costs')
+    setShellView('workspace')
+    setMobileSidebarOpen(false)
+  }, [workspace])
+
   const handleCloseSettings = useCallback(() => {
     setShellView('workspace')
   }, [])
@@ -239,7 +268,7 @@ export function RendererApp() {
   }, [mobileSidebarOpen])
 
   useEffect(() => {
-    if (shellView !== 'settings') return
+    if (shellView !== 'settings' && shellView !== 'extensions') return
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') setShellView('workspace')
@@ -263,14 +292,20 @@ export function RendererApp() {
           onForward={handleHistoryForward}
           onSelectProject={handleSelectProject}
           onSelectThread={(project, thread) => void handleSelectThread(project, thread)}
+          onSelectThreadAgent={(project, thread, sessionId) =>
+            void handleSelectThreadAgent(project, thread, sessionId)
+          }
           onNewChat={handleNewChat}
           onNewChatForProject={handleNewChatForProject}
           onSelectedProjectDeleted={workspace.handleSelectedProjectDeleted}
           onActiveThreadDeleted={workspace.handleNewTab}
           onSearch={handleOpenSearch}
+          onPlugins={handleOpenExtensions}
           onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+          onOpenUsage={handleOpenUsage}
           onOpenSettings={handleOpenSettings}
           settingsActive={shellView === 'settings'}
+          usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
       </div>
@@ -309,14 +344,20 @@ export function RendererApp() {
               onForward={handleHistoryForward}
               onSelectProject={handleSelectProject}
               onSelectThread={(project, thread) => void handleSelectThread(project, thread)}
+              onSelectThreadAgent={(project, thread, sessionId) =>
+                void handleSelectThreadAgent(project, thread, sessionId)
+              }
               onNewChat={handleNewChat}
               onNewChatForProject={handleNewChatForProject}
               onSelectedProjectDeleted={workspace.handleSelectedProjectDeleted}
               onActiveThreadDeleted={workspace.handleNewTab}
               onSearch={handleOpenSearch}
+              onPlugins={handleOpenExtensions}
               onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+              onOpenUsage={handleOpenUsage}
               onOpenSettings={handleOpenSettings}
               settingsActive={shellView === 'settings'}
+              usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
             />
           </div>
         </div>
@@ -325,6 +366,15 @@ export function RendererApp() {
       <div className="flex min-w-0 flex-1 overflow-hidden">
         {shellView === 'settings' ? (
           <SettingsView
+            isMac={isMac}
+            selectedProject={workspace.selectedProject}
+            onOpenSidebar={() => setMobileSidebarOpen(true)}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+            onClose={handleCloseSettings}
+          />
+        ) : shellView === 'extensions' ? (
+          <ExtensionMarketplaceView
             isMac={isMac}
             selectedProject={workspace.selectedProject}
             onOpenSidebar={() => setMobileSidebarOpen(true)}
@@ -363,6 +413,10 @@ export function RendererApp() {
           onStatusChange={workspace.updateActiveStatus}
           onApproveApproval={workspace.handleApproveApproval}
           onRejectApproval={workspace.handleRejectApproval}
+          onOpenSession={(session) => {
+            workspace.handleOpenSession(session)
+            if (session.threadId) history.push(session.threadId)
+          }}
           onSessionStarted={(summary) => {
             workspace.handleSessionStarted(summary)
             history.push(summary.threadId)

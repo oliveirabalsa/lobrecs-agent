@@ -3,8 +3,10 @@ import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   ApprovalRequest,
   DiffProposal,
+  GitDiffReviewResult,
   ImageAttachment,
   Project,
+  RunAuditRecord,
   SessionStatus,
   SupportedAgentId,
   ThreadTranscriptTurn,
@@ -13,6 +15,10 @@ import { AssistantMessage } from '../components/AssistantMessage'
 import type { MarkdownLinkRequest } from '../components/MarkdownContent'
 import type { MarkdownPreviewDocument } from '../components/MarkdownPreviewer'
 import { MessageStream } from '../components/MessageStream'
+import {
+  DiffReviewCard,
+  RunAuditTimelineCard,
+} from '../components/artifacts'
 import { PlanPromptModal } from '../components/modals/PlanPromptModal'
 import {
   emitPlanModeReset,
@@ -59,6 +65,7 @@ interface RunWorkspaceProps {
    * inside `<EditedFilesCard>` jump straight to the matching diff tab.
    */
   onReviewFile?: (filePath?: string) => void
+  onOpenAgentPanel?: () => void
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
   /** Called with the context window percentage (0–100) after a session completes. */
@@ -95,6 +102,7 @@ export function RunWorkspace({
   onRejectApproval,
   onSessionStarted,
   onReviewFile,
+  onOpenAgentPanel,
   onOpenMarkdown,
   onPreviewMarkdown,
   onContextPercent,
@@ -205,6 +213,10 @@ export function RunWorkspace({
     onContextPercent(Math.min(100, Math.round((tokensIn / 200_000) * 100)))
   }, [tokensIn, onContextPercent])
   const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
+  const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
+  const [diffReview, setDiffReview] = useState<GitDiffReviewResult | null>(null)
+  const [diffReviewLoading, setDiffReviewLoading] = useState(false)
+  const [diffReviewError, setDiffReviewError] = useState<string | null>(null)
   const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
@@ -240,6 +252,31 @@ export function RunWorkspace({
       cancelled = true
     }
   }, [sessionId, threadId])
+
+  useEffect(() => {
+    setAuditRecords([])
+    setDiffReview(null)
+    setDiffReviewError(null)
+  }, [sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    let cancelled = false
+    const loadAuditRecords = async () => {
+      const records = await window.agentforge.runs
+        .listSessionAuditRecords(sessionId)
+        .catch(() => [])
+      if (cancelled) return
+      setAuditRecords(records)
+    }
+
+    void loadAuditRecords()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activities.length, sessionId, status])
 
   // A pending agent question belongs to the *thread*, not one session run.
   // Queued follow-ups, steering, and answering all start a fresh `sessionId`
@@ -278,6 +315,11 @@ export function RunWorkspace({
   const pendingApprovals = approvalRequest ? 1 : 0
   const pendingQuestions = pendingUserQuestion ? 1 : 0
   const effectiveStatus = status ?? (sessionId ? 'running' : null)
+  const showDiffReview =
+    isFinishedSessionStatus(effectiveStatus) ||
+    diffReview !== null ||
+    diffReviewLoading ||
+    diffReviewError !== null
   const seedUserMessage = useMemo(() => {
     if (!prompt) return undefined
     if (startedAt === undefined) {
@@ -296,6 +338,47 @@ export function RunWorkspace({
     [onReviewFile],
   )
 
+  const handleReviewCurrentDiff = useCallback(async () => {
+    setDiffReviewLoading(true)
+    setDiffReviewError(null)
+    try {
+      const result = await window.agentforge.git.reviewCurrentDiff(
+        project.id,
+        threadId ?? undefined,
+      )
+      setDiffReview(result)
+    } catch (error) {
+      setDiffReview(null)
+      setDiffReviewError(formatDiffReviewError(error))
+    } finally {
+      setDiffReviewLoading(false)
+    }
+  }, [project.id, threadId])
+
+  const handleFixDiffReview = useCallback(
+    async (review: GitDiffReviewResult) => {
+      const fixPrompt = buildDiffReviewFixPrompt(review)
+      const createdAt = Date.now()
+      const result = await window.agentforge.agent.dispatch({
+        projectId: project.id,
+        prompt: fixPrompt,
+        agentId: toSupportedAgentId(agentId),
+        modelOverride,
+        threadId: threadId ?? undefined,
+      })
+      onSessionStarted?.({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt: fixPrompt,
+        routingDecision: null,
+        agentId: toSupportedAgentId(agentId),
+        modelOverride,
+        createdAt,
+      })
+    },
+    [agentId, modelOverride, onSessionStarted, project.id, threadId],
+  )
+
   const streamHandlers = useMemo(
     () => ({
       diffProposals,
@@ -309,6 +392,7 @@ export function RunWorkspace({
         setActiveUserQuestion(prompt)
         setQuestionSubmitError(null)
       },
+      onSessionStarted,
       onOpenMarkdown,
       onPreviewMarkdown,
     }),
@@ -319,6 +403,7 @@ export function RunWorkspace({
       handleReviewFile,
       onApproveApproval,
       onRejectApproval,
+      onSessionStarted,
       onOpenMarkdown,
       onPreviewMarkdown,
     ],
@@ -434,6 +519,17 @@ export function RunWorkspace({
             seedUserMessage={seedUserMessage}
             streamHandlers={streamHandlers}
           />
+          <RunAuditTimelineCard records={auditRecords} />
+          {showDiffReview ? (
+            <DiffReviewCard
+              result={diffReview}
+              loading={diffReviewLoading}
+              error={diffReviewError}
+              onReview={handleReviewCurrentDiff}
+              onFix={handleFixDiffReview}
+              onOpenAgentPanel={onOpenAgentPanel}
+            />
+          ) : null}
           {approvalRequest && approvalRequest.risk !== 'high' ? (
             <ApprovalCallout
               request={approvalRequest}
@@ -544,6 +640,52 @@ function toSupportedAgentId(agentId: Project['agentId'] | undefined): SupportedA
     return agentId as SupportedAgentId
   }
   return undefined
+}
+
+function isFinishedSessionStatus(status: SessionStatus | null): boolean {
+  return status === 'done' || status === 'error' || status === 'cancelled'
+}
+
+function formatDiffReviewError(error: unknown): string {
+  const fallback = 'Failed to review current diff.'
+  const message = error instanceof Error ? error.message : String(error || fallback)
+  const ipcPrefix = "Error invoking remote method 'git:review-current-diff': Error: "
+
+  return message.startsWith(ipcPrefix) ? message.slice(ipcPrefix.length) : message
+}
+
+function buildDiffReviewFixPrompt(review: GitDiffReviewResult): string {
+  const findings =
+    review.findings.length > 0
+      ? review.findings
+          .map((finding, index) =>
+            [
+              `${index + 1}. [${finding.severity}/${finding.category}] ${finding.title}`,
+              finding.filePath ? `File: ${finding.filePath}${finding.line ? `:${finding.line}` : ''}` : null,
+              `Detail: ${finding.detail}`,
+              finding.recommendation ? `Recommendation: ${finding.recommendation}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          )
+          .join('\n\n')
+      : 'No concrete findings were returned.'
+
+  return [
+    'Fix the issues from the local diff review below.',
+    '',
+    'Rules:',
+    '- Keep the fix scoped to the current working tree changes.',
+    '- Do not revert unrelated user changes.',
+    '- Add or update focused tests when the finding requires verification.',
+    '',
+    `Review summary: ${review.summary}`,
+    `Branch: ${review.branch}`,
+    `Diff: ${review.statusSummary}`,
+    '',
+    'Findings:',
+    findings,
+  ].join('\n')
 }
 
 function PriorThreadMessages({

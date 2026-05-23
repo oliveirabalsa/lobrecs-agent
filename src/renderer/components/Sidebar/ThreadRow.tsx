@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import type { SessionStatus } from '../../../shared/types'
 import { Spinner } from '../ui'
 import { formatRelative } from '../../lib/relativeTime'
@@ -8,6 +8,7 @@ interface ThreadRowProps {
   thread: Thread
   active: boolean
   onSelect: (thread: Thread) => void
+  onSelectAgent?: (thread: Thread, sessionId: string) => void
   onDelete?: (thread: Thread) => void
 }
 
@@ -32,8 +33,12 @@ const STATUS_DOT: Record<SessionStatus, StatusDotStyle> = {
   cancelled: { color: 'bg-muted', active: false, label: 'Cancelled' },
 }
 
-export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps) {
+export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }: ThreadRowProps) {
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)
+  const visibleAgents = active && thread.agents.length > 1 ? thread.agents : []
+  const hasSubagents = visibleAgents.length > 0
+  const [subagentsExpanded, setSubagentsExpanded] = useState(true)
+  const subagentsVisible = hasSubagents && subagentsExpanded
   const baseClasses =
     'group flex h-8 w-full cursor-pointer items-center gap-1 rounded-card pr-1 pl-3 text-left transition-colors'
   const stateClasses = active
@@ -41,64 +46,119 @@ export function ThreadRow({ thread, active, onSelect, onDelete }: ThreadRowProps
     : 'text-secondary hover:bg-white/5 hover:text-primary'
   const inactiveButtonClass = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition hover:bg-accent-del/10 hover:text-accent-del'
 
-  function handleDeleteClick(event: MouseEvent<HTMLSpanElement>) {
+  function handleSubagentsToggleClick(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation()
-    onDelete?.(thread)
+    setSubagentsExpanded((value) => !value)
   }
 
-  function handleDeleteKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-
-    event.preventDefault()
+  function handleDeleteClick(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation()
     onDelete?.(thread)
   }
 
   return (
-    <button
-      type="button"
-      className={`relative ${baseClasses} ${stateClasses}`}
-      onClick={() => onSelect(thread)}
-    >
-      {active ? (
-        <span
-          className="animate-accent-line absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
-          aria-hidden="true"
-        />
-      ) : null}
+    <div className="min-w-0">
       <div
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        aria-current={active ? 'page' : undefined}
-        title={thread.title}
+        className={`relative ${baseClasses} ${stateClasses}`}
       >
-        <StatusDot status={thread.sessionStatus} />
-        <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
-          {thread.title}
-        </span>
-        {isRunning ? (
-          <span className="shrink-0 text-secondary" aria-label={`${thread.sessionStatus}`}>
-            <Spinner size={12} />
-          </span>
-        ) : (
-          <span className="shrink-0 text-[11px] text-muted tabular-nums">
-            {formatRelative(thread.updatedAt)}
-          </span>
-        )}
-      </div>
-      {onDelete ? (
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={handleDeleteClick}
-          onKeyDown={handleDeleteKeyDown}
-          aria-label={`Delete thread ${thread.title}`}
-          title="Delete thread"
-          className={`${inactiveButtonClass} opacity-0 group-hover:opacity-100 focus:opacity-100`}
+        {active ? (
+          <span
+            className="animate-accent-line absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
+            aria-hidden="true"
+          />
+        ) : null}
+        {hasSubagents ? (
+          <button
+            type="button"
+            onClick={handleSubagentsToggleClick}
+            aria-label={subagentsExpanded ? 'Collapse subagents' : 'Expand subagents'}
+            aria-expanded={subagentsExpanded}
+            className="-ml-1 flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+          >
+            <ChevronIcon open={subagentsExpanded} />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => onSelect(thread)}
+          className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
+          aria-current={active ? 'page' : undefined}
+          aria-label={thread.title}
         >
-          <TrashIcon />
-        </span>
+          <StatusDot status={thread.sessionStatus} />
+          <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
+            {thread.title}
+          </span>
+          {isRunning ? (
+            <span className="shrink-0 text-secondary" aria-label={`${thread.sessionStatus}`}>
+              <Spinner size={12} />
+            </span>
+          ) : (
+            <span className="shrink-0 text-[11px] text-muted tabular-nums">
+              {formatRelative(thread.updatedAt)}
+            </span>
+          )}
+        </button>
+        {onDelete ? (
+          <button
+            type="button"
+            onClick={handleDeleteClick}
+            aria-label={`Delete thread ${thread.title}`}
+            title="Delete thread"
+            className={`${inactiveButtonClass} opacity-0 group-hover:opacity-100 focus:opacity-100`}
+          >
+            <TrashIcon />
+          </button>
+        ) : null}
+      </div>
+
+      {subagentsVisible ? (
+        <div className="ml-5 mt-1 grid gap-0.5 border-l border-hairline pl-2">
+          <div className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted">
+            Subagents
+          </div>
+          {visibleAgents.map((agent, index) => (
+            <button
+              key={agent.sessionId}
+              type="button"
+              onClick={() => onSelectAgent?.(thread, agent.sessionId)}
+              className="grid h-7 min-w-0 grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2 rounded-card px-2 text-left text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+              title={`${agent.role} / ${agent.agentId} / ${agent.model}`}
+            >
+              <StatusDot status={agent.status} />
+              <span className="min-w-0 truncate text-[12px] leading-none">
+                {agent.role}
+              </span>
+              <span className="shrink-0 text-[10px] text-muted">
+                {index + 1}
+              </span>
+            </button>
+          ))}
+        </div>
       ) : null}
-    </button>
+    </div>
+  )
+}
+
+function ChevronIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{
+        transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+        transition: 'transform 120ms ease-out',
+      }}
+    >
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
   )
 }
 

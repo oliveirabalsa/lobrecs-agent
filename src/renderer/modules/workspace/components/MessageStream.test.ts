@@ -325,7 +325,7 @@ describe('editedFileCardsForFallbackFiles', () => {
       ]),
     ).toEqual([
       {
-        id: 'fallback:/repo/index.html|src/app.ts',
+        id: 'edited-files',
         proposals: [htmlProposal],
         fallbackFiles: [
           {
@@ -371,7 +371,7 @@ describe('editedFileCards', () => {
       ),
     ).toEqual([
       {
-        id: 'mixed:/Users/leo/project/src/app.ts|/Users/leo/project/src/config.ts',
+        id: 'edited-files',
         proposals: [appProposal, configProposal],
         fallbackFiles: [
           {
@@ -407,10 +407,38 @@ describe('editedFileCards', () => {
       }),
     ).toEqual([
       {
-        id: 'proposals:/Users/leo/project/src/a.ts|/Users/leo/project/src/b.ts',
+        id: 'edited-files',
         proposals: [firstProposal, secondProposal],
         fallbackFiles: [],
       },
     ])
+  })
+
+  it('keeps the card identity stable while files are added to the live edit set', () => {
+    const firstProposal = {
+      filePath: '/Users/leo/project/src/a.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 1,
+    }
+    const secondProposal = {
+      filePath: '/Users/leo/project/src/b.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 2,
+      deletions: 0,
+    }
+
+    const before = editedFileCards([firstProposal], [], {
+      includeUnmatchedProposals: true,
+    })
+    const after = editedFileCards([firstProposal, secondProposal], [], {
+      includeUnmatchedProposals: true,
+    })
+
+    expect(before).toHaveLength(1)
+    expect(after).toHaveLength(1)
+    expect(after[0].id).toBe(before[0].id)
   })
 })

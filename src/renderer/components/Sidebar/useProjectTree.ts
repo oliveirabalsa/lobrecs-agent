@@ -25,6 +25,16 @@ export interface Thread {
   /** Required for sidebar status display — threads without sessions are hidden. */
   lastSessionId: string
   sessionStatus: SessionStatus
+  agents: ThreadAgentSummary[]
+}
+
+export interface ThreadAgentSummary {
+  sessionId: string
+  role: string
+  agentId: Session['agentId']
+  model: string
+  status: SessionStatus
+  createdAt: number
 }
 
 interface ProjectTreeState {
@@ -81,16 +91,24 @@ async function listThreadsForProject(projectId: string): Promise<Thread[]> {
     (thread): thread is ThreadContract & { lastSessionId: string } =>
       Boolean(thread.lastSessionId),
   )
-
-  // Parallel fetch sessions so we can render the right status pill.
-  const sessions = await Promise.all(
-    withSession.map((thread) =>
-      window.agentforge.sessions.get(thread.lastSessionId).catch(() => null),
-    ),
-  )
+  const projectSessions = await window.agentforge.sessions.list(projectId)
+  const sessionsById = new Map(projectSessions.map((session) => [session.id, session]))
+  const sessionsByThread = new Map<string, Session[]>()
+  for (const session of projectSessions) {
+    if (!session.threadId) continue
+    const list = sessionsByThread.get(session.threadId) ?? []
+    list.push(session)
+    sessionsByThread.set(session.threadId, list)
+  }
 
   const merged: Thread[] = withSession
-    .map((thread, idx) => mergeContractWithSession(thread, sessions[idx]))
+    .map((thread) =>
+      mergeContractWithSession(
+        thread,
+        sessionsById.get(thread.lastSessionId) ?? null,
+        sessionsByThread.get(thread.id) ?? [],
+      ),
+    )
     .filter((thread): thread is Thread => thread !== null)
 
   return merged.sort(compareThreads)
@@ -99,6 +117,7 @@ async function listThreadsForProject(projectId: string): Promise<Thread[]> {
 function mergeContractWithSession(
   thread: ThreadContract & { lastSessionId: string },
   session: Session | null,
+  threadSessions: readonly Session[] = session ? [session] : [],
 ): Thread | null {
   if (!session) return null
   return {
@@ -110,6 +129,17 @@ function mergeContractWithSession(
     pinned: thread.pinned,
     lastSessionId: thread.lastSessionId,
     sessionStatus: session.status,
+    agents: threadSessions
+      .slice()
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((item, index) => ({
+        sessionId: item.id,
+        role: roleFromPrompt(item.prompt) ?? `agent ${index + 1}`,
+        agentId: item.agentId,
+        model: item.model,
+        status: item.status,
+        createdAt: item.createdAt,
+      })),
   }
 }
 
@@ -265,6 +295,11 @@ export function useProjectTree(): ProjectTreeApi {
               ...t,
               sessionStatus: nextStatus,
               updatedAt: Math.max(t.updatedAt, event.timestamp),
+              agents: t.agents.map((agent) =>
+                agent.sessionId === thread.lastSessionId
+                  ? { ...agent, status: nextStatus }
+                  : agent,
+              ),
             }
           })
           if (!mutated) return prev
@@ -290,11 +325,15 @@ export function useProjectTree(): ProjectTreeApi {
       void window.agentforge.sessions
         .get(incoming.lastSessionId)
         .catch(() => null)
-        .then((session) => {
+        .then(async (session) => {
           if (!session) return
+          const projectSessions = await window.agentforge.sessions
+            .list(projectId)
+            .catch(() => [session])
           const hydrated = mergeContractWithSession(
             { ...incoming, lastSessionId: incoming.lastSessionId! },
             session,
+            projectSessions.filter((item) => item.threadId === incoming.id),
           )
           if (!hydrated) return
 
@@ -371,4 +410,10 @@ export function useProjectTree(): ProjectTreeApi {
     refreshThreads,
     deleteThread,
   }
+}
+
+function roleFromPrompt(prompt: string): string | null {
+  const match = prompt.match(/^\s*\[Role:\s*([^\]]+)\]/i)
+  const role = match?.[1]?.trim()
+  return role || null
 }

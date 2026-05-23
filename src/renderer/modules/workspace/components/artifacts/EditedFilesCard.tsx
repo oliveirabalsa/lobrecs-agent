@@ -1,5 +1,5 @@
 import { DiffEditor } from '@monaco-editor/react'
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import type { DiffProposal } from '../../../../../shared/types'
 import { Button } from '../../../../components/ui'
 import {
@@ -228,16 +228,18 @@ function toEditedFileEntry(entry: OrderedEditedFileEntry): EditedFileEntry {
   return editedFileEntry
 }
 
-function FileRow({
-  entry,
-  onReview,
-  onOpenDiff,
-}: {
+export interface FileRowProps {
   entry: EditedFileEntry
   onReview?: (filePath?: string) => void
   /** Opens the full-screen diff modal for this file. */
   onOpenDiff: (entry: EditedFileEntry) => void
-}) {
+}
+
+const FileRow = memo(function FileRow({
+  entry,
+  onReview,
+  onOpenDiff,
+}: FileRowProps) {
   const [expanded, setExpanded] = useState(false)
   const { filePath, additions, deletions, proposal } = entry
   const hasVisibleStats = additions + deletions > 0
@@ -318,6 +320,49 @@ function FileRow({
         </div>
       ) : null}
     </li>
+  )
+}, areFileRowPropsEqual)
+
+export function areFileRowPropsEqual(
+  previous: FileRowProps,
+  next: FileRowProps,
+): boolean {
+  return (
+    previous.onReview === next.onReview &&
+    previous.onOpenDiff === next.onOpenDiff &&
+    editedFileEntriesAreEqual(previous.entry, next.entry)
+  )
+}
+
+function editedFileEntriesAreEqual(
+  previous: EditedFileEntry,
+  next: EditedFileEntry,
+): boolean {
+  return (
+    previous.filePath === next.filePath &&
+    previous.additions === next.additions &&
+    previous.deletions === next.deletions &&
+    diffProposalsAreEqual(previous.proposal, next.proposal)
+  )
+}
+
+function diffProposalsAreEqual(
+  previous: DiffProposal | undefined,
+  next: DiffProposal | undefined,
+): boolean {
+  if (previous === next) return true
+  if (!previous || !next) return false
+
+  return (
+    previous.filePath === next.filePath &&
+    previous.originalContent === next.originalContent &&
+    previous.proposedContent === next.proposedContent &&
+    previous.description === next.description &&
+    previous.changeType === next.changeType &&
+    previous.additions === next.additions &&
+    previous.deletions === next.deletions &&
+    previous.baseHash === next.baseHash &&
+    previous.status === next.status
   )
 }
 
