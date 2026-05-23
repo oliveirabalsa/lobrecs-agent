@@ -116,7 +116,7 @@ describe('splitFinalAssistant', () => {
     const items: StreamItem[] = [
       { kind: 'message', role: 'assistant', text: 'Here is my plan' },
       { kind: 'completion', status: 'done', summary: 'Session complete' },
-      { kind: 'plan-review', reviewId: 'review-1' },
+      { kind: 'plan-review', reviewId: 'review-1', agentId: 'claude-code', model: 'claude-sonnet-4-6' },
     ]
 
     const result = splitFinalAssistant(items)
@@ -125,7 +125,7 @@ describe('splitFinalAssistant', () => {
     // The marker is pulled out of `renderable` so it does not appear above
     // the plan it belongs to.
     expect(result.renderable).toEqual([])
-    expect(result.planReviewItems).toEqual([{ kind: 'plan-review', reviewId: 'review-1' }])
+    expect(result.planReviewItems).toEqual([{ kind: 'plan-review', reviewId: 'review-1', agentId: 'claude-code', model: 'claude-sonnet-4-6' }])
   })
 })
 

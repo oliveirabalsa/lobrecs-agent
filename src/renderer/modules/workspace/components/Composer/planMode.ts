@@ -11,6 +11,17 @@ export function shouldResetPlanModeAfterDispatch(planMode: boolean): boolean {
 }
 
 /**
+ * Answering an agent question is a follow-up dispatch on the same thread. If
+ * the interrupted session was a plan-mode planning turn, the answer must keep
+ * the planning gate active instead of turning into an execution run.
+ */
+export function shouldContinuePlanModeAfterQuestionAnswer(
+  planMode: boolean | null | undefined,
+): boolean {
+  return planMode === true
+}
+
+/**
  * Returns the most recent plan-review marker id in a session activity list.
  * When present, the planning phase is complete and the composer should drop
  * any sticky plan-mode toggle.

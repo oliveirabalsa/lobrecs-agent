@@ -1,6 +1,19 @@
-import { useMemo, useState } from 'react'
-import type { AgentDispatchResult } from '../../../../../shared/types'
+import { useEffect, useMemo, useState } from 'react'
+import type {
+  AgentDispatchResult,
+  AgentModelCatalog,
+  AgentPlanReviewDecisionPayload,
+  SupportedAgentId,
+} from '../../../../../shared/types'
+import { SUPPORTED_AGENT_IDS } from '../../../../../shared/types'
 import { Button } from '../../../../components/ui'
+import { ModelChip } from '../Composer/ModelChip'
+import {
+  FALLBACK_MODEL_CATALOGS,
+  groupModelOptions,
+} from '../Composer/modelCatalog'
+import { formatModelLabel } from '../Composer/modelDisplay'
+import type { ModelGroup, ModelOption, ModelSelection } from '../Composer/types'
 import type { MarkdownPreviewDocument } from '../MarkdownPreviewer'
 
 export interface PlanReviewCardProps {
@@ -10,6 +23,10 @@ export interface PlanReviewCardProps {
   sessionId: string
   /** The assistant plan text rendered directly above this review control. */
   planText?: string
+  /** Agent that produced the plan — used to scope the model picker. */
+  agentId?: string
+  /** Model that produced the plan — used as the default in the model picker. */
+  planningModel?: string
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
 }
 
@@ -42,6 +59,58 @@ export function resolvePlanReviewOutcome(
   return result ? 'approved' : 'stale'
 }
 
+export function normalizePlanReviewText(
+  value: string | null | undefined,
+): string | undefined {
+  const normalized = value?.trim()
+  return normalized ? normalized : undefined
+}
+
+export function buildPlanReviewDecisionPayload(input: {
+  reviewId: string
+  sessionId: string
+  choice: 'approve' | 'reject'
+  originalPlanText?: string
+  editedPlanText?: string
+  suggestionText?: string
+  planningAgentId?: string
+  agentOverride?: string
+  planningModel?: string
+  modelOverride?: string
+}): AgentPlanReviewDecisionPayload {
+  const payload: AgentPlanReviewDecisionPayload = {
+    reviewId: input.reviewId,
+    sessionId: input.sessionId,
+    decision: input.choice,
+  }
+
+  if (input.choice !== 'approve') return payload
+
+  const originalPlanText = normalizePlanReviewText(input.originalPlanText)
+  const editedPlanText = normalizePlanReviewText(input.editedPlanText)
+  const suggestionText = normalizePlanReviewText(input.suggestionText)
+
+  if (editedPlanText && editedPlanText !== originalPlanText) {
+    payload.editedPlanText = editedPlanText
+  }
+  if (suggestionText) payload.suggestionText = suggestionText
+  if (
+    isSupportedAgentId(input.agentOverride) &&
+    input.agentOverride !== input.planningAgentId &&
+    input.modelOverride
+  ) {
+    payload.agentId = input.agentOverride
+  }
+  if (
+    input.modelOverride &&
+    (input.modelOverride !== input.planningModel || payload.agentId)
+  ) {
+    payload.modelOverride = input.modelOverride
+  }
+
+  return payload
+}
+
 export function toPlanReviewMarkdownDocument(
   planText: string,
 ): MarkdownPreviewDocument {
@@ -56,6 +125,63 @@ export function toPlanReviewMarkdownDocument(
 
 function canPreviewPlan(planText?: string): planText is string {
   return typeof planText === 'string' && planText.trim().length > 0
+}
+
+function isSupportedAgentId(value: unknown): value is SupportedAgentId {
+  return typeof value === 'string' && SUPPORTED_AGENT_IDS.includes(value as SupportedAgentId)
+}
+
+function toSupportedAgentId(value: unknown): SupportedAgentId | undefined {
+  return isSupportedAgentId(value) ? value : undefined
+}
+
+export function selectPlanReviewModel(
+  groups: readonly ModelGroup[],
+  planningAgentId?: SupportedAgentId,
+  planningModel?: string,
+): ModelSelection | null {
+  const plannedOption = groups
+    .find((group) => group.agentId === planningAgentId)
+    ?.options.find((option) => option.modelId === planningModel)
+  const sameAgentOption = groups.find((group) => group.agentId === planningAgentId)
+    ?.options[0]
+  const fallbackOption = plannedOption ?? sameAgentOption ?? groups[0]?.options[0]
+
+  if (fallbackOption) {
+    return {
+      kind: 'manual',
+      agentId: fallbackOption.agentId,
+      modelId: fallbackOption.modelId,
+    }
+  }
+
+  if (planningAgentId && planningModel) {
+    return { kind: 'manual', agentId: planningAgentId, modelId: planningModel }
+  }
+
+  return null
+}
+
+export function findPlanReviewManualOption(
+  groups: readonly ModelGroup[],
+  selection: ModelSelection | null,
+): ModelOption | null {
+  if (selection?.kind !== 'manual') return null
+
+  const option = groups
+    .find((group) => group.agentId === selection.agentId)
+    ?.options.find((candidate) => candidate.modelId === selection.modelId)
+
+  if (option) return option
+
+  return {
+    key: `${selection.agentId}:${selection.modelId}`,
+    agentId: selection.agentId,
+    agentName: selection.agentId,
+    modelId: selection.modelId,
+    label: formatModelLabel(selection.agentId, selection.modelId),
+    tier: 'balanced',
+  }
 }
 
 /**
@@ -74,27 +200,86 @@ export function PlanReviewCard({
   reviewId,
   sessionId,
   planText,
+  agentId,
+  planningModel,
   onPreviewMarkdown,
 }: PlanReviewCardProps) {
   const [decision, setDecision] = useState<PlanReviewOutcome | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingPlan, setEditingPlan] = useState(false)
+  const [editedPlanText, setEditedPlanText] = useState(planText ?? '')
+  const [suggestionText, setSuggestionText] = useState('')
+  const [modelCatalogs, setModelCatalogs] = useState<AgentModelCatalog[]>(
+    FALLBACK_MODEL_CATALOGS,
+  )
+  const planningAgentId = toSupportedAgentId(agentId)
+  const modelGroups = useMemo(() => groupModelOptions(modelCatalogs), [modelCatalogs])
+  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(() =>
+    selectPlanReviewModel(
+      groupModelOptions(FALLBACK_MODEL_CATALOGS),
+      planningAgentId,
+      planningModel,
+    ),
+  )
+  const manualOption = useMemo(
+    () => findPlanReviewManualOption(modelGroups, selectedModel),
+    [modelGroups, selectedModel],
+  )
   const planDocument = useMemo(
     () =>
       canPreviewPlan(planText) ? toPlanReviewMarkdownDocument(planText) : null,
     [planText],
   )
+  const normalizedOriginalPlan = normalizePlanReviewText(planText)
+  const normalizedEditedPlan = normalizePlanReviewText(editedPlanText)
+  const hasPlanChanges = normalizedEditedPlan !== normalizedOriginalPlan
+  const hasSuggestions = normalizePlanReviewText(suggestionText) !== undefined
+
+  useEffect(() => {
+    let cancelled = false
+    window.agentforge.system
+      .listAgentModels()
+      .then((catalogs) => {
+        if (cancelled) return
+        if (catalogs.some((catalog) => catalog.models.length > 0)) {
+          setModelCatalogs(catalogs)
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (selectedModel || modelGroups.length === 0) return
+
+    const fallback = selectPlanReviewModel(modelGroups, planningAgentId, planningModel)
+    if (fallback) setSelectedModel(fallback)
+  }, [modelGroups, planningAgentId, planningModel, selectedModel])
 
   const decide = async (choice: 'approve' | 'reject') => {
     if (pending || decision !== null) return
     setPending(true)
     setError(null)
     try {
-      const result = await window.agentforge.agent.planReviewDecision({
-        reviewId,
-        sessionId,
-        decision: choice,
-      })
+      const result = await window.agentforge.agent.planReviewDecision(
+        buildPlanReviewDecisionPayload({
+          reviewId,
+          sessionId,
+          choice,
+          originalPlanText: planText,
+          editedPlanText,
+          suggestionText,
+          planningAgentId,
+          agentOverride:
+            selectedModel?.kind === 'manual' ? selectedModel.agentId : undefined,
+          planningModel,
+          modelOverride:
+            selectedModel?.kind === 'manual' ? selectedModel.modelId : undefined,
+        }),
+      )
       setDecision(resolvePlanReviewOutcome(choice, result))
     } catch (decisionError: unknown) {
       setError(
@@ -151,38 +336,99 @@ export function PlanReviewCard({
           </div>
           <div className="flex items-start gap-2">
             <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
+            <span>
+              Answer any open questions below, or use Edit plan to rewrite the plan itself.
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-primary" />
             <span>Approve dispatches the execution session on this same thread.</span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {planDocument && onPreviewMarkdown ? (
-            <button
-              type="button"
-              onClick={() => onPreviewMarkdown(planDocument)}
-              aria-label="Preview plan as Markdown"
-              title="Preview plan as Markdown"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+        {editingPlan ? (
+          <label className="grid gap-1 rounded-card border border-hairline bg-card-raised px-3 py-3">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+              Edit approved plan
+            </span>
+            <textarea
+              value={editedPlanText}
+              onChange={(event) => setEditedPlanText(event.currentTarget.value)}
+              rows={8}
+              className="min-h-[120px] rounded-card border border-hairline bg-card px-3 py-2 text-xs leading-5 text-primary outline-none ring-accent-primary/40 transition focus:border-accent-primary/40 focus:ring-2"
+            />
+          </label>
+        ) : null}
+
+        <label className="grid gap-1">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+            Answers or notes for execution
+          </span>
+          <textarea
+            value={suggestionText}
+            onChange={(event) => setSuggestionText(event.currentTarget.value)}
+            rows={3}
+            placeholder="Answer the plan's open questions or add execution notes for the implementing agent."
+            className="min-h-[72px] rounded-card border border-hairline bg-card-raised px-3 py-2 text-xs leading-5 text-primary outline-none ring-accent-primary/40 transition placeholder:text-muted focus:border-accent-primary/40 focus:ring-2"
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {selectedModel ? (
+              <ModelChip
+                groups={modelGroups}
+                selection={selectedModel}
+                manualOption={manualOption}
+                routerPreview={null}
+                onSelect={setSelectedModel}
+                allowAuto={false}
+              />
+            ) : (
+              <div className="rounded-pill border border-hairline bg-card-raised px-2.5 py-1 text-[11px] text-muted">
+                Loading implementation models
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {planDocument && onPreviewMarkdown ? (
+              <button
+                type="button"
+                onClick={() => onPreviewMarkdown(planDocument)}
+                aria-label="Preview plan as Markdown"
+                title="Preview plan as Markdown"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
+              >
+                {iconDocument}
+              </button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setEditingPlan((value) => !value)}
+              disabled={pending}
             >
-              {iconDocument}
-            </button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void decide('reject')}
-            disabled={pending}
-          >
-            Reject
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => void decide('approve')}
-            loading={pending}
-          >
-            Approve and execute
-          </Button>
+              {editingPlan ? 'Close editor' : 'Edit plan'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void decide('reject')}
+              disabled={pending}
+            >
+              Reject
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => void decide('approve')}
+              loading={pending}
+            >
+              {hasPlanChanges || hasSuggestions
+                ? 'Approve edited plan and execute'
+                : 'Approve and execute'}
+            </Button>
+          </div>
         </div>
 
         {error ? (

@@ -320,6 +320,7 @@ export function useWorkspaceController() {
       agentId: summary.agentId,
       modelOverride: summary.modelOverride,
       approvalMode: summary.approvalMode,
+      planMode: summary.planMode,
       createdAt: summary.createdAt ?? Date.now(),
     })
     setDiffProposalState(null)
@@ -589,6 +590,7 @@ export function useWorkspaceController() {
       agentId: session.agentId,
       modelOverride: session.model,
       approvalMode: undefined,
+      planMode: session.planMode,
       createdAt: session.createdAt,
     })
     writeActiveThread(session.projectId, session.threadId ?? null)

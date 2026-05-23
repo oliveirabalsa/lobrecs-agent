@@ -421,7 +421,10 @@ function isPostCompletionArtifact(activity: AgentActivity): boolean {
     activity.kind === 'file-change' ||
     // The plan-review marker is emitted right after `session-complete`; keep
     // it on the completed turn so it renders beneath that turn's plan.
-    activity.kind === 'plan-review'
+    activity.kind === 'plan-review' ||
+    // Swarm step approval gates the next sequential step; same lifecycle as
+    // plan-review — emitted after completion, must stick to this turn.
+    activity.kind === 'swarm-step-approval'
   )
 }
 

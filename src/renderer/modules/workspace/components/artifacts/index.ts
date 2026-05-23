@@ -34,6 +34,15 @@ export type { ApprovalRequestPillProps } from './ApprovalRequestPill'
 export { PlanReviewCard } from './PlanReviewCard'
 export type { PlanReviewCardProps } from './PlanReviewCard'
 
+export { SwarmStepApprovalCard } from './SwarmStepApprovalCard'
+export type {
+  SwarmStepApprovalActivity,
+  SwarmStepApprovalCardProps,
+} from './SwarmStepApprovalCard'
+
+export { AgentModelPicker, shortAgentModelLabel } from './AgentModelPicker'
+export type { AgentModelPickerProps } from './AgentModelPicker'
+
 export { UserQuestionPromptCard } from './UserQuestionPromptCard'
 export type {
   UserQuestionActivity,

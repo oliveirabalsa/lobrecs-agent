@@ -25,6 +25,8 @@ export interface SwarmPlanAgentView {
   agentLabel: string
   modelOverride?: string
   promptSuffix?: string
+  /** When true, the swarm pauses after this step for user approval. */
+  requireApprovalAfter?: boolean
 }
 
 export interface SwarmPlanView {
@@ -77,6 +79,7 @@ export function parseSwarmPlan(text: string): SwarmPlanView | null {
       agentLabel: AGENT_LABELS[agentId as SupportedAgentId] ?? agentId,
       modelOverride: optionalText(entry.modelOverride),
       promptSuffix: optionalText(entry.promptSuffix),
+      requireApprovalAfter: entry.requireApprovalAfter === true ? true : undefined,
     })
   }
 

@@ -78,6 +78,32 @@ describe('buildEditedFileEntries', () => {
     ])
   })
 
+  it('orders distinct fallback-only rows by newest edit first', () => {
+    expect(
+      buildEditedFileEntries([], [
+        { filePath: 'src/oldest.ts', additions: 1, deletions: 0, changeType: 'modified' },
+        { filePath: 'src/middle.ts', additions: 2, deletions: 0, changeType: 'modified' },
+        { filePath: 'src/newest.ts', additions: 3, deletions: 0, changeType: 'modified' },
+      ]),
+    ).toEqual([
+      {
+        filePath: 'src/newest.ts',
+        additions: 3,
+        deletions: 0,
+      },
+      {
+        filePath: 'src/middle.ts',
+        additions: 2,
+        deletions: 0,
+      },
+      {
+        filePath: 'src/oldest.ts',
+        additions: 1,
+        deletions: 0,
+      },
+    ])
+  })
+
   it('orders fallback rows by the last edit first', () => {
     expect(
       buildEditedFileEntries([], [
@@ -127,6 +153,53 @@ describe('buildEditedFileEntries', () => {
         additions: 1,
         deletions: 1,
         proposal: firstProposal,
+      },
+    ])
+  })
+
+  it('orders proposal-backed rows by fallback edit order when fallback metadata exists', () => {
+    const olderProposal = {
+      filePath: '/Users/leo/project/src/older.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 10,
+      deletions: 1,
+    }
+    const newerProposal = {
+      filePath: '/Users/leo/project/src/newer.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 10,
+      deletions: 1,
+    }
+
+    expect(
+      buildEditedFileEntries([newerProposal, olderProposal], [
+        {
+          filePath: 'src/older.ts',
+          additions: 1,
+          deletions: 0,
+          changeType: 'modified',
+        },
+        {
+          filePath: 'src/newer.ts',
+          additions: 2,
+          deletions: 0,
+          changeType: 'modified',
+        },
+      ]),
+    ).toEqual([
+      {
+        filePath: '/Users/leo/project/src/newer.ts',
+        additions: 2,
+        deletions: 0,
+        proposal: newerProposal,
+      },
+      {
+        filePath: '/Users/leo/project/src/older.ts',
+        additions: 1,
+        deletions: 0,
+        proposal: olderProposal,
       },
     ])
   })

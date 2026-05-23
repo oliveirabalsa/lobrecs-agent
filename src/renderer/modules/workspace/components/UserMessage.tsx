@@ -1,11 +1,13 @@
 import type { ImageAttachment } from '../../../../shared/types'
 import { parseSwarmRolePrompt } from '../lib/swarmMessage'
+import { parsePlanModeQuestionAnswer } from '../lib/planModeQuestionAnswer'
 import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
 import {
   isPlanModeExecutionPrompt,
   PlanModeExecutionMessage,
 } from './PlanModeExecutionMessage'
 import { SwarmRoleMessage } from './SwarmRoleMessage'
+import { QuestionAnswerCard } from './QuestionAnswerCard'
 
 export interface UserMessageProps {
   text: string
@@ -38,6 +40,11 @@ export function UserMessage({ text, attachments, onOpenMarkdown }: UserMessagePr
 
   if (isPlanModeExecutionPrompt(text)) {
     return <PlanModeExecutionMessage />
+  }
+
+  const planModeQuestionAnswer = parsePlanModeQuestionAnswer(text)
+  if (planModeQuestionAnswer) {
+    return <QuestionAnswerCard view={planModeQuestionAnswer} />
   }
 
   return (

@@ -159,6 +159,8 @@ function textFromActivity(activity: AgentActivity): string {
       return 'Plan ready for review'
     case 'user-question':
       return activity.title
+    case 'swarm-step-approval':
+      return `Continue to ${activity.nextRole}?`
   }
 }
 

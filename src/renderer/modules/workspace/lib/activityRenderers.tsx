@@ -16,6 +16,7 @@ import {
   EditedFilesCard,
   PlanReviewCard,
   RanCommandsPill,
+  SwarmStepApprovalCard,
   UserQuestionPromptCard,
 } from '../components/artifacts'
 import type { UserQuestionActivity } from '../components/artifacts'
@@ -236,7 +237,19 @@ export function renderStreamItem(
           reviewId={item.reviewId}
           sessionId={ctx.sessionId}
           planText={ctx.planReviewPlanText}
+          agentId={item.agentId}
+          planningModel={item.model}
           onPreviewMarkdown={ctx.onPreviewMarkdown}
+        />
+      )
+
+    case 'swarm-step-approval':
+      if (!ctx.sessionId) return null
+      return (
+        <SwarmStepApprovalCard
+          key={key}
+          approval={item}
+          sessionId={ctx.sessionId}
         />
       )
 
