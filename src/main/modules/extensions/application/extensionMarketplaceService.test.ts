@@ -97,6 +97,26 @@ describe('ExtensionMarketplaceService', () => {
     })
   })
 
+  it('publishes the skills.sh composition patterns entry with the published CLI skill name', async () => {
+    const service = serviceWithCatalog()
+
+    const result = await service.searchCatalog({
+      query: 'composition',
+      categories: ['skill'],
+      sources: ['external'],
+      targetAgents: ['codex'],
+    })
+
+    const compositionSkill = result.items.find(
+      (item) => item.id === 'skills-sh-composition-patterns',
+    )
+    expect(compositionSkill?.artifacts[0]).toMatchObject({
+      kind: 'skill',
+      packageName: 'vercel-labs/agent-skills',
+      cliSkillName: 'vercel-composition-patterns',
+    })
+  })
+
   it('merges external MCP registry entries into catalog search results', async () => {
     const service = serviceWithCatalog({
       externalCatalog: [
