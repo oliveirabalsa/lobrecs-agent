@@ -3,10 +3,12 @@ import type { SupportedAgentId, SwarmAgentConfig } from '../../../../shared/type
 export const MANAGER_AGENT_ROLE = 'manager'
 
 export type ManagerPlanStrategy = 'parallel' | 'sequential'
+export type ManagerPlanStatus = 'continue' | 'complete'
 
 export interface ManagerPlanAgent extends SwarmAgentConfig {}
 
 export interface ManagerPlan {
+  status: ManagerPlanStatus
   strategy: ManagerPlanStrategy
   agents: ManagerPlanAgent[]
 }
@@ -24,21 +26,26 @@ export function buildManagerPrompt({
 
   return [
     'You are the Manager Agent for Lobrecs Agent.',
-    'Analyze the user task and produce the execution plan for the worker swarm.',
+    'Analyze the user task and produce the next execution phase for the worker swarm.',
     '',
     'Constraints:',
     '- Return only a JSON object. Do not wrap it in markdown.',
     '- Do not include commentary outside the JSON object.',
     '- Do not include a manager agent in the plan.',
-    '- Choose the smallest useful agent set.',
-    `- Use at most ${maxAgents} worker agents.`,
+    '- Return only the next useful phase, not the entire swarm lifecycle.',
+    '- You will be called again after the selected phase finishes with the completed output.',
+    '- Choose the smallest useful agent set for this phase.',
+    `- Use at most ${maxAgents} worker agents in this phase.`,
     `- agentId must be one of: ${agentIds}.`,
+    '- Use status "complete" with an empty agents array when no more worker, reviewer, tester, or QA agents are needed.',
+    '- If the task needs a concrete plan before implementation, make the first phase a single planner agent.',
+    '- Do not decide implementer count until planner output is available.',
+    '- After implementers finish, decide whether the next phase needs review, tests, QA, or completion based on the latest output.',
     '- Prefer "parallel" when the task can be split by file, module, concern, or review angle.',
     '- strategy must be "parallel" when independent work can run together.',
     '- Use "sequential" only when a later agent genuinely needs the exact output from an earlier agent.',
-    '- Reviewers, testers, QA, and verification agents must run only after implementers finish.',
-    '- Implementers may run in parallel with other implementers, but never in the same phase as reviewers or testers.',
-    '- Do not add a planner step before implementation unless the implementation depends on that planner output.',
+    '- Reviewers, testers, QA, and verification agents must run only in a phase after implementers finish.',
+    '- Implementers may run in parallel with other implementers, but never in the same phase as reviewers, testers, or QA.',
     '- promptSuffix must be specific enough for that agent to act without guessing.',
     '- requireApprovalAfter is optional and only meaningful in sequential plans.',
     '- Set requireApprovalAfter: true on a planner step ONLY when the next step is an implementer — this lets the user review the plan before implementation begins.',
@@ -46,6 +53,7 @@ export function buildManagerPrompt({
     '',
     'JSON schema:',
     '{',
+    '  "status": "continue" | "complete",',
     '  "strategy": "parallel" | "sequential",',
     '  "agents": [',
     '    {',
@@ -78,7 +86,16 @@ export function parseManagerPlan(
 
 function normalizeManagerPlan(value: unknown, input: ManagerPromptInput): ManagerPlan {
   const record = objectLike(value)
+  const status = record.status === 'complete' ? 'complete' : 'continue'
   const strategy = record.strategy
+
+  if (status === 'complete') {
+    return {
+      status,
+      strategy: strategy === 'parallel' || strategy === 'sequential' ? strategy : 'sequential',
+      agents: [],
+    }
+  }
 
   if (strategy !== 'parallel' && strategy !== 'sequential') {
     throw new Error('Manager plan strategy must be "parallel" or "sequential"')
@@ -101,6 +118,7 @@ function normalizeManagerPlan(value: unknown, input: ManagerPromptInput): Manage
   )
 
   return {
+    status,
     strategy,
     agents: agents.map((agent, index) =>
       gateApprovalFlag(agent, agents[index + 1], strategy),

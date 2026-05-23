@@ -31,6 +31,7 @@ import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
 
 const DEFAULT_REVIEW_LOOP_MAX_ITERATIONS = 3
 const REVIEW_LOOP_HARD_CAP = 10
+const MANAGED_ORCHESTRATION_HARD_CAP = 8
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -103,9 +104,10 @@ type SpawnedSession = SwarmResult['sessions'][number] & {
   output?: string
 }
 
-interface DeferredVerificationPlan {
-  workerAgents: SwarmAgentConfig[]
-  verificationAgents: SwarmAgentConfig[]
+interface ActiveManagedPhase {
+  strategy: ManagerPlan['strategy']
+  sessions: SpawnedSession[]
+  remainingAgents: SwarmAgentConfig[]
 }
 
 export class SwarmOrchestrator {
@@ -323,29 +325,78 @@ export class SwarmOrchestrator {
     settings: AppSettings,
   ): Promise<SpawnedSession[]> {
     const supportedAgentIds = enabledSwarmAgentIds(settings)
-    const managerAgentId = selectManagerAgent(supportedAgentIds)
-    const sessions: SpawnedSession[] = []
-    const managerSession = await this.spawnAgent({
-      agentConfig: {
-        role: MANAGER_AGENT_ROLE,
-        agentId: managerAgentId,
-        modelOverride: settings.agents.modelMap[managerAgentId].frontier,
-        promptSuffix: buildManagerPrompt({
-          supportedAgentIds,
-          maxAgents: settings.swarms.maxAgents,
-        }),
-      },
-      basePrompt: config.prompt,
-      projectId: config.projectId,
+    const firstPlan = await this.runManagedDecision({
+      config,
+      repoPath,
+      swarmId,
+      threadId,
+      settings,
+      supportedAgentIds,
+    })
+
+    const firstPhase = await this.startManagedPhase({
+      config,
+      plan: firstPlan,
       repoPath,
       swarmId,
       threadId,
       imageAttachments: config.imageAttachments,
     })
 
-    sessions.push(managerSession)
-    const swarm = this.swarms.get(swarmId)
-    if (swarm) swarm.sessions = sessions
+    if (firstPhase) {
+      void this.continueManagedOrchestration({
+        config,
+        repoPath,
+        swarmId,
+        threadId,
+        settings,
+        supportedAgentIds,
+        activePhase: firstPhase,
+        completedPhaseOutputs: [],
+        decisionRound: 1,
+      }).catch(() => {
+        const swarm = this.swarms.get(swarmId)
+        const lastSession = swarm?.sessions.at(-1)
+        if (lastSession && lastSession.status === 'running') {
+          lastSession.status = 'error'
+        }
+      })
+    }
+
+    return this.swarms.get(swarmId)?.sessions ?? []
+  }
+
+  private async runManagedDecision(input: {
+    config: SwarmConfig
+    repoPath: string
+    swarmId: string
+    threadId: string
+    settings: AppSettings
+    supportedAgentIds: SupportedAgentId[]
+    previousOutput?: string
+  }): Promise<ManagerPlan> {
+    const managerAgentId = selectManagerAgent(input.supportedAgentIds)
+    const managerSession = await this.spawnAgent({
+      agentConfig: {
+        role: MANAGER_AGENT_ROLE,
+        agentId: managerAgentId,
+        modelOverride: input.settings.agents.modelMap[managerAgentId].frontier,
+        promptSuffix: buildManagerPrompt({
+          supportedAgentIds: input.supportedAgentIds,
+          maxAgents: input.settings.swarms.maxAgents,
+        }),
+      },
+      basePrompt: input.config.prompt,
+      projectId: input.config.projectId,
+      repoPath: input.repoPath,
+      swarmId: input.swarmId,
+      threadId: input.threadId,
+      previousOutput: input.previousOutput,
+      contextLabel: input.previousOutput ? 'Completed swarm work so far' : undefined,
+      imageAttachments: input.config.imageAttachments,
+    })
+
+    this.swarms.get(input.swarmId)?.sessions.push(managerSession)
 
     const managerCompletion = await this.waitForCompletion(managerSession)
     managerSession.status = managerCompletion.status
@@ -356,211 +407,165 @@ export class SwarmOrchestrator {
     }
 
     const plan = parseManagerPlan(managerCompletion.output ?? '', {
-      supportedAgentIds,
-      maxAgents: settings.swarms.maxAgents,
+      supportedAgentIds: input.supportedAgentIds,
+      maxAgents: input.settings.swarms.maxAgents,
     })
-    const plannedConfig: SwarmConfig = {
-      ...config,
-      strategy: plan.strategy,
-      agents: plan.agents,
-    }
-    const deferredVerificationPlan = splitDeferredVerificationPlan(plan)
-    const spawned = deferredVerificationPlan
-      ? await this.spawnManagedWithDeferredVerification({
-          config,
-          plan,
-          deferredVerificationPlan,
-          repoPath,
-          swarmId,
-          threadId,
-        })
-      : plan.strategy === 'parallel'
-        ? await this.spawnParallel(plannedConfig, repoPath, swarmId, threadId)
-        : await this.spawnSequential(plannedConfig, repoPath, swarmId, threadId, settings)
 
-    sessions.push(...spawned)
-    if (swarm) swarm.sessions = sessions
-
-    return sessions
+    return selectNextManagedPhase(plan)
   }
 
-  private async spawnManagedWithDeferredVerification(input: {
+  private async startManagedPhase(input: {
     config: SwarmConfig
     plan: ManagerPlan
-    deferredVerificationPlan: DeferredVerificationPlan
     repoPath: string
     swarmId: string
     threadId: string
-  }): Promise<SpawnedSession[]> {
-    const { config, plan, deferredVerificationPlan, repoPath, swarmId, threadId } = input
+    previousOutput?: string
+    imageAttachments?: ImageAttachment[]
+  }): Promise<ActiveManagedPhase | null> {
+    if (input.plan.status === 'complete') return null
 
-    if (plan.strategy === 'parallel') {
-      const workerSessions = await this.spawnParallel(
-        {
-          ...config,
+    if (input.plan.strategy === 'parallel') {
+      const sessions = await this.spawnParallelWithContext({
+        config: {
+          ...input.config,
           strategy: 'parallel',
-          agents: deferredVerificationPlan.workerAgents,
+          agents: input.plan.agents,
         },
-        repoPath,
-        swarmId,
-        threadId,
-      )
-
-      void this.continueManagedVerificationSwarm({
-        swarmId,
-        threadId,
-        projectId: config.projectId,
-        repoPath,
-        basePrompt: config.prompt,
-        workerSessions,
-        verificationAgents: deferredVerificationPlan.verificationAgents,
-        verificationStrategy: 'parallel',
-        imageAttachments: config.imageAttachments,
-      }).catch(() => {
-        const swarm = this.swarms.get(swarmId)
-        const lastSession = swarm?.sessions.at(-1)
-        if (lastSession && lastSession.status === 'running') {
-          lastSession.status = 'error'
-        }
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        previousOutput: input.previousOutput ?? '',
+        contextLabel: 'Manager context for this phase',
       })
 
-      return workerSessions
+      this.swarms.get(input.swarmId)?.sessions.push(...sessions)
+      return { strategy: 'parallel', sessions, remainingAgents: [] }
     }
 
-    const [firstAgent, ...remainingWorkerAgents] = deferredVerificationPlan.workerAgents
-    if (!firstAgent) return []
+    const [firstAgent, ...remainingAgents] = input.plan.agents
+    if (!firstAgent) return null
 
     const firstSession = await this.spawnAgent({
       agentConfig: firstAgent,
-      basePrompt: config.prompt,
-      projectId: config.projectId,
-      repoPath,
-      swarmId,
-      threadId,
-      imageAttachments: config.imageAttachments,
-    })
-
-    void this.continueManagedSequentialWorkersThenVerify({
-      swarmId,
-      threadId,
-      projectId: config.projectId,
-      repoPath,
-      basePrompt: config.prompt,
-      remainingWorkerAgents,
-      verificationAgents: deferredVerificationPlan.verificationAgents,
-      previousSession: firstSession,
-      workerSessions: [firstSession],
-      imageAttachments: config.imageAttachments,
-    }).catch(() => {
-      const swarm = this.swarms.get(swarmId)
-      const lastSession = swarm?.sessions.at(-1)
-      if (lastSession && lastSession.status === 'running') {
-        lastSession.status = 'error'
-      }
-    })
-
-    return [firstSession]
-  }
-
-  private async continueManagedVerificationSwarm(input: {
-    swarmId: string
-    threadId: string
-    projectId: string
-    repoPath: string
-    basePrompt: string
-    workerSessions: SpawnedSession[]
-    verificationAgents: SwarmAgentConfig[]
-    verificationStrategy: ManagerPlan['strategy']
-    imageAttachments?: ImageAttachment[]
-  }): Promise<void> {
-    const completedWorkers: SpawnedSession[] = []
-
-    for (const session of input.workerSessions) {
-      if (!this.swarms.has(input.swarmId)) return
-      if (session.status === 'done') {
-        completedWorkers.push(session)
-        continue
-      }
-
-      const completion = await this.waitForCompletion(session)
-      session.status = completion.status
-      session.output = completion.output
-      if (completion.status !== 'done') return
-
-      completedWorkers.push(session)
-    }
-
-    if (!this.swarms.has(input.swarmId)) return
-
-    const previousOutput = buildManagedPhaseOutput(completedWorkers)
-    const verifierConfig: SwarmConfig = {
-      projectId: input.projectId,
-      prompt: input.basePrompt,
-      strategy: input.verificationStrategy,
-      agents: input.verificationAgents,
+      basePrompt: input.config.prompt,
+      projectId: input.config.projectId,
+      repoPath: input.repoPath,
+      swarmId: input.swarmId,
       threadId: input.threadId,
+      previousOutput: input.previousOutput,
+      contextLabel: input.previousOutput ? 'Manager context for this phase' : undefined,
       imageAttachments: input.imageAttachments,
-    }
+    })
 
-    const verificationSessions =
-      input.verificationStrategy === 'parallel'
-        ? await this.spawnParallelWithContext({
-            config: verifierConfig,
-            repoPath: input.repoPath,
-            swarmId: input.swarmId,
-            threadId: input.threadId,
-            previousOutput,
-            contextLabel: 'Completed implementation work to verify',
-          })
-        : await this.spawnVerificationSequentially({
-            config: verifierConfig,
-            repoPath: input.repoPath,
-            swarmId: input.swarmId,
-            threadId: input.threadId,
-            previousOutput,
-          })
-
-    this.swarms.get(input.swarmId)?.sessions.push(...verificationSessions)
+    this.swarms.get(input.swarmId)?.sessions.push(firstSession)
+    return { strategy: 'sequential', sessions: [firstSession], remainingAgents }
   }
 
-  private async continueManagedSequentialWorkersThenVerify(input: {
+  private async continueManagedOrchestration(input: {
+    config: SwarmConfig
     swarmId: string
     threadId: string
-    projectId: string
     repoPath: string
-    basePrompt: string
-    remainingWorkerAgents: SwarmAgentConfig[]
-    verificationAgents: SwarmAgentConfig[]
-    previousSession: SpawnedSession
-    workerSessions: SpawnedSession[]
-    imageAttachments?: ImageAttachment[]
+    settings: AppSettings
+    supportedAgentIds: SupportedAgentId[]
+    activePhase: ActiveManagedPhase
+    completedPhaseOutputs: string[]
+    decisionRound: number
   }): Promise<void> {
-    let previousSession = input.previousSession
+    let activePhase: ActiveManagedPhase | null = input.activePhase
+    const completedPhaseOutputs = [...input.completedPhaseOutputs]
+    let decisionRound = input.decisionRound
+
+    while (activePhase) {
+      if (!this.swarms.has(input.swarmId)) return
+
+      const completedSessions = await this.completeManagedPhase({
+        ...input,
+        activePhase,
+      })
+      if (!completedSessions) return
+
+      const phaseOutput = buildManagedPhaseOutput(completedSessions)
+      if (phaseOutput) completedPhaseOutputs.push(phaseOutput)
+
+      if (decisionRound >= MANAGED_ORCHESTRATION_HARD_CAP) return
+      decisionRound += 1
+
+      const orchestrationContext = completedPhaseOutputs.join('\n\n')
+      const nextPlan = await this.runManagedDecision({
+        config: input.config,
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        settings: input.settings,
+        supportedAgentIds: input.supportedAgentIds,
+        previousOutput: orchestrationContext,
+      })
+
+      if (!this.swarms.has(input.swarmId)) return
+
+      activePhase = await this.startManagedPhase({
+        config: input.config,
+        plan: nextPlan,
+        repoPath: input.repoPath,
+        swarmId: input.swarmId,
+        threadId: input.threadId,
+        previousOutput: orchestrationContext,
+        imageAttachments: input.config.imageAttachments,
+      })
+    }
+  }
+
+  private async completeManagedPhase(input: {
+    swarmId: string
+    threadId: string
+    repoPath: string
+    config: SwarmConfig
+    activePhase: ActiveManagedPhase
+  }): Promise<SpawnedSession[] | null> {
+    if (input.activePhase.strategy === 'parallel') {
+      for (const session of input.activePhase.sessions) {
+        if (!this.swarms.has(input.swarmId)) return null
+        if (session.status === 'done') continue
+
+        const completion = await this.waitForCompletion(session)
+        session.status = completion.status
+        session.output = completion.output
+        if (completion.status !== 'done') return null
+      }
+
+      return input.activePhase.sessions
+    }
+
+    let previousSession = input.activePhase.sessions.at(-1)
+    if (!previousSession) return []
     let previousOutput = previousSession.output ?? ''
 
-    for (const agentConfig of input.remainingWorkerAgents) {
-      if (!this.swarms.has(input.swarmId)) return
+    for (const agentConfig of input.activePhase.remainingAgents) {
+      if (!this.swarms.has(input.swarmId)) return null
 
       const completion = await this.waitForCompletion(previousSession)
       previousSession.status = completion.status
       previousSession.output = completion.output
       if (completion.output?.trim()) previousOutput = completion.output
-      if (completion.status !== 'done') return
-      if (!this.swarms.has(input.swarmId)) return
+      if (completion.status !== 'done') return null
+      if (!this.swarms.has(input.swarmId)) return null
 
       const nextSession = await this.spawnAgent({
         agentConfig,
-        basePrompt: input.basePrompt,
-        projectId: input.projectId,
+        basePrompt: input.config.prompt,
+        projectId: input.config.projectId,
         repoPath: input.repoPath,
         swarmId: input.swarmId,
         threadId: input.threadId,
         previousOutput,
-        imageAttachments: input.imageAttachments,
+        contextLabel: 'Manager context for this phase',
+        imageAttachments: input.config.imageAttachments,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
-      input.workerSessions.push(nextSession)
+      input.activePhase.sessions.push(nextSession)
       previousSession = nextSession
       previousOutput = nextSession.output ?? previousOutput
     }
@@ -568,19 +573,9 @@ export class SwarmOrchestrator {
     const completion = await this.waitForCompletion(previousSession)
     previousSession.status = completion.status
     previousSession.output = completion.output
-    if (completion.status !== 'done') return
+    if (completion.status !== 'done') return null
 
-    await this.continueManagedVerificationSwarm({
-      swarmId: input.swarmId,
-      threadId: input.threadId,
-      projectId: input.projectId,
-      repoPath: input.repoPath,
-      basePrompt: input.basePrompt,
-      workerSessions: input.workerSessions,
-      verificationAgents: input.verificationAgents,
-      verificationStrategy: 'sequential',
-      imageAttachments: input.imageAttachments,
-    })
+    return input.activePhase.sessions
   }
 
   private async spawnParallelWithContext(input: {
@@ -606,42 +601,6 @@ export class SwarmOrchestrator {
         }),
       ),
     )
-  }
-
-  private async spawnVerificationSequentially(input: {
-    config: SwarmConfig
-    repoPath: string
-    swarmId: string
-    threadId: string
-    previousOutput: string
-  }): Promise<SpawnedSession[]> {
-    const sessions: SpawnedSession[] = []
-    let previousOutput = input.previousOutput
-
-    for (const agentConfig of input.config.agents) {
-      if (!this.swarms.has(input.swarmId)) return sessions
-
-      const session = await this.spawnAgent({
-        agentConfig,
-        basePrompt: input.config.prompt,
-        projectId: input.config.projectId,
-        repoPath: input.repoPath,
-        swarmId: input.swarmId,
-        threadId: input.threadId,
-        previousOutput,
-        contextLabel: 'Completed implementation work to verify',
-        imageAttachments: input.config.imageAttachments,
-      })
-
-      sessions.push(session)
-      const completion = await this.waitForCompletion(session)
-      session.status = completion.status
-      session.output = completion.output
-      if (completion.output?.trim()) previousOutput = completion.output
-      if (completion.status !== 'done') return sessions
-    }
-
-    return sessions
   }
 
   private async spawnFanOut(
@@ -979,13 +938,32 @@ function isReviewerRole(role: string): boolean {
   return /\breview/i.test(role)
 }
 
-function splitDeferredVerificationPlan(plan: ManagerPlan): DeferredVerificationPlan | null {
-  const workerAgents = plan.agents.filter((agent) => !isVerificationRole(agent.role))
-  const verificationAgents = plan.agents.filter((agent) => isVerificationRole(agent.role))
+function selectNextManagedPhase(plan: ManagerPlan): ManagerPlan {
+  if (plan.status === 'complete') return plan
+  if (plan.agents.length <= 1) return plan
 
-  if (workerAgents.length === 0 || verificationAgents.length === 0) return null
+  const [firstAgent] = plan.agents
+  if (firstAgent && isPlanningRole(firstAgent.role)) {
+    return {
+      ...plan,
+      strategy: 'sequential',
+      agents: [firstAgent],
+    }
+  }
 
-  return { workerAgents, verificationAgents }
+  const firstVerificationIndex = plan.agents.findIndex((agent) => isVerificationRole(agent.role))
+  if (firstVerificationIndex > 0) {
+    return {
+      ...plan,
+      agents: plan.agents.slice(0, firstVerificationIndex),
+    }
+  }
+
+  return plan
+}
+
+function isPlanningRole(role: string): boolean {
+  return /\b(plan|planner|planning|architect|design|scope|research|analy)/i.test(role)
 }
 
 function isVerificationRole(role: string): boolean {

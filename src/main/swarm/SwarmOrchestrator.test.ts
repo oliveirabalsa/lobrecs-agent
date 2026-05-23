@@ -143,7 +143,7 @@ describe('SwarmOrchestrator', () => {
     expect(createThread).not.toHaveBeenCalled()
   })
 
-  it('runs a frontier manager agent before spawning planned parallel agents', async () => {
+  it('keeps the manager active between planner and implementation phases', async () => {
     const { orchestrator, dispatched, completions, waitedSessionIds } = createManagedHarness()
 
     const spawnPromise = orchestrator.spawn(managedConfig())
@@ -180,27 +180,66 @@ describe('SwarmOrchestrator', () => {
     const result = await spawnPromise
 
     expect(result.strategy).toBe('managed')
-    expect(result.sessions).toHaveLength(3)
+    expect(result.sessions).toHaveLength(2)
     expect(result.sessions.map((session) => session.role)).toEqual([
       'manager',
       'planner',
-      'implementer',
     ])
-    expect(result.sessions.map((session) => session.threadId)).toEqual([
-      'thread-1',
-      'thread-1',
-      'thread-1',
-    ])
+    expect(result.sessions.map((session) => session.threadId)).toEqual(['thread-1', 'thread-1'])
     expect(result.sessions[0].status).toBe('done')
+    expect(dispatched.map((call) => call.role)).toEqual(['manager', 'planner'])
+    expect(waitedSessionIds).toEqual([dispatched[0].sessionId, dispatched[1].sessionId])
+    expect(dispatched[1].prompt).toContain('[Role: planner]')
+    expect(dispatched[1].prompt).toContain('Identify the files')
+
+    completions.get(dispatched[1].sessionId)?.resolve({
+      status: 'done',
+      output: 'Plan: split into session API and workspace UI implementation.',
+    })
+
+    await waitFor(() => dispatched.length === 3)
+
+    expect(dispatched[2].role).toBe('manager')
+    expect(dispatched[2].prompt).toContain('Completed swarm work so far')
+    expect(dispatched[2].prompt).toContain('Plan: split into session API')
+
+    completions.get(dispatched[2].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'implementer',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.3-codex',
+            promptSuffix: 'Apply the complete patch and tests from the plan.',
+          },
+        ],
+      }),
+    })
+
+    await waitFor(() => dispatched.length === 4)
+
     expect(dispatched.map((call) => call.role)).toEqual([
       'manager',
       'planner',
+      'manager',
       'implementer',
     ])
-    expect(waitedSessionIds).toEqual([dispatched[0].sessionId])
-    expect(dispatched[1].prompt).toContain('[Role: planner]')
-    expect(dispatched[1].prompt).toContain('Identify the files')
-    expect(dispatched[2].model).toBe('gpt-5.3-codex')
+    expect(dispatched[3].model).toBe('gpt-5.3-codex')
+    expect(dispatched[3].prompt).toContain('Manager context for this phase')
+    expect(dispatched[3].prompt).toContain('Plan: split into session API')
+
+    completions.get(dispatched[3].sessionId)?.resolve({
+      status: 'done',
+      output: 'Implementation complete.',
+    })
+
+    await waitFor(() => dispatched.length === 5)
+    completions.get(dispatched[4].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({ status: 'complete', agents: [] }),
+    })
   })
 
   it('delays managed reviewer and tester roles until planned implementers finish', async () => {
@@ -275,13 +314,39 @@ describe('SwarmOrchestrator', () => {
       output: 'test implementation complete',
     })
 
-    await waitFor(() => dispatched.length === 6)
+    await waitFor(() => dispatched.length === 5)
+
+    expect(dispatched[4].role).toBe('manager')
+    expect(dispatched[4].prompt).toContain('api implementation complete')
+    expect(dispatched[4].prompt).toContain('ui implementation complete')
+
+    completions.get(dispatched[4].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'reviewer',
+            agentId: 'claude-code',
+            promptSuffix: 'Review the completed implementation.',
+          },
+          {
+            role: 'tester',
+            agentId: 'codex',
+            promptSuffix: 'Run verification and report failures.',
+          },
+        ],
+      }),
+    })
+
+    await waitFor(() => dispatched.length === 7)
 
     expect(dispatched.map((call) => call.role)).toEqual([
       'manager',
       'implementer api',
       'implementer ui',
       'implementer tests',
+      'manager',
       'reviewer',
       'tester',
     ])
@@ -290,11 +355,13 @@ describe('SwarmOrchestrator', () => {
       dispatched[1].sessionId,
       dispatched[2].sessionId,
       dispatched[3].sessionId,
+      dispatched[4].sessionId,
+      dispatched[5].sessionId,
     ])
-    expect(dispatched[4].prompt).toContain('Completed implementation work to verify')
-    expect(dispatched[4].prompt).toContain('api implementation complete')
-    expect(dispatched[4].prompt).toContain('ui implementation complete')
-    expect(dispatched[5].prompt).toContain('test implementation complete')
+    expect(dispatched[5].prompt).toContain('Manager context for this phase')
+    expect(dispatched[5].prompt).toContain('api implementation complete')
+    expect(dispatched[5].prompt).toContain('ui implementation complete')
+    expect(dispatched[6].prompt).toContain('test implementation complete')
 
     const swarm = orchestrator.get(result.swarmId)
     expect(swarm?.sessions.map((session) => session.role)).toEqual([
@@ -302,6 +369,7 @@ describe('SwarmOrchestrator', () => {
       'implementer api',
       'implementer ui',
       'implementer tests',
+      'manager',
       'reviewer',
       'tester',
     ])

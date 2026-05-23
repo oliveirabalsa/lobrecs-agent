@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseManagerPlan } from './managerPrompt'
+import { buildManagerPrompt, parseManagerPlan } from './managerPrompt'
 
 const INPUT = {
   supportedAgentIds: ['claude-code', 'codex', 'opencode', 'antigravity'] as const,
@@ -11,6 +11,24 @@ function planJson(strategy: 'sequential' | 'parallel', agents: object[]): string
 }
 
 describe('parseManagerPlan — requireApprovalAfter gating', () => {
+  it('describes phase-by-phase manager decisions', () => {
+    const prompt = buildManagerPrompt(INPUT)
+
+    expect(prompt).toContain('Return only the next useful phase')
+    expect(prompt).toContain('You will be called again after the selected phase finishes')
+    expect(prompt).toContain('Do not decide implementer count until planner output is available')
+  })
+
+  it('allows the manager to mark orchestration complete without workers', () => {
+    const plan = parseManagerPlan(JSON.stringify({ status: 'complete', agents: [] }), INPUT)
+
+    expect(plan).toEqual({
+      status: 'complete',
+      strategy: 'sequential',
+      agents: [],
+    })
+  })
+
   it('keeps the flag when a sequential planner is followed by an implementer', () => {
     const plan = parseManagerPlan(
       planJson('sequential', [
