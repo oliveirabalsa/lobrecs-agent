@@ -149,6 +149,14 @@ export const specRunsStore = {
     }
   },
 
+  findSpecRunIdBySessionId(sessionId: string): string | null {
+    const row = getDb()
+      .prepare('SELECT spec_run_id FROM run_attempts WHERE session_id = ? LIMIT 1')
+      .get(sessionId) as { spec_run_id: string } | undefined
+
+    return row?.spec_run_id ?? null
+  },
+
   listAttempts(runId: string): RunAttempt[] {
     const rows = getDb()
       .prepare('SELECT * FROM run_attempts WHERE spec_run_id = ? ORDER BY created_at ASC')

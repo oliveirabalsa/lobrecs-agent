@@ -1,7 +1,14 @@
 import { spawn } from 'node:child_process'
 import { ipcMain } from 'electron'
 import { buildProcessEnvironment } from '../../../process/environment'
-import { projectsStore, sessionsStore, specRunsStore, specsStore } from '../../../store'
+import {
+  projectsStore,
+  promptEvidenceStore,
+  runAuditStore,
+  sessionsStore,
+  specRunsStore,
+  specsStore,
+} from '../../../store'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import type {
   RunAttempt,
@@ -109,6 +116,18 @@ export function registerRunHandlers(context: MainIpcContext): void {
     )
 
     return specRunsStore.finishVerification(verification.id, status, output)
+  })
+
+  ipcMain.handle('runs:listAuditRecords', async (_event, runId: string) => {
+    return runAuditStore.listForSpecRun(runId)
+  })
+
+  ipcMain.handle('runs:listSessionAuditRecords', async (_event, sessionId: string) => {
+    return runAuditStore.listForSession(sessionId)
+  })
+
+  ipcMain.handle('runs:getPromptEvidence', async (_event, sessionId: string) => {
+    return promptEvidenceStore.getForSession(sessionId)
   })
 }
 

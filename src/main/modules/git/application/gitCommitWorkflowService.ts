@@ -3,12 +3,15 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { getModelForTier } from '../../../router/ModelRouter'
 import { deriveActivityEvents } from '../../../session/activity'
+import { sessionsStore } from '../../../store'
+import { extractSessionOutput } from '../../../store/sessionOutput'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import {
   normalizeSuggestedCommitPlan,
   validateCommitSuggestions,
 } from '../domain/commitPlan'
+import { normalizeDiffReview } from '../domain/diffReview'
 import { runGit, runGitOrThrow } from '../infrastructure/runGit'
 import type {
   AgentEvent,
@@ -18,6 +21,7 @@ import type {
   GitCommitPlanExecutionInput,
   GitCommitPlanExecutionResult,
   GitCommitSuggestion,
+  GitDiffReviewResult,
   ModelTier,
   SupportedAgentId,
 } from '../../../../shared/types'
@@ -34,6 +38,9 @@ interface WorkingTreeSnapshot {
   changedFiles: GitChangedFile[]
   fingerprint: string
   prompt: string
+  diffStat: string
+  trackedPatch: string
+  untrackedDiffs: string[]
 }
 
 interface AssistantTranscriptState {
@@ -42,6 +49,8 @@ interface AssistantTranscriptState {
 }
 
 const ANALYSIS_TIMEOUT_MS = 45_000
+const DIFF_REVIEW_TIMEOUT_MS = 180_000
+const ANALYSIS_POLL_INTERVAL_MS = 500
 const MAX_PROMPT_CHARS = 120_000
 const MAX_UNTRACKED_FILE_CHARS = 20_000
 
@@ -132,6 +141,49 @@ export class GitCommitWorkflowService {
       throw error
     }
   }
+
+  async reviewCurrentDiff(projectId: string, threadId?: string): Promise<GitDiffReviewResult> {
+    const project = requireProject(projectId)
+    const snapshot = await collectWorkingTreeSnapshot(project.repoPath)
+    const selection = await selectAnalysisAgent(this.context, projectId)
+    const prompt = buildDiffReviewPrompt(snapshot)
+    const analysis = threadId
+      ? await runVisibleDiffReviewAgent(this.context, selection, {
+          projectId,
+          repoPath: project.repoPath,
+          threadId,
+          prompt,
+        })
+      : {
+          responseText: await runCommitPlannerAgent(
+            this.context,
+            selection,
+            project.repoPath,
+            prompt,
+            {
+              timeoutMessage: 'Diff review analysis timed out.',
+              timeoutMs: DIFF_REVIEW_TIMEOUT_MS,
+            },
+          ),
+          sessionId: undefined,
+        }
+    const review = normalizeDiffReview(analysis.responseText, snapshot.changedFiles)
+
+    return {
+      projectId,
+      fingerprint: snapshot.fingerprint,
+      branch: snapshot.branch,
+      statusSummary: snapshot.statusSummary,
+      changedFiles: snapshot.changedFiles,
+      summary: review.summary,
+      findings: review.findings,
+      analysis: {
+        agentId: selection.agentId,
+        model: selection.model,
+        sessionId: analysis.sessionId,
+      },
+    }
+  }
 }
 
 async function collectWorkingTreeSnapshot(repoPath: string): Promise<WorkingTreeSnapshot> {
@@ -176,6 +228,9 @@ async function collectWorkingTreeSnapshot(repoPath: string): Promise<WorkingTree
     changedFiles,
     fingerprint: fingerprintWorkingTree(changedFiles, patchResult.stdout, untrackedDiffs),
     prompt,
+    diffStat: diffStatResult.stdout.trim(),
+    trackedPatch: patchResult.stdout.trim(),
+    untrackedDiffs,
   }
 }
 
@@ -354,6 +409,60 @@ function buildCommitAnalysisPrompt(input: {
   return trimPromptSection(sections.join('\n'))
 }
 
+function buildDiffReviewPrompt(input: WorkingTreeSnapshot): string {
+  const changedFilesBlock = input.changedFiles
+    .map((file) =>
+      file.previousPath
+        ? `- ${file.status}: ${file.previousPath} -> ${file.path}`
+        : `- ${file.status}: ${file.path}`,
+    )
+    .join('\n')
+
+  const sections = [
+    'You are reviewing the current git working tree diff.',
+    '',
+    'Return valid JSON only. No markdown fences. No extra prose.',
+    'Focus only on concrete issues introduced by the diff: bugs, regressions, security risks, missing tests, and verification gaps.',
+    'Do not praise the code. Do not invent issues. If there are no concrete findings, return an empty findings array.',
+    '',
+    'JSON schema:',
+    '{',
+    '  "summary": "One short sentence.",',
+    '  "findings": [',
+    '    {',
+    '      "severity": "critical | high | medium | low",',
+    '      "category": "bug | regression | security | missing-test | verification",',
+    '      "title": "Short finding title",',
+    '      "detail": "Why this is a real issue in this diff.",',
+    '      "filePath": "relative/path.ts",',
+    '      "line": 123,',
+    '      "recommendation": "Concrete fix or verification step."',
+    '    }',
+    '  ]',
+    '}',
+    '',
+    `Current branch: ${input.branch}`,
+    '',
+    'Changed files:',
+    changedFilesBlock,
+    '',
+    'Diff stat:',
+    input.diffStat || '(no diff stat available)',
+    '',
+    'Patch:',
+    trimPromptSection(input.trackedPatch || '(tracked patch is empty)'),
+  ]
+
+  if (input.untrackedDiffs.length > 0) {
+    sections.push('', 'Untracked file diffs:')
+    for (const diff of input.untrackedDiffs) {
+      sections.push(trimPromptSection(diff))
+    }
+  }
+
+  return trimPromptSection(sections.join('\n'))
+}
+
 function trimPromptSection(text: string): string {
   if (text.length <= MAX_PROMPT_CHARS) return text
   return `${text.slice(0, MAX_PROMPT_CHARS).trimEnd()}\n[truncated]`
@@ -417,6 +526,7 @@ async function runCommitPlannerAgent(
   selection: AnalysisAgentSelection,
   repoPath: string,
   prompt: string,
+  options: { timeoutMessage?: string; timeoutMs?: number } = {},
 ): Promise<string> {
   const adapter = context.adapters.get(selection.agentId)
   if (!adapter) {
@@ -441,8 +551,10 @@ async function runCommitPlannerAgent(
 
     const timeout = setTimeout(() => {
       session.cancel()
-      settleWithError(new Error('Commit suggestion analysis timed out.'))
-    }, ANALYSIS_TIMEOUT_MS)
+      settleWithError(
+        new Error(options.timeoutMessage ?? 'Commit suggestion analysis timed out.'),
+      )
+    }, options.timeoutMs ?? ANALYSIS_TIMEOUT_MS)
 
     const settleWithError = (error: Error): void => {
       if (settled) return
@@ -503,6 +615,100 @@ async function runCommitPlannerAgent(
       settleWithSuccess(finalText)
     })
   })
+}
+
+async function runVisibleDiffReviewAgent(
+  context: MainIpcContext,
+  selection: AnalysisAgentSelection,
+  input: {
+    projectId: string
+    repoPath: string
+    threadId: string
+    prompt: string
+  },
+): Promise<{ responseText: string; sessionId: string }> {
+  const visiblePrompt = ['[Role: diff reviewer]', '', input.prompt].join('\n')
+  const { sessionId } = await context.sessionManager.dispatch({
+    projectId: input.projectId,
+    prompt: visiblePrompt,
+    agentId: selection.agentId,
+    model: selection.model,
+    repoPath: input.repoPath,
+    threadId: input.threadId,
+    isolate: false,
+    runtimeSettings: selection.runtimeSettings,
+  })
+
+  return {
+    sessionId,
+    responseText: await waitForAnalysisSessionOutput(context, sessionId),
+  }
+}
+
+async function waitForAnalysisSessionOutput(
+  context: MainIpcContext,
+  sessionId: string,
+): Promise<string> {
+  const deadline = Date.now() + DIFF_REVIEW_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    const session = sessionsStore.get(sessionId)
+    const events = sessionsStore.listEvents(sessionId)
+
+    if (session?.status === 'done') {
+      const output =
+        extractSessionOutput(events, { maxChars: MAX_PROMPT_CHARS }) ??
+        lastCompletionMessage(events)
+      if (output) return output
+      if (!events.some((event) => event.type === 'session-complete')) {
+        await delay(ANALYSIS_POLL_INTERVAL_MS)
+        continue
+      }
+      throw new Error('The review agent returned an empty response.')
+    }
+
+    if (session?.status === 'error' || session?.status === 'cancelled') {
+      throw new Error(lastFailureMessage(events) ?? `Review agent ${session.status}.`)
+    }
+
+    await delay(ANALYSIS_POLL_INTERVAL_MS)
+  }
+
+  context.sessionManager.cancel(sessionId)
+  throw new Error('Diff review analysis timed out after 3 minutes.')
+}
+
+function lastCompletionMessage(events: readonly AgentEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.type !== 'session-complete') continue
+    const text = extractTextFromPayload(event.payload).trim()
+    if (text) return trimPromptSection(text)
+  }
+
+  return null
+}
+
+function lastFailureMessage(events: readonly AgentEvent[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.type !== 'error' && event.type !== 'stderr' && event.type !== 'session-complete') {
+      continue
+    }
+
+    if (event.type === 'session-complete' && !completionFailed(event.payload)) {
+      continue
+    }
+
+    const text = extractTextFromPayload(event.payload).trim()
+    if (text) return text
+  }
+
+  return null
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function extractTextFromPayload(payload: unknown): string {

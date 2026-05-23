@@ -28,33 +28,10 @@ export class CodexAdapter implements AgentAdapter {
 
   async dispatch(params: AgentDispatchParams): Promise<AgentSession> {
     const events = new EventEmitter()
-    const models = uniqueModels([params.model, ...(params.modelFallbacks ?? [])])
-    let modelIndex = 0
-    let retryAfterExit = false
     let completed = false
     const emitEvent = (event: AgentEvent): void => {
       if (event.type === 'session-complete' || event.type === 'error') completed = true
       events.emit('event', event)
-    }
-
-    const scheduleCapacityRetry = (reason: unknown): boolean => {
-      const nextModel = models[modelIndex + 1]
-      if (!nextModel) return false
-
-      modelIndex += 1
-      retryAfterExit = true
-      events.emit('event', {
-        type: 'activity',
-        sessionId: params.sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Model at capacity',
-          detail: `${capacityReasonText(reason)} Retrying with ${nextModel}.`,
-          status: 'running',
-        },
-        timestamp: Date.now(),
-      } satisfies AgentEvent)
-      return true
     }
 
     const startCurrentModel = (): void => {
@@ -65,8 +42,6 @@ export class CodexAdapter implements AgentAdapter {
           'codex',
           params.runtimeSettings?.command,
         )
-        const model = models[modelIndex] ?? params.model
-        let capacityStderr: string | null = null
         const imageArgs = (params.imageAttachments ?? []).flatMap((image) => [
           '--image',
           image.filePath,
@@ -74,7 +49,7 @@ export class CodexAdapter implements AgentAdapter {
         const args = [
           'exec',
           '--model',
-          model,
+          params.model,
           ...imageArgs,
           ...dangerousArgs(params.runtimeSettings?.permissionMode),
           '--color',
@@ -94,11 +69,8 @@ export class CodexAdapter implements AgentAdapter {
           const rl = createInterface({ input: child.stdout })
           rl.on('line', (line) => {
             if (!line.trim()) return
-            if (retryAfterExit) return
 
             const event = parseCodexLine(line, params.sessionId)
-            if (isCapacityFailureEvent(event) && scheduleCapacityRetry(event.payload)) return
-
             emitEvent(event)
           })
         }
@@ -106,10 +78,6 @@ export class CodexAdapter implements AgentAdapter {
         child.stderr?.on('data', (chunk: Buffer) => {
           const text = visibleCodexStderr(chunk.toString())
           if (!text) return
-          if (retryAfterExit) return
-          if (isCapacityFailureText(text)) {
-            capacityStderr = text
-          }
 
           emitEvent({
             type: 'stderr',
@@ -120,16 +88,6 @@ export class CodexAdapter implements AgentAdapter {
         })
 
         child.on('exit', (code, signal) => {
-          if (retryAfterExit) {
-            retryAfterExit = false
-            startCurrentModel()
-            return
-          }
-          if (code && capacityStderr && scheduleCapacityRetry(capacityStderr)) {
-            retryAfterExit = false
-            startCurrentModel()
-            return
-          }
           if (completed) return
 
           emitEvent({
@@ -178,48 +136,6 @@ export class CodexAdapter implements AgentAdapter {
       return fallbackModelsForAgent(this.id)
     }
   }
-}
-
-function uniqueModels(models: readonly string[]): string[] {
-  return models.filter((model, index) => model.trim() && models.indexOf(model) === index)
-}
-
-function isCapacityFailureEvent(event: AgentEvent): boolean {
-  return (
-    (event.type === 'error' || event.type === 'session-complete') &&
-    isCapacityFailureText(capacityReasonText(event.payload))
-  )
-}
-
-function isCapacityFailureText(text: string): boolean {
-  const normalized = text.toLowerCase()
-  return (
-    normalized.includes('model is at capacity') ||
-    normalized.includes('selected model is at capacity') ||
-    normalized.includes('model capacity') ||
-    normalized.includes('capacity exceeded')
-  )
-}
-
-function capacityReasonText(payload: unknown): string {
-  if (typeof payload === 'string') return payload
-  if (!payload || typeof payload !== 'object') return String(payload)
-
-  const record = payload as Record<string, unknown>
-  const candidates = [
-    record.message,
-    record.error,
-    record.detail,
-    record.reason,
-    record.result,
-    record.text,
-  ]
-
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
-  }
-
-  return JSON.stringify(payload)
 }
 
 function dangerousArgs(permissionMode = 'dangerous'): string[] {

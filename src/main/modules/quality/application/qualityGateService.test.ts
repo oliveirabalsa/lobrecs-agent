@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_APP_SETTINGS } from '../../settings'
-import type { AgentActivity, AppSettings, DiffProposal } from '../../../../shared/types'
+import type { AgentActivity, AppSettings, DiffProposal, SupportedAgentId } from '../../../../shared/types'
 import { runQualityGate, type QualityGateDependencies } from './qualityGateService'
 
 type RunCommand = NonNullable<QualityGateDependencies['runCommand']>
@@ -95,15 +95,16 @@ describe('runQualityGate', () => {
   it('dispatches one repair session when verification fails', async () => {
     const activities: AgentActivity[] = []
     const repairPrompts: string[] = []
+    const auditEvents: Parameters<NonNullable<QualityGateDependencies['recordAudit']>>[0][] = []
     const dispatchRepair = vi.fn<QualityGateDependencies['dispatchRepair']>(
       async (input) => {
         repairPrompts.push(input.prompt)
         return { sessionId: 'repair-1' }
       },
     )
-    const routeModel = vi.fn<QualityGateDependencies['routeModel']>(async () => ({
-      agentId: 'claude-code' as const,
-      model: 'claude-sonnet-4-6',
+    const routeModel = vi.fn<QualityGateDependencies['routeModel']>(async (input) => ({
+      agentId: input.preferredAgentId,
+      model: modelForAgent(input.preferredAgentId),
     }))
 
     await runQualityGate(
@@ -120,6 +121,7 @@ describe('runQualityGate', () => {
         getSettings: () => DEFAULT_APP_SETTINGS,
         routeModel,
         dispatchRepair,
+        recordAudit: (event) => auditEvents.push(event),
         runCommand: vi.fn<RunCommand>(async (command) =>
           command.includes('build')
             ? { exitCode: 1, stdout: '', stderr: 'Type error' }
@@ -128,11 +130,29 @@ describe('runQualityGate', () => {
       },
     )
 
+    expect(auditEvents.map((event) => event.phase)).toEqual([
+      'recipe-started',
+      'recipe-failed',
+      'repair-dispatched',
+    ])
+    expect(auditEvents.at(-1)).toMatchObject({
+      phase: 'repair-dispatched',
+      repairSessionId: 'repair-1',
+      exitCode: 1,
+    })
+
     expect(routeModel).toHaveBeenCalledTimes(1)
+    expect(routeModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredAgentId: 'codex',
+      }),
+    )
     expect(dispatchRepair).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: 'project-1',
         threadId: 'thread-1',
+        agentId: 'codex',
+        model: 'gpt-5.3-codex',
         qualityAttempt: 1,
       }),
     )
@@ -143,6 +163,98 @@ describe('runQualityGate', () => {
         expect.objectContaining({ kind: 'step', title: 'Self-healing repair started' }),
       ]),
     )
+  })
+
+  it('keeps trying repair agents when the router falls back to Claude first', async () => {
+    const dispatchRepair = vi.fn<QualityGateDependencies['dispatchRepair']>(
+      async () => ({ sessionId: 'repair-1' }),
+    )
+    const routeModel = vi.fn<QualityGateDependencies['routeModel']>(async (input) => {
+      if (input.preferredAgentId === 'codex') {
+        return { agentId: 'claude-code', model: 'claude-sonnet-4-6' }
+      }
+
+      return { agentId: 'opencode', model: 'minimax-coding-plan/MiniMax-M2' }
+    })
+
+    await runQualityGate(
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        repoPath: '/repo',
+        changedFiles: [appliedProposal('/repo/src/app.ts')],
+        attempt: 0,
+        emitActivity: vi.fn(),
+      },
+      {
+        getSettings: () => DEFAULT_APP_SETTINGS,
+        routeModel,
+        dispatchRepair,
+        runCommand: vi.fn<RunCommand>(async (command) =>
+          command.includes('build')
+            ? { exitCode: 1, stdout: '', stderr: 'Type error' }
+            : { exitCode: 0, stdout: 'ok', stderr: '' },
+        ),
+      },
+    )
+
+    expect(routeModel).toHaveBeenCalledTimes(2)
+    expect(routeModel.mock.calls.map(([input]) => input.preferredAgentId)).toEqual([
+      'codex',
+      'opencode',
+    ])
+    expect(dispatchRepair).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'opencode',
+        model: 'minimax-coding-plan/MiniMax-M2',
+      }),
+    )
+  })
+
+  it('stops self-healing when the same recipe fails twice with the same exit code', async () => {
+    const auditEvents: Parameters<NonNullable<QualityGateDependencies['recordAudit']>>[0][] = []
+    const dispatchRepair = vi.fn()
+    const settings: AppSettings = {
+      ...DEFAULT_APP_SETTINGS,
+      verification: {
+        ...DEFAULT_APP_SETTINGS.verification,
+        selfHealingMaxAttempts: 3,
+      },
+    }
+
+    await runQualityGate(
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        repoPath: '/repo',
+        changedFiles: [appliedProposal('/repo/src/app.ts')],
+        attempt: 1,
+        emitActivity: vi.fn(),
+      },
+      {
+        getSettings: () => settings,
+        routeModel: vi.fn(),
+        dispatchRepair,
+        recordAudit: (event) => auditEvents.push(event),
+        getLastAudit: () => ({ recipeId: 'build', exitCode: 1, phase: 'recipe-failed' }),
+        runCommand: vi.fn<RunCommand>(async (command) =>
+          command.includes('build')
+            ? { exitCode: 1, stdout: '', stderr: 'Type error' }
+            : { exitCode: 0, stdout: 'ok', stderr: '' },
+        ),
+      },
+    )
+
+    expect(dispatchRepair).not.toHaveBeenCalled()
+    expect(auditEvents.at(-1)).toMatchObject({
+      phase: 'gate-stopped',
+      stopReason: 'repeat-failure',
+      finalStatus: 'failed',
+      recipeId: 'build',
+      exitCode: 1,
+    })
   })
 
   it('does not dispatch another repair after the configured attempt limit', async () => {
@@ -185,4 +297,11 @@ function appliedProposal(filePath: string): DiffProposal {
     changeType: 'modified',
     status: 'applied',
   }
+}
+
+function modelForAgent(agentId: SupportedAgentId): string {
+  if (agentId === 'codex') return 'gpt-5.3-codex'
+  if (agentId === 'opencode') return 'minimax-coding-plan/MiniMax-M2'
+  if (agentId === 'antigravity') return 'gemini-3.0-pro'
+  return 'claude-sonnet-4-6'
 }

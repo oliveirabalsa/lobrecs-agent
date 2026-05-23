@@ -6,6 +6,7 @@ import type {
   AgentApprovalMode,
   AgentEvent,
   AgentId,
+  AgentModelRecoveryDecisionPayload,
   AgentPlanReviewDecisionPayload,
   AgentRuntimeSettings,
   QueuedMessage,
@@ -13,13 +14,14 @@ import type {
   Session,
   ThreadTranscriptTurn,
   SessionStatus,
+  SupportedAgentId,
   Thread,
   ThreadUpdatedEvent,
 } from '../../shared/types'
 import { processWarningKey } from '../../shared/contracts/agentOutput'
 import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
-import { sessionsStore, threadsStore } from '../store'
+import { promptEvidenceStore, sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
 import { buildPlanExecutionPrompt, buildPlanModeContext } from './planModePrompt'
 import {
@@ -126,6 +128,10 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   runtimeSettings?: AgentRuntimeSettings
   /** Raw project context — carried so a gated execution session resolves with parity. */
   baseContext?: string | null
+  /** Context retrieval query to preserve when a paused run is continued. */
+  contextQuery?: string
+  /** Last provider-limit/capacity message observed before terminal failure. */
+  providerLimitReason?: string
 }
 
 /**
@@ -164,6 +170,31 @@ export type PlanReviewExecutionOptions = {
   modelFallbacks?: string[]
 }
 
+type ModelRecoveryRecord = {
+  recoveryId: string
+  sourceSessionId: string
+  projectId: string
+  threadId: string
+  repoPath: string
+  prompt: string
+  agentId: AgentId
+  model: string
+  isolate: boolean
+  runtimeSettings?: AgentRuntimeSettings
+  baseContext?: string | null
+  contextQuery?: string
+  imageAttachments?: ImageAttachment[]
+  planMode: boolean
+  requiresImageSupport: boolean
+  reason: string
+}
+
+export type ModelRecoveryExecutionOptions = {
+  runtimeSettings?: AgentRuntimeSettings
+  modelFallbacks?: string[]
+  validateSelection?: (agentId: SupportedAgentId, model: string) => void
+}
+
 type PendingQueuedMessage = QueuedMessage & {
   runtimeSettings?: AgentRuntimeSettings
 }
@@ -196,6 +227,8 @@ export class SessionManager {
   private readonly pendingQueues = new Map<string, PendingQueuedMessage[]>()
   /** Plans awaiting an Approve/Reject decision, keyed by reviewId. */
   private readonly pendingPlanReviews = new Map<string, PlanReviewRecord>()
+  /** Provider-limit recoveries awaiting Continue/Cancel, keyed by recoveryId. */
+  private readonly pendingModelRecoveries = new Map<string, ModelRecoveryRecord>()
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
   private qualityGateRunner?: QualityGateRunner
@@ -292,6 +325,17 @@ export class SessionManager {
         ? buildPlanModeContext(context)
         : context
 
+      promptEvidenceStore.create({
+        sessionId: session.id,
+        projectId: params.projectId,
+        threadId,
+        agentId: params.agentId,
+        model: params.model,
+        prompt: params.prompt,
+        resolvedContext: context,
+        adapterContext,
+      })
+
       const agentSession = await adapter.dispatch({
         sessionId: session.id,
         prompt: params.prompt,
@@ -318,6 +362,7 @@ export class SessionManager {
         isolate: shouldIsolate,
         runtimeSettings: params.runtimeSettings,
         baseContext: params.context,
+        contextQuery: params.contextQuery,
       })
       this.scheduleIdleHeartbeat(session.id)
 
@@ -360,6 +405,7 @@ export class SessionManager {
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
     this.dropPlanReviewsForSession(sessionId)
+    this.dropModelRecoveriesForSession(sessionId)
     const session = sessionsStore.get(sessionId)
 
     if (session && !terminalSessionStatuses.has(session.status)) {
@@ -564,6 +610,53 @@ export class SessionManager {
     }
   }
 
+  async resolveModelRecovery(
+    payload: AgentModelRecoveryDecisionPayload,
+    executionOptions: ModelRecoveryExecutionOptions = {},
+  ): Promise<DispatchSessionResult | null> {
+    const record = this.pendingModelRecoveries.get(payload.recoveryId)
+    if (!record) return null
+    if (payload.sessionId !== record.sourceSessionId) return null
+
+    if (payload.decision === 'cancel') {
+      this.pendingModelRecoveries.delete(payload.recoveryId)
+      this.sessionsPausedForUserInput.delete(payload.sessionId)
+      sessionsStore.updateStatus(payload.sessionId, 'cancelled')
+      this.recordEvent({
+        type: 'session-complete',
+        sessionId: payload.sessionId,
+        payload: { status: 'cancelled' },
+        timestamp: Date.now(),
+      })
+      return null
+    }
+
+    if (!payload.agentId || !payload.modelOverride) {
+      throw new Error('Choose an agent and model to continue this task')
+    }
+
+    executionOptions.validateSelection?.(payload.agentId, payload.modelOverride)
+
+    const execution = await this.dispatch({
+      projectId: record.projectId,
+      prompt: record.prompt,
+      context: record.baseContext,
+      contextQuery: record.contextQuery,
+      agentId: payload.agentId,
+      model: payload.modelOverride,
+      modelFallbacks: executionOptions.modelFallbacks,
+      repoPath: record.repoPath,
+      imageAttachments: record.imageAttachments,
+      threadId: record.threadId,
+      isolate: record.isolate,
+      runtimeSettings: executionOptions.runtimeSettings ?? record.runtimeSettings,
+      planMode: record.planMode,
+    })
+    this.pendingModelRecoveries.delete(payload.recoveryId)
+    this.sessionsPausedForUserInput.delete(payload.sessionId)
+    return execution
+  }
+
   /**
    * Completion path for a plan-mode planning session.
    *
@@ -636,6 +729,15 @@ export class SessionManager {
     }
   }
 
+  /** Drops pending provider-limit recovery prompts tied to a session. */
+  private dropModelRecoveriesForSession(sessionId: string): void {
+    for (const [recoveryId, record] of this.pendingModelRecoveries) {
+      if (record.sourceSessionId === sessionId) {
+        this.pendingModelRecoveries.delete(recoveryId)
+      }
+    }
+  }
+
   private resolveAdapter(agentId: AgentId): AgentAdapter | undefined {
     return this.adapterResolver?.(agentId) ?? this.adapters.get(agentId)
   }
@@ -679,6 +781,12 @@ export class SessionManager {
     if (this.sessionsPausedForUserInput.has(event.sessionId)) return
     this.noteAgentEvent(event.sessionId)
 
+    const observedProviderLimit = providerLimitReasonFromEvent(event)
+    if (observedProviderLimit) {
+      const active = this.activeSessions.get(event.sessionId)
+      if (active) active.providerLimitReason = observedProviderLimit
+    }
+
     if (event.type === 'approval-request') {
       if (this.isTerminalSession(event.sessionId)) return
 
@@ -695,6 +803,14 @@ export class SessionManager {
       const completedEvent = withCompletionStatus(event, status)
       const active = this.activeSessions.get(event.sessionId)
       const session = sessionsStore.get(event.sessionId)
+      const providerLimitReason =
+        observedProviderLimit ?? active?.providerLimitReason ?? null
+
+      if (status === 'error' && active && session && providerLimitReason) {
+        this.applyUsage(event)
+        void this.pauseForModelRecovery(event.sessionId, active, session, providerLimitReason)
+        return
+      }
 
       this.applyUsage(event)
       sessionsStore.updateStatus(event.sessionId, status)
@@ -735,6 +851,15 @@ export class SessionManager {
       if (this.isTerminalSession(event.sessionId)) return
 
       const active = this.activeSessions.get(event.sessionId)
+      const session = sessionsStore.get(event.sessionId)
+      const providerLimitReason =
+        observedProviderLimit ?? active?.providerLimitReason ?? null
+
+      if (active && session && providerLimitReason) {
+        void this.pauseForModelRecovery(event.sessionId, active, session, providerLimitReason)
+        return
+      }
+
       sessionsStore.updateStatus(event.sessionId, 'error')
       this.recordEvent(event)
       void this.removeWorktree(event.sessionId, active)
@@ -902,6 +1027,59 @@ export class SessionManager {
 
     active.cancel()
     void this.removeWorktree(sessionId, active)
+  }
+
+  private async pauseForModelRecovery(
+    sessionId: string,
+    active: ActiveSession,
+    session: Session,
+    reason: string,
+  ): Promise<void> {
+    sessionsStore.updateStatus(sessionId, 'awaiting-input')
+    this.sessionsPausedForUserInput.add(sessionId)
+    this.stopIdleHeartbeat(sessionId)
+    this.stopLiveDiff(sessionId)
+    this.activeSessions.delete(sessionId)
+    this.processWarningsBySession.delete(sessionId)
+
+    const recoveryId = randomUUID()
+    const requiresImageSupport = (session.imageAttachments?.length ?? 0) > 0
+    this.pendingModelRecoveries.set(recoveryId, {
+      recoveryId,
+      sourceSessionId: sessionId,
+      projectId: session.projectId,
+      threadId: active.threadId,
+      repoPath: active.repoPath,
+      prompt: session.prompt,
+      agentId: session.agentId,
+      model: session.model,
+      isolate: active.isolate,
+      runtimeSettings: active.runtimeSettings,
+      baseContext: active.baseContext,
+      contextQuery: active.contextQuery,
+      imageAttachments: session.imageAttachments,
+      planMode: active.planMode,
+      requiresImageSupport,
+      reason,
+    })
+
+    try {
+      await this.removeWorktree(sessionId, active)
+    } finally {
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'model-recovery',
+          recoveryId,
+          failedAgentId: session.agentId,
+          failedModel: session.model,
+          reason,
+          requiresImageSupport,
+        },
+        timestamp: Date.now(),
+      })
+    }
   }
 
   private hasSeenProcessWarning(event: AgentEvent): boolean {
@@ -1197,6 +1375,7 @@ export class SessionManager {
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
+    this.dropModelRecoveriesForSession(sessionId)
   }
 }
 
@@ -1218,6 +1397,92 @@ function isUserQuestionActivity(payload: unknown): payload is Extract<
     payload !== null &&
     (payload as { kind?: unknown }).kind === 'user-question'
   )
+}
+
+function providerLimitReasonFromEvent(event: AgentEvent): string | null {
+  if (
+    event.type !== 'stderr' &&
+    event.type !== 'error' &&
+    event.type !== 'session-complete'
+  ) {
+    return null
+  }
+
+  const text = textFromUnknownPayload(event.payload).trim()
+  if (!isProviderLimitText(text)) return null
+
+  return truncateProviderLimitReason(text)
+}
+
+function isProviderLimitText(text: string): boolean {
+  const normalized = text.toLowerCase()
+  if (!normalized) return false
+
+  const directSignals = [
+    'usage limit',
+    'rate limit',
+    'rate_limit',
+    'quota',
+    'insufficient_quota',
+    'too many requests',
+    'session limit',
+    'model is at capacity',
+    'selected model is at capacity',
+    'model capacity',
+    'capacity exceeded',
+    'credits exhausted',
+    'billing hard limit',
+    'credit balance',
+    'limit reached',
+    'limit exceeded',
+  ]
+
+  return directSignals.some((signal) => normalized.includes(signal))
+}
+
+function truncateProviderLimitReason(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= 500) return normalized
+
+  return `${normalized.slice(0, 497)}...`
+}
+
+function textFromUnknownPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (payload === null || payload === undefined) return ''
+  if (typeof payload !== 'object') return String(payload)
+
+  const record = payload as Record<string, unknown>
+  const directFields = [
+    'text',
+    'message',
+    'error',
+    'detail',
+    'reason',
+    'result',
+    'summary',
+    'output',
+    'content',
+  ]
+
+  for (const field of directFields) {
+    const value = record[field]
+    if (typeof value === 'string' && value.trim()) return value
+    if (Array.isArray(value)) {
+      const text = value.map(textFromUnknownPayload).join(' ')
+      if (text.trim()) return text
+    }
+    if (value && typeof value === 'object') {
+      const text = textFromUnknownPayload(value)
+      if (text.trim()) return text
+    }
+  }
+
+  try {
+    return JSON.stringify(payload)
+  } catch {
+    return String(payload)
+  }
 }
 
 function publicQueuedMessage(message: PendingQueuedMessage): QueuedMessage {

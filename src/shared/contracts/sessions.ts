@@ -155,6 +155,24 @@ export type AgentActivity =
        */
       nextPromptSuffix?: string
     }
+  | {
+      /**
+       * Emitted when an agent stops because its provider/model limit was hit.
+       * The renderer shows an inline model picker and calls
+       * `agent:model-recovery-decision` to continue on the same thread.
+       */
+      kind: 'model-recovery'
+      /** Identifier echoed back in `AgentModelRecoveryDecisionPayload`. */
+      recoveryId: string
+      /** Agent that failed because of the provider/model limit. */
+      failedAgentId: string
+      /** Model that failed because of the provider/model limit. */
+      failedModel: string
+      /** Human-readable provider error, safe to show in the review card. */
+      reason: string
+      /** True when the continuation model must support image inputs. */
+      requiresImageSupport?: boolean
+    }
 
 export interface AgentEvent {
   type:

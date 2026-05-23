@@ -2,6 +2,7 @@ import type { IpcRendererEvent } from 'electron'
 import type {
   AgentDispatchParams,
   AgentDispatchResult,
+  AgentModelRecoveryDecisionPayload,
   AgentPlanDecisionPayload,
   AgentPlanReviewDecisionPayload,
   EnqueueParams,
@@ -27,6 +28,13 @@ export interface AgentApi {
    */
   planReviewDecision(
     payload: AgentPlanReviewDecisionPayload,
+  ): Promise<AgentDispatchResult | null>
+  /**
+   * Continues a session that paused after a provider/model limit with a
+   * selected replacement model, or dismisses the recovery prompt.
+   */
+  modelRecoveryDecision(
+    payload: AgentModelRecoveryDecisionPayload,
   ): Promise<AgentDispatchResult | null>
   /**
    * Resolves a pending `swarm-step-approval` round-trip. `continue` releases
@@ -63,6 +71,8 @@ export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentAp
     planDecision: (payload) => ipcRenderer.invoke('agent:plan-decision', payload),
     planReviewDecision: (payload) =>
       ipcRenderer.invoke('agent:plan-review-decision', payload),
+    modelRecoveryDecision: (payload) =>
+      ipcRenderer.invoke('agent:model-recovery-decision', payload),
     stepApprovalDecision: (payload) =>
       ipcRenderer.invoke('swarm:step-approval-decision', payload),
     enqueue: (params) => ipcRenderer.invoke('agent:enqueue', params),

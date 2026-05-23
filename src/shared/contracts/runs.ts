@@ -104,3 +104,39 @@ export interface SpecRunComparison {
   attempts: RunAttempt[]
   verificationResults: VerificationResult[]
 }
+
+export type RunAuditPhase =
+  | 'recipe-started'
+  | 'recipe-passed'
+  | 'recipe-failed'
+  | 'repair-dispatched'
+  | 'repair-skipped'
+  | 'gate-passed'
+  | 'gate-stopped'
+
+export type RunAuditStopReason =
+  | 'passed'
+  | 'max-attempts'
+  | 'repeat-failure'
+  | 'no-diff'
+  | 'manual-review'
+  | 'cancelled'
+
+export interface RunAuditRecord {
+  id: string
+  specRunId?: string
+  sessionId: string
+  threadId?: string
+  attempt: number
+  phase: RunAuditPhase
+  recipeId?: string
+  recipeLabel?: string
+  command?: string
+  exitCode?: number
+  outputTail?: string
+  changedFiles?: string[]
+  repairSessionId?: string
+  stopReason?: RunAuditStopReason
+  finalStatus?: 'passed' | 'failed' | 'pending'
+  createdAt: number
+}

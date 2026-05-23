@@ -8,7 +8,14 @@ import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '../../shared/types'
 import { worktreeManager } from '../git/WorktreeManager'
-import { closeDb, projectsStore, sessionsStore, setDbForTests, threadsStore } from '../store'
+import {
+  closeDb,
+  projectsStore,
+  promptEvidenceStore,
+  sessionsStore,
+  setDbForTests,
+  threadsStore,
+} from '../store'
 import type { AgentAdapter, AgentSession } from './SessionManager'
 import { SessionManager } from './SessionManager'
 import { buildPlanExecutionPrompt } from './planModePrompt'
@@ -275,6 +282,107 @@ describe('SessionManager', () => {
     expect(broadcasts.map((event) => event.type)).toEqual(['stdout', 'activity'])
   })
 
+  it('pauses on provider limits and continues with a user-selected model', async () => {
+    const project = createProject()
+    const claudeAdapter = new FakeAdapter('claude-code')
+    const codexAdapter = new FakeAdapter('codex')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [claudeAdapter, codexAdapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId, threadId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'finish the refactor',
+      agentId: 'claude-code',
+      model: 'claude-opus-4-7',
+      repoPath: project.repoPath,
+    })
+
+    claudeAdapter.emit({
+      type: 'error',
+      sessionId,
+      payload: { message: 'Claude usage limit reached. Please try again later.' },
+      timestamp: 10,
+    })
+
+    await waitFor(() => sessionsStore.get(sessionId)?.status === 'awaiting-input')
+    const recoveryEvent = broadcasts.find(
+      (event) =>
+        event.type === 'activity' &&
+        typeof event.payload === 'object' &&
+        event.payload !== null &&
+        (event.payload as { kind?: string }).kind === 'model-recovery',
+    )
+    const recoveryId = (recoveryEvent?.payload as { recoveryId?: string } | undefined)
+      ?.recoveryId
+
+    expect(recoveryId).toBeTruthy()
+    expect(sessionsStore.listEvents(sessionId).some((event) => event.type === 'error')).toBe(false)
+    expect(manager.isActive(sessionId)).toBe(false)
+
+    const continued = await manager.resolveModelRecovery({
+      recoveryId: recoveryId!,
+      sessionId,
+      decision: 'continue',
+      agentId: 'codex',
+      modelOverride: 'gpt-5.4',
+    })
+
+    expect(continued?.threadId).toBe(threadId)
+    expect(codexAdapter.dispatchedParams).toMatchObject({
+      prompt: 'finish the refactor',
+      repoPath: project.repoPath,
+      model: 'gpt-5.4',
+    })
+  })
+
+  it('pauses for model recovery when a process warning reports a session limit', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter('claude-code')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'continue this task',
+      agentId: 'claude-code',
+      model: 'claude-haiku-4-5-20251001',
+      repoPath: project.repoPath,
+    })
+    const reason = "You've hit your session limit · resets 3:40am (America/Sao_Paulo)"
+
+    adapter.emit({
+      type: 'stderr',
+      sessionId,
+      payload: { text: reason },
+      timestamp: 10,
+    })
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 1 },
+      timestamp: 11,
+    })
+
+    await waitFor(() => sessionsStore.get(sessionId)?.status === 'awaiting-input')
+    expect(manager.isActive(sessionId)).toBe(false)
+    expect(
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'model-recovery' &&
+          (event.payload as { reason?: string }).reason === reason,
+      ),
+    ).toBe(true)
+  })
+
   it('links follow-up sessions to an existing thread id', async () => {
     const project = createProject()
     const thread = threadsStore.create({ projectId: project.id, title: 'Existing thread' })
@@ -415,6 +523,12 @@ describe('SessionManager', () => {
     )
     expect(context).toContain('- [workflow] Use rtk for shell commands.')
     expect(context).toContain('Assistant: Store foundation is ready')
+
+    expect(promptEvidenceStore.getForSession(adapter.dispatches[1]?.sessionId ?? '')).toMatchObject({
+      prompt: 'add tests',
+      resolvedContext: expect.stringContaining('Project knowledge base'),
+      adapterContext: expect.stringContaining('Conversation history'),
+    })
   })
 
   it('allows overlapping local runs from different chat threads in the same repository', async () => {

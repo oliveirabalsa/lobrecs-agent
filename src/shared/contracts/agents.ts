@@ -104,6 +104,23 @@ export interface AgentPlanReviewDecisionPayload {
 }
 
 /**
+ * Renderer→main payload for resolving a provider/model limit recovery prompt.
+ * The failed session is already paused; choosing `continue` dispatches a new
+ * session on the same thread using the selected agent/model.
+ */
+export interface AgentModelRecoveryDecisionPayload {
+  /** Identifier echoed from the matching `model-recovery` activity. */
+  recoveryId: string
+  /** Failed session that emitted the recovery prompt. */
+  sessionId: string
+  decision: 'continue' | 'cancel'
+  /** Agent selected for the continuation run. Required for `continue`. */
+  agentId?: SupportedAgentId
+  /** Model selected for the continuation run. Required for `continue`. */
+  modelOverride?: string
+}
+
+/**
  * Renderer→main payload for resolving a `swarm-step-approval` activity. The
  * orchestrator pauses between sequential swarm steps when the previous agent
  * was configured with `requireApprovalAfter`. The user chooses to continue

@@ -246,6 +246,77 @@ const migrations: Migration[] = [
       ALTER TABLE sessions ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 10,
+    up: `
+      CREATE TABLE IF NOT EXISTS run_audit_records (
+        id                TEXT PRIMARY KEY,
+        spec_run_id       TEXT REFERENCES spec_runs(id) ON DELETE CASCADE,
+        session_id        TEXT NOT NULL,
+        thread_id         TEXT,
+        attempt           INTEGER NOT NULL DEFAULT 0,
+        phase             TEXT NOT NULL,
+        recipe_id         TEXT,
+        recipe_label      TEXT,
+        command           TEXT,
+        exit_code         INTEGER,
+        output_tail       TEXT,
+        changed_files     TEXT,
+        repair_session_id TEXT,
+        stop_reason       TEXT,
+        final_status      TEXT,
+        created_at        INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_run_audit_records_run
+        ON run_audit_records(spec_run_id, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_run_audit_records_session
+        ON run_audit_records(session_id, created_at ASC);
+    `,
+  },
+  {
+    version: 11,
+    up: `
+      CREATE TABLE IF NOT EXISTS prompt_evidence_records (
+        id               TEXT PRIMARY KEY,
+        session_id       TEXT NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+        project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        thread_id        TEXT,
+        agent_id         TEXT NOT NULL,
+        model            TEXT NOT NULL,
+        prompt           TEXT NOT NULL,
+        resolved_context TEXT,
+        adapter_context  TEXT,
+        context_bytes    INTEGER NOT NULL DEFAULT 0,
+        redacted         INTEGER NOT NULL DEFAULT 0 CHECK (redacted IN (0, 1)),
+        created_at       INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_prompt_evidence_session
+        ON prompt_evidence_records(session_id);
+      CREATE INDEX IF NOT EXISTS idx_prompt_evidence_project
+        ON prompt_evidence_records(project_id, created_at DESC);
+    `,
+  },
+  {
+    version: 12,
+    up: `
+      CREATE TABLE IF NOT EXISTS extension_installations (
+        id            TEXT PRIMARY KEY,
+        extension_id  TEXT NOT NULL,
+        scope         TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+        project_path  TEXT,
+        target_agents TEXT NOT NULL,
+        actions       TEXT NOT NULL,
+        installed_at  INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_extension_installations_extension
+        ON extension_installations(extension_id, installed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_extension_installations_scope
+        ON extension_installations(scope, installed_at DESC);
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {

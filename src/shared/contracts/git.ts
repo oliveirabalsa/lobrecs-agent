@@ -50,6 +50,10 @@ export interface GitCommitAnalysisModel {
   model: string
 }
 
+export interface GitDiffReviewAnalysis extends GitCommitAnalysisModel {
+  sessionId?: string
+}
+
 export interface GitCommitAnalysisResult {
   projectId: string
   fingerprint: string
@@ -59,6 +63,36 @@ export interface GitCommitAnalysisResult {
   changedFiles: GitChangedFile[]
   suggestions: GitCommitSuggestion[]
   analysis: GitCommitAnalysisModel
+}
+
+export type GitDiffReviewSeverity = 'critical' | 'high' | 'medium' | 'low'
+export type GitDiffReviewCategory =
+  | 'bug'
+  | 'regression'
+  | 'security'
+  | 'missing-test'
+  | 'verification'
+
+export interface GitDiffReviewFinding {
+  id: string
+  severity: GitDiffReviewSeverity
+  category: GitDiffReviewCategory
+  title: string
+  detail: string
+  filePath?: string
+  line?: number
+  recommendation?: string
+}
+
+export interface GitDiffReviewResult {
+  projectId: string
+  fingerprint: string
+  branch: string
+  statusSummary: string
+  changedFiles: GitChangedFile[]
+  summary: string
+  findings: GitDiffReviewFinding[]
+  analysis: GitDiffReviewAnalysis
 }
 
 /**

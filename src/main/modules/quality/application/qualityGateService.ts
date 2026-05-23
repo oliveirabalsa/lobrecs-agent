@@ -6,9 +6,27 @@ import type {
   AppSettings,
   DiffProposal,
   RoutingDecision,
+  RunAuditPhase,
+  RunAuditStopReason,
   SupportedAgentId,
   VerificationRecipe,
 } from '../../../../shared/types'
+
+export interface QualityGateAuditInput {
+  sessionId: string
+  threadId: string
+  attempt: number
+  phase: RunAuditPhase
+  recipeId?: string
+  recipeLabel?: string
+  command?: string
+  exitCode?: number
+  outputTail?: string
+  changedFiles?: string[]
+  repairSessionId?: string
+  stopReason?: RunAuditStopReason
+  finalStatus?: 'passed' | 'failed' | 'pending'
+}
 
 export interface QualityGateInput {
   sessionId: string
@@ -47,11 +65,18 @@ export interface QualityGateDependencies {
     cwd: string,
     options: { timeoutMs: number; maxOutputBytes: number },
   ) => Promise<QualityGateCommandResult>
+  recordAudit?: (input: QualityGateAuditInput) => void
+  getLastAudit?: (sessionId: string) => {
+    recipeId?: string
+    exitCode?: number
+    phase: RunAuditPhase
+  } | null
 }
 
 interface VerificationFailure {
   recipe: VerificationRecipe
   output: string
+  exitCode: number
 }
 
 export async function runQualityGate(
@@ -62,7 +87,14 @@ export async function runQualityGate(
   if (!settings.verification.autoRunAfterAgentDiffs) return
 
   const changedFiles = input.changedFiles.filter((proposal) => proposal.status === 'applied')
-  if (changedFiles.length === 0) return
+  if (changedFiles.length === 0) {
+    emitAudit(dependencies, input, {
+      phase: 'repair-skipped',
+      stopReason: 'no-diff',
+      finalStatus: 'pending',
+    })
+    return
+  }
 
   const recipes = selectAutoRecipes(settings)
   if (recipes.length === 0) return
@@ -74,13 +106,20 @@ export async function runQualityGate(
     status: 'running',
   })
 
-  const failure = await runRecipes(input, dependencies, settings, recipes)
+  const changedPaths = changedFiles.map((proposal) => proposal.filePath)
+  const failure = await runRecipes(input, dependencies, settings, recipes, changedPaths)
   if (!failure) {
     input.emitActivity({
       kind: 'step',
       title: 'Automated QA passed',
       detail: `${recipes.length} verification command${recipes.length === 1 ? '' : 's'} passed.`,
       status: 'done',
+    })
+    emitAudit(dependencies, input, {
+      phase: 'gate-passed',
+      stopReason: 'passed',
+      finalStatus: 'passed',
+      changedFiles: changedPaths,
     })
     return
   }
@@ -99,10 +138,69 @@ export async function runQualityGate(
       detail: `Reached the configured repair limit of ${settings.verification.selfHealingMaxAttempts}.`,
       status: 'error',
     })
+    emitAudit(dependencies, input, {
+      phase: 'gate-stopped',
+      stopReason: 'max-attempts',
+      finalStatus: 'failed',
+      recipeId: failure.recipe.id,
+      recipeLabel: failure.recipe.label,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+      outputTail: failure.output,
+      changedFiles: changedPaths,
+    })
+    return
+  }
+
+  if (isRepeatFailure(dependencies, input, failure)) {
+    input.emitActivity({
+      kind: 'step',
+      title: 'Self-healing stopped',
+      detail: `${failure.recipe.label} failed twice in a row with the same exit code; manual review required.`,
+      status: 'error',
+    })
+    emitAudit(dependencies, input, {
+      phase: 'gate-stopped',
+      stopReason: 'repeat-failure',
+      finalStatus: 'failed',
+      recipeId: failure.recipe.id,
+      recipeLabel: failure.recipe.label,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+      outputTail: failure.output,
+      changedFiles: changedPaths,
+    })
     return
   }
 
   await dispatchRepair(input, dependencies, settings, changedFiles, failure)
+}
+
+function isRepeatFailure(
+  dependencies: QualityGateDependencies,
+  input: QualityGateInput,
+  failure: VerificationFailure,
+): boolean {
+  if (input.attempt === 0) return false
+  const previous = dependencies.getLastAudit?.(input.sessionId)
+  if (!previous || previous.phase !== 'recipe-failed') return false
+  return (
+    previous.recipeId === failure.recipe.id &&
+    previous.exitCode === failure.exitCode
+  )
+}
+
+function emitAudit(
+  dependencies: QualityGateDependencies,
+  input: QualityGateInput,
+  partial: Omit<QualityGateAuditInput, 'sessionId' | 'threadId' | 'attempt'>,
+): void {
+  dependencies.recordAudit?.({
+    sessionId: input.sessionId,
+    threadId: input.threadId,
+    attempt: input.attempt,
+    ...partial,
+  })
 }
 
 async function runRecipes(
@@ -110,6 +208,7 @@ async function runRecipes(
   dependencies: QualityGateDependencies,
   settings: AppSettings,
   recipes: VerificationRecipe[],
+  changedPaths: string[],
 ): Promise<VerificationFailure | null> {
   for (const recipe of recipes) {
     input.emitActivity({
@@ -117,6 +216,14 @@ async function runRecipes(
       command: recipe.command,
       cwd: input.repoPath,
       status: 'running',
+    })
+
+    emitAudit(dependencies, input, {
+      phase: 'recipe-started',
+      recipeId: recipe.id,
+      recipeLabel: recipe.label,
+      command: recipe.command,
+      changedFiles: changedPaths,
     })
 
     const result = await runRecipe(recipe, input.repoPath, settings, dependencies)
@@ -133,8 +240,26 @@ async function runRecipes(
     })
 
     if (result.exitCode !== 0) {
-      return { recipe, output }
+      emitAudit(dependencies, input, {
+        phase: 'recipe-failed',
+        recipeId: recipe.id,
+        recipeLabel: recipe.label,
+        command: recipe.command,
+        exitCode: result.exitCode,
+        outputTail: output,
+        changedFiles: changedPaths,
+      })
+      return { recipe, output, exitCode: result.exitCode }
     }
+
+    emitAudit(dependencies, input, {
+      phase: 'recipe-passed',
+      recipeId: recipe.id,
+      recipeLabel: recipe.label,
+      command: recipe.command,
+      exitCode: result.exitCode,
+      changedFiles: changedPaths,
+    })
   }
 
   return null
@@ -172,12 +297,7 @@ async function dispatchRepair(
   failure: VerificationFailure,
 ): Promise<void> {
   const prompt = buildRepairPrompt(changedFiles, failure)
-  const preferredAgentId = settings.agents.fallbackAgentId
-  const route = await dependencies.routeModel({
-    projectId: input.projectId,
-    prompt,
-    preferredAgentId,
-  })
+  const route = await routeRepairModel(input, dependencies, settings, prompt)
 
   const repair = await dependencies.dispatchRepair({
     projectId: input.projectId,
@@ -195,6 +315,71 @@ async function dispatchRepair(
     detail: `Started repair session ${repair.sessionId} after ${failure.recipe.label} failed.`,
     status: 'done',
   })
+
+  emitAudit(dependencies, input, {
+    phase: 'repair-dispatched',
+    recipeId: failure.recipe.id,
+    recipeLabel: failure.recipe.label,
+    command: failure.recipe.command,
+    exitCode: failure.exitCode,
+    outputTail: failure.output,
+    changedFiles: changedFiles.map((proposal) => proposal.filePath),
+    repairSessionId: repair.sessionId,
+  })
+}
+
+async function routeRepairModel(
+  input: QualityGateInput,
+  dependencies: QualityGateDependencies,
+  settings: AppSettings,
+  prompt: string,
+): Promise<Pick<RoutingDecision, 'agentId' | 'model'>> {
+  let fallbackRoute: Pick<RoutingDecision, 'agentId' | 'model'> | null = null
+  let lastError: unknown = null
+
+  for (const preferredAgentId of repairAgentCandidates(settings)) {
+    try {
+      const route = await dependencies.routeModel({
+        projectId: input.projectId,
+        prompt,
+        preferredAgentId,
+      })
+
+      if (route.agentId === preferredAgentId || route.agentId !== 'claude-code') {
+        return route
+      }
+
+      fallbackRoute ??= route
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  if (fallbackRoute) return fallbackRoute
+  if (lastError) throw lastError
+
+  return dependencies.routeModel({
+    projectId: input.projectId,
+    prompt,
+    preferredAgentId: settings.agents.fallbackAgentId,
+  })
+}
+
+function repairAgentCandidates(settings: AppSettings): SupportedAgentId[] {
+  const configuredAgents = uniqueAgentIds([
+    settings.agents.fallbackAgentId,
+    settings.agents.defaultAgentId,
+    ...settings.agents.enabledAgentIds,
+  ]).filter((agentId) => settings.agents.runtimes[agentId]?.enabled !== false)
+
+  const nonClaude = configuredAgents.filter((agentId) => agentId !== 'claude-code')
+  const claude = configuredAgents.filter((agentId) => agentId === 'claude-code')
+
+  return [...nonClaude, ...claude]
+}
+
+function uniqueAgentIds(agentIds: SupportedAgentId[]): SupportedAgentId[] {
+  return [...new Set(agentIds)]
 }
 
 function selectAutoRecipes(settings: AppSettings): VerificationRecipe[] {

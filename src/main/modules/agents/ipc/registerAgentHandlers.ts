@@ -13,6 +13,7 @@ import { isSupportedAgentId } from '../domain/isSupportedAgentId'
 import type {
   AgentDispatchParams,
   AgentId,
+  AgentModelRecoveryDecisionPayload,
   AgentPlanDecisionPayload,
   AgentPlanReviewDecisionPayload,
   EnqueueParams,
@@ -171,6 +172,47 @@ export function registerAgentHandlers(context: MainIpcContext): void {
           agentId: executionAgentId,
           currentModel: executionModel,
         }),
+      })
+    },
+  )
+  ipcMain.handle(
+    'agent:model-recovery-decision',
+    async (_event, payload: AgentModelRecoveryDecisionPayload) => {
+      const session = sessionsStore.get(payload.sessionId)
+      if (
+        payload.decision !== 'continue' ||
+        !session ||
+        !payload.agentId ||
+        !payload.modelOverride
+      ) {
+        return context.sessionManager.resolveModelRecovery(payload)
+      }
+
+      const settings = context.settingsService.getEffective(session.projectId).settings
+      const runtimeSettings = runtimeSettingsWithApprovalMode(
+        settings.agents.runtimes[payload.agentId],
+        undefined,
+        settings.execution.defaultApprovalMode,
+      )
+
+      return context.sessionManager.resolveModelRecovery(payload, {
+        runtimeSettings,
+        modelFallbacks: capacityFallbackModelsForAgent({
+          settings,
+          agentId: payload.agentId,
+          currentModel: payload.modelOverride,
+          requiresImageSupport: (session.imageAttachments?.length ?? 0) > 0,
+        }),
+        validateSelection: (agentId, model) => {
+          if (
+            (session.imageAttachments?.length ?? 0) > 0 &&
+            !context.modelRouter.supportsImages(agentId, model)
+          ) {
+            throw new Error(
+              `Image attachments are not supported by the selected agent/model (${agentId} - ${model})`,
+            )
+          }
+        },
       })
     },
   )

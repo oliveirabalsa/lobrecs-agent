@@ -73,6 +73,10 @@ export function registerGitHandlers(context: MainIpcContext): void {
     workflowService.analyzeCommitPlan(projectId),
   )
 
+  ipcMain.handle('git:review-current-diff', async (_event, projectId: string, threadId?: string) =>
+    workflowService.reviewCurrentDiff(projectId, threadId),
+  )
+
   ipcMain.handle(
     'git:execute-commit-plan',
     async (_event, input: GitCommitPlanExecutionInput) =>
