@@ -432,6 +432,38 @@ describe('groupTurns', () => {
       }
     })
 
+    it('groups MCP tool traffic separately from generic tools', () => {
+      const activities: AgentActivity[] = [
+        {
+          kind: 'tool-call',
+          name: 'mcp__github__list_pull_requests',
+          input: { repo: 'lobrecs-agent' },
+          status: 'running',
+        },
+        {
+          kind: 'tool-result',
+          name: 'mcp__github__list_pull_requests',
+          output: '[]',
+          status: 'done',
+        },
+        { kind: 'tool-call', name: 'shell', status: 'running' },
+      ]
+
+      const [turn] = groupTurns(activities)
+
+      expect(turn.streamItems.map((item) => item.kind)).toEqual([
+        'mcp-calls-group',
+        'tool-call',
+      ])
+      expect(turn.streamItems[0]).toMatchObject({
+        kind: 'mcp-calls-group',
+        items: [
+          expect.objectContaining({ kind: 'tool-call' }),
+          expect.objectContaining({ kind: 'tool-result' }),
+        ],
+      })
+    })
+
     it('keeps a single command as a singleton (no group wrapper)', () => {
       const activities: AgentActivity[] = [
         { kind: 'command', command: 'pwd', status: 'done' },

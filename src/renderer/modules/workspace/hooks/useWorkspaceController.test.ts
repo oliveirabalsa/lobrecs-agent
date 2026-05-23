@@ -104,7 +104,7 @@ describe('visibleDiffProposalsForActiveSession', () => {
     expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-2')).toEqual([])
   })
 
-  it('accepts proposals captured from another swarm agent in the active thread', () => {
+  it('rejects proposals captured from another session in the active thread', () => {
     const next = nextScopedDiffProposalState(
       null,
       [
@@ -119,18 +119,12 @@ describe('visibleDiffProposalsForActiveSession', () => {
       'thread-1',
     )
 
-    expect(visibleDiffProposalsForActiveSession(next, 'reviewer-session', 'thread-1')).toEqual([
-      {
-        filePath: '/repo/swarm-agent.ts',
-        originalContent: 'old',
-        proposedContent: 'new',
-      },
-    ])
+    expect(visibleDiffProposalsForActiveSession(next, 'reviewer-session', 'thread-1')).toEqual([])
   })
 
-  it('merges same-thread proposals instead of replacing another agent edit', () => {
+  it('merges proposals from the active session instead of replacing earlier edits', () => {
     const current: ScopedDiffProposalState = {
-      sessionId: 'reviewer-session',
+      sessionId: 'session-1',
       threadId: 'thread-1',
       proposals: [
         {
@@ -151,8 +145,8 @@ describe('visibleDiffProposalsForActiveSession', () => {
             proposedContent: 'after',
           },
         ],
-        { sessionId: 'implementer-session', threadId: 'thread-1' },
-        'reviewer-session',
+        { sessionId: 'session-1', threadId: 'thread-1' },
+        'session-1',
         'thread-1',
       )?.proposals,
     ).toEqual([

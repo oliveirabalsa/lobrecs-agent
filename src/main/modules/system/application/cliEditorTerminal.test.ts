@@ -174,6 +174,43 @@ describe('CliEditorTerminalService', () => {
     )
   })
 
+  it('starts lazygit without appending a project path argument', async () => {
+    vi.stubEnv('SHELL', '/bin/zsh')
+
+    const pty = new FakePty()
+    const spawnPty = vi.fn(
+      (_command: string, _args: string[], _options: PtySpawnOptions) => pty,
+    )
+    const service = new CliEditorTerminalService({
+      spawnPty,
+      detectEditors: async () => [
+        {
+          id: 'lazygit',
+          name: 'LazyGit',
+          kind: 'cli',
+          target: 'lazygit',
+          binPath: '/opt/homebrew/bin/lazygit',
+        },
+      ],
+    })
+
+    const session = await service.start(
+      {
+        sessionId: 'terminal-lazygit',
+        editorId: 'lazygit',
+        repoPath: '/tmp/repo',
+      },
+      vi.fn(),
+    )
+
+    expect(session.command).toBe('lazygit')
+    expect(spawnPty).toHaveBeenCalledWith(
+      '/bin/zsh',
+      ['-i', '-c', 'lazygit'],
+      expect.any(Object),
+    )
+  })
+
   it('spawns the user shell when editorId is the shell sentinel', async () => {
     vi.stubEnv('SHELL', '/bin/zsh')
 

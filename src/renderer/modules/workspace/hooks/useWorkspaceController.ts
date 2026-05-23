@@ -107,12 +107,10 @@ export function nextScopedDiffProposalState(
 
   const sourceSessionId = source.sessionId ?? activeSessionId
   const sourceThreadId = source.threadId ?? activeThreadId
-  const sourceMatchesActiveThread =
-    activeThreadId !== null && (sourceThreadId ?? null) === activeThreadId
   const sourceMatchesActiveSession =
     sourceSessionId === activeSessionId && (sourceThreadId ?? null) === activeThreadId
 
-  if (!sourceMatchesActiveThread && !sourceMatchesActiveSession) return current
+  if (!sourceMatchesActiveSession) return current
 
   if (proposals.length === 0) return null
 

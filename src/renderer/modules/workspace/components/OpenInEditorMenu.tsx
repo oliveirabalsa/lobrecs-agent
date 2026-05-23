@@ -55,8 +55,10 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
     }
   }
 
-  const guiEditors = editors?.filter((e) => e.kind === 'gui') ?? []
-  const hasAny = guiEditors.length > 0
+  const guiEditors = editors?.filter((editor) => editor.kind === 'gui') ?? []
+  const cliEditors =
+    editors?.filter((editor) => editor.kind === 'cli' && Boolean(onOpenCliEditor)) ?? []
+  const hasAny = guiEditors.length > 0 || cliEditors.length > 0
 
   return (
     <div ref={containerRef} className="relative">
@@ -88,9 +90,20 @@ export function OpenInEditorMenu({ repoPath, onOpenCliEditor, onError }: Props) 
               {guiEditors.map((editor) => (
                 <EditorRow key={editor.id} editor={editor} onSelect={handleSelect} />
               ))}
+              {guiEditors.length > 0 && cliEditors.length > 0 ? (
+                <div className="my-1 h-px bg-hairline" />
+              ) : null}
+              {cliEditors.length > 0 ? (
+                <div className="px-3 pb-1 pt-1.5 text-[9px] font-semibold uppercase text-muted/70">
+                  Terminal tools
+                </div>
+              ) : null}
+              {cliEditors.map((editor) => (
+                <EditorRow key={editor.id} editor={editor} onSelect={handleSelect} />
+              ))}
               {!hasAny ? (
                 <div className="px-3 py-2 text-[10px] text-muted/70">
-                  No editors detected. Install VS Code, Cursor, etc. to launch them here.
+                  No editors detected. Install VS Code, Cursor, Vim, LazyGit, etc. to launch them here.
                 </div>
               ) : null}
             </>

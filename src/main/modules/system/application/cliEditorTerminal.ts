@@ -234,10 +234,16 @@ export class CliEditorTerminalService {
     userShell: string,
   ): Promise<EditorLaunch> {
     const editors = await this.detectEditors()
-    const editor = editors.find((entry) => entry.id === editorId)
+    let editor = editors.find((entry) => entry.id === editorId)
 
     if (!editor) {
-      throw new Error(`Editor not found: ${editorId}`)
+      if (editorId === 'lazygit') {
+        editor = { id: 'lazygit', name: 'LazyGit', kind: 'cli', target: 'lazygit' }
+      } else if (editorId === 'vim') {
+        editor = { id: 'vim', name: 'Vim', kind: 'cli', target: 'vim' }
+      } else {
+        throw new Error(`Editor not found: ${editorId}`)
+      }
     }
 
     if (editor.kind !== 'cli') {
@@ -271,6 +277,13 @@ interface EditorCommand {
 }
 
 function buildCliEditorCommand(editor: EditorInfo): EditorCommand {
+  if (editor.id === 'lazygit') {
+    return {
+      shellCommand: shellQuote(editor.target),
+      displayCommand: shellQuote(editor.target),
+    }
+  }
+
   const args = isClassicVimEditor(editor)
     ? ['--cmd', VIM_CURSOR_SHAPE_COMMAND, '.']
     : ['.']

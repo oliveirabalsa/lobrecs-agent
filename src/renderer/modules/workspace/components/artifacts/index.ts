@@ -10,6 +10,9 @@ export type { CommandCardProps } from './CommandCard'
 export { CommandsGroup } from './CommandsGroup'
 export type { CommandsGroupProps } from './CommandsGroup'
 
+export { McpCallCard } from './McpCallCard'
+export type { McpCallCardProps } from './McpCallCard'
+
 export { EditedFilesCard } from './EditedFilesCard'
 export type { EditedFilesCardProps } from './EditedFilesCard'
 
@@ -62,4 +65,4 @@ export { PromptEvidenceCard } from './PromptEvidenceCard'
 export type { PromptEvidenceCardProps } from './PromptEvidenceCard'
 
 export { DiffReviewCard } from './DiffReviewCard'
-export type { DiffReviewCardProps } from './DiffReviewCard'
+export type { DiffReviewCardProps, DiffReviewFixSelection } from './DiffReviewCard'

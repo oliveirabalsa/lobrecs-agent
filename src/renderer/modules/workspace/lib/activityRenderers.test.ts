@@ -159,4 +159,28 @@ describe('renderStreamItem diff actions', () => {
     })
     expect(props.onAnswer).toBe(onAnswer)
   })
+
+  it('renders MCP calls with the MCP artifact instead of the generic tool pill', () => {
+    const item = {
+      kind: 'mcp-calls-group',
+      id: 'turn-0-mcp-1',
+      items: [
+        {
+          kind: 'tool-call',
+          name: 'mcp__github__list_pull_requests',
+          input: { repo: 'lobrecs-agent' },
+          status: 'running',
+        },
+      ],
+    } satisfies Extract<StreamItem, { kind: 'mcp-calls-group' }>
+
+    const node = renderStreamItem(item, 'mcp', {
+      sessionId: 'session-1',
+      running: true,
+    })
+    const props = elementProps<{ items: typeof item.items; running?: boolean }>(node)
+
+    expect(props.items).toBe(item.items)
+    expect(props.running).toBe(true)
+  })
 })

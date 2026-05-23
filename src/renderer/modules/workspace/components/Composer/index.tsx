@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -23,10 +24,20 @@ import { AttachmentStrip } from './AttachmentStrip'
 import { ApprovalModeChip } from './ApprovalModeChip'
 import { ModelChip } from './ModelChip'
 import { SendButton } from './SendButton'
+import { SlashMentionPalette } from './SlashMentionPalette'
 import { StatusFooter } from './StatusFooter'
 import { useComposerState } from './useComposerState'
 import { AGENT_SHORT, formatModelLabel } from './modelDisplay'
 import { shouldResetPlanModeAfterDispatch } from './planMode'
+import {
+  extractSlashMentionTokens,
+  extensionToSlashMentionOption,
+  findActiveSlashMentionTrigger,
+  insertSlashMention,
+  SLASH_MENTION_CATEGORIES,
+  slashMentionKindLabel,
+  type SlashMentionOption,
+} from './slashMentions'
 import type { AttachedImage } from './types'
 
 /** Mirrors the `StartedSessionSummary` shape consumed by the workspace controller. */
@@ -154,6 +165,12 @@ export function Composer({
 
   const [submitting, setSubmitting] = useState(false)
   const [dragActive, setDragActive] = useState(false)
+  const [cursorPosition, setCursorPosition] = useState(0)
+  const [slashOptions, setSlashOptions] = useState<SlashMentionOption[]>([])
+  const [slashLoading, setSlashLoading] = useState(false)
+  const [slashError, setSlashError] = useState<string | null>(null)
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0)
+  const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const attachingRef = useRef(false)
   // Counts dragenter minus dragleave. Native drag events fire leave+enter on
@@ -174,6 +191,64 @@ export function Composer({
     if (prefillPrompt === undefined) return
     window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
   }, [prefillPrompt])
+
+  const slashTrigger = useMemo(
+    () => findActiveSlashMentionTrigger(draft, cursorPosition),
+    [cursorPosition, draft],
+  )
+  const slashTriggerKey = slashTrigger
+    ? `${slashTrigger.start}:${slashTrigger.query}`
+    : null
+  const slashPickerVisible =
+    slashTrigger !== null && slashTriggerKey !== dismissedSlashKey
+  const selectedSlashMentions = useMemo(
+    () => extractSlashMentionTokens(draft),
+    [draft],
+  )
+
+  useEffect(() => {
+    if (!slashTrigger) {
+      setSlashOptions([])
+      setSlashLoading(false)
+      setSlashError(null)
+      setSlashActiveIndex(0)
+      return
+    }
+
+    let cancelled = false
+    setSlashLoading(true)
+    setSlashError(null)
+
+    window.agentforge.extensions
+      .searchCatalog({
+        query: slashTrigger.query,
+        categories: SLASH_MENTION_CATEGORIES,
+        limit: 8,
+      })
+      .then((result) => {
+        if (cancelled) return
+        setSlashOptions(
+          result.items
+            .map(extensionToSlashMentionOption)
+            .filter((option): option is SlashMentionOption => option !== null),
+        )
+        setSlashActiveIndex(0)
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return
+        setSlashOptions([])
+        setSlashError(
+          reason instanceof Error ? reason.message : 'Failed to search context.',
+        )
+      })
+      .finally(() => {
+        if (!cancelled) setSlashLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [slashTrigger?.query, slashTrigger?.start])
 
   // Focus the composer on mount and whenever the active thread changes, so a
   // freshly-opened chat is immediately typeable.
@@ -304,6 +379,28 @@ export function Composer({
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const isComposing = Boolean((event.nativeEvent as { isComposing?: boolean }).isComposing)
+    if (slashPickerVisible) {
+      if (event.key === 'ArrowDown' && slashOptions.length > 0) {
+        event.preventDefault()
+        setSlashActiveIndex((index) => Math.min(index + 1, slashOptions.length - 1))
+        return
+      }
+      if (event.key === 'ArrowUp' && slashOptions.length > 0) {
+        event.preventDefault()
+        setSlashActiveIndex((index) => Math.max(index - 1, 0))
+        return
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && slashOptions[slashActiveIndex]) {
+        event.preventDefault()
+        selectSlashMention(slashOptions[slashActiveIndex])
+        return
+      }
+      if (event.key === 'Escape' && slashTriggerKey) {
+        event.preventDefault()
+        setDismissedSlashKey(slashTriggerKey)
+        return
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !isComposing) {
       event.preventDefault()
       void submit()
@@ -313,6 +410,32 @@ export function Composer({
       event.preventDefault()
       setDraft('')
     }
+  }
+
+  function handleTextareaChange(value: string, selectionStart: number | null) {
+    setDraft(value)
+    setCursorPosition(selectionStart ?? value.length)
+  }
+
+  function syncCursorPosition() {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    setCursorPosition(textarea.selectionStart ?? draft.length)
+  }
+
+  function selectSlashMention(option: SlashMentionOption) {
+    if (!slashTrigger) return
+    const next = insertSlashMention(draft, slashTrigger, option)
+    setDraft(next.value)
+    setCursorPosition(next.cursorPosition)
+    setDismissedSlashKey(null)
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(next.cursorPosition, next.cursorPosition)
+      autosizeTextarea(textarea)
+    })
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
@@ -445,8 +568,13 @@ export function Composer({
         <textarea
           ref={textareaRef}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) =>
+            handleTextareaChange(event.target.value, event.target.selectionStart)
+          }
           onKeyDown={handleKeyDown}
+          onKeyUp={syncCursorPosition}
+          onClick={syncCursorPosition}
+          onSelect={syncCursorPosition}
           onPaste={(event) => void handlePaste(event)}
           className="block w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-primary outline-none placeholder:text-muted"
           style={{ minHeight: MIN_TEXTAREA_HEIGHT, maxHeight: MAX_TEXTAREA_HEIGHT }}
@@ -454,6 +582,34 @@ export function Composer({
           disabled={submitting || attaching}
           aria-label="Message composer"
         />
+
+        {selectedSlashMentions.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+            {selectedSlashMentions.map((mention) => (
+              <span
+                key={`${mention.kind}:${mention.value}:${mention.raw}`}
+                className="inline-flex max-w-full items-center gap-1 rounded-pill border border-accent-primary/25 bg-accent-primary/10 px-2 py-0.5 text-[11px] text-accent-primary"
+                title={mention.raw}
+              >
+                <span className="shrink-0 uppercase">
+                  {slashMentionKindLabel(mention.kind)}
+                </span>
+                <span className="min-w-0 truncate font-mono">{mention.value}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {slashPickerVisible ? (
+          <SlashMentionPalette
+            options={slashOptions}
+            loading={slashLoading}
+            error={slashError}
+            activeIndex={slashActiveIndex}
+            onHover={setSlashActiveIndex}
+            onSelect={selectSlashMention}
+          />
+        ) : null}
 
         {showRouterPreview ? (
           <div className="px-3 pb-1 text-xs text-muted" aria-live="polite">

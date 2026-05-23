@@ -14,6 +14,7 @@ import {
   CommandsGroup,
   CompletionFooter,
   EditedFilesCard,
+  McpCallCard,
   ModelRecoveryCard,
   PlanReviewCard,
   RanCommandsPill,
@@ -24,6 +25,7 @@ import type { UserQuestionActivity } from '../components/artifacts'
 import type { StartedSessionSummary } from '../../sessions/types'
 import type { StreamItem } from './groupTurns'
 import { matchingDiffProposals } from './diffProposalMatching'
+import { isMcpToolActivity } from './mcpActivity'
 import {
   shouldSuppressUserQuestionToolResult,
   userQuestionActivityFromToolPayload,
@@ -159,6 +161,10 @@ export function renderStreamItem(
         )
       }
 
+      if (isMcpToolActivity(item)) {
+        return <McpCallCard key={key} items={[item]} running={ctx.running} />
+      }
+
       // When a tool-call/result lands by itself (not part of a batch),
       // render as a slim mono pill rather than a full RanCommands group.
       return (
@@ -178,6 +184,10 @@ export function renderStreamItem(
 
     case 'tool-result':
       if (shouldSuppressUserQuestionToolResult(item.name, item.output)) return null
+
+      if (isMcpToolActivity(item)) {
+        return <McpCallCard key={key} items={[item]} running={ctx.running} />
+      }
 
       // When a tool-call/result lands by itself (not part of a batch),
       // render as a slim mono pill rather than a full RanCommands group.
@@ -290,6 +300,9 @@ export function renderStreamItem(
           running={ctx.running}
         />
       )
+
+    case 'mcp-calls-group':
+      return <McpCallCard key={key} items={item.items} running={ctx.running} />
 
     case 'edited-files-group': {
       // Prefer live DiffProposals from the parent — they carry actual content

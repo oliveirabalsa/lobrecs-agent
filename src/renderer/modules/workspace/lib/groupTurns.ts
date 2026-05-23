@@ -5,6 +5,7 @@ import {
 } from '../../../../shared/contracts/userQuestionPrompts'
 import { transformFileEditActivities } from './fileEditActivities'
 import { classifyCommand, type CommandType } from './commandClassifier'
+import { isMcpToolActivity, type McpToolActivity } from './mcpActivity'
 
 /**
  * A "turn" groups one user message together with all the activities the
@@ -35,6 +36,8 @@ export interface TurnUserMessage {
  *
  * `ran-commands-group` collapses consecutive `command | tool-call | tool-result`
  * activities grouped by command type (shell, package, git, file-ops, other).
+ * `mcp-calls-group` keeps MCP tool traffic separate from generic command/tool
+ * batches so the timeline can render it with MCP-specific affordances.
  * `edited-files-group` collapses consecutive `file-change` activities that
  * arrived within `AGGREGATE_TIME_WINDOW_MS` of each other.
  *
@@ -47,6 +50,11 @@ export type StreamItem =
       id: string
       type: 'shell' | 'package' | 'git' | 'file-ops' | 'other'
       items: Array<Extract<AgentActivity, { kind: 'command' | 'tool-call' | 'tool-result' }>>
+    }
+  | {
+      kind: 'mcp-calls-group'
+      id: string
+      items: McpToolActivity[]
     }
   | {
       kind: 'edited-files-group'
@@ -101,6 +109,7 @@ const FILE_CHANGE_WINDOW_MS = 30_000
  * Aggregation pass (M4):
  *  - Consecutive `command | tool-call | tool-result` activities collapse
  *    into one `ran-commands-group` StreamItem.
+ *  - Consecutive MCP tool calls/results collapse into `mcp-calls-group`.
  *  - Consecutive `file-change` activities within FILE_CHANGE_WINDOW_MS
  *    collapse into one `edited-files-group` StreamItem.
  *  - Singletons remain as the original activity.
@@ -237,6 +246,28 @@ function aggregateStreamItems(
 
     if (shouldSuppressUserQuestionToolResultActivity(activity)) {
       i += 1
+      continue
+    }
+
+    if (isMcpToolActivity(activity)) {
+      const batch: McpToolActivity[] = []
+      let j = i
+      while (j < activities.length && isMcpToolActivity(activities[j])) {
+        batch.push(activities[j] as McpToolActivity)
+        j += 1
+      }
+
+      if (batch.length === 1) {
+        items.push(batch[0])
+      } else {
+        groupCounter += 1
+        items.push({
+          kind: 'mcp-calls-group',
+          id: `${turnId}-mcp-${groupCounter}`,
+          items: batch,
+        })
+      }
+      i = j
       continue
     }
 
@@ -392,8 +423,8 @@ function mergeAssistantStreamText(current: string, incoming: string): string {
 function isCommandLike(activity: AgentActivity): boolean {
   return (
     activity.kind === 'command' ||
-    activity.kind === 'tool-call' ||
-    activity.kind === 'tool-result'
+    ((activity.kind === 'tool-call' || activity.kind === 'tool-result') &&
+      !isMcpToolActivity(activity))
   )
 }
 
