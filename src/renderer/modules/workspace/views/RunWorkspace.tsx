@@ -17,6 +17,7 @@ import { PlanPromptModal } from '../components/modals/PlanPromptModal'
 import {
   emitPlanModeReset,
   latestPlanReviewId,
+  shouldContinuePlanModeAfterQuestionAnswer,
 } from '../components/Composer/planMode'
 import {
   formatUserQuestionPromptAnswers,
@@ -28,6 +29,7 @@ import { useAttentionSound } from '../hooks/useAttentionSound'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import { diffProposalsFromThreadEvents } from '../lib/threadDiffProposals'
+import { buildUserQuestionFollowUpDispatchParams } from '../lib/userQuestionFollowUp'
 import type { StartedSessionSummary } from '../../sessions/types'
 import { Button, Modal } from '../../../components/ui'
 
@@ -42,6 +44,7 @@ interface RunWorkspaceProps {
   agentId?: Project['agentId']
   model?: string
   modelOverride?: string
+  planMode?: boolean
   diffProposals: DiffProposal[]
   approvalRequest: ApprovalRequest | null
   onApprovalRequest: (request: ApprovalRequest | null) => void
@@ -82,6 +85,7 @@ export function RunWorkspace({
   agentId,
   model,
   modelOverride,
+  planMode,
   diffProposals,
   approvalRequest,
   onApprovalRequest,
@@ -347,13 +351,17 @@ export function RunWorkspace({
       const createdAt = Date.now()
 
       try {
-        const result = await window.agentforge.agent.dispatch({
-          projectId: project.id,
-          prompt: followUpPrompt,
-          agentId: toSupportedAgentId(agentId),
-          modelOverride,
-          threadId: threadId ?? undefined,
-        })
+        const planModeFollowUp = shouldContinuePlanModeAfterQuestionAnswer(planMode)
+        const result = await window.agentforge.agent.dispatch(
+          buildUserQuestionFollowUpDispatchParams({
+            projectId: project.id,
+            prompt: followUpPrompt,
+            agentId: toSupportedAgentId(agentId),
+            modelOverride,
+            threadId,
+            planMode,
+          }),
+        )
         onSessionStarted?.({
           sessionId: result.sessionId,
           threadId: result.threadId,
@@ -361,6 +369,7 @@ export function RunWorkspace({
           routingDecision: null,
           agentId: toSupportedAgentId(agentId),
           modelOverride,
+          planMode: planModeFollowUp,
           createdAt,
         })
         resolveUserQuestion(activeUserQuestion.promptId)
@@ -378,6 +387,7 @@ export function RunWorkspace({
       activeUserQuestion,
       agentId,
       modelOverride,
+      planMode,
       onSessionStarted,
       project.id,
       resolveUserQuestion,

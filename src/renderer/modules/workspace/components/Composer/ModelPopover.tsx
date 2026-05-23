@@ -16,6 +16,7 @@ interface ModelPickerModalProps {
   selection: ModelSelection
   onSelect: (selection: ModelSelection) => void
   onClose: () => void
+  allowAuto?: boolean
 }
 
 /**
@@ -30,15 +31,22 @@ export function ModelPopover({
   selection,
   onSelect,
   onClose,
+  allowAuto = true,
 }: ModelPickerModalProps) {
   const tabs = useMemo(() => {
-    return [{ id: 'auto' as const, label: 'Auto' }, ...groups.map((g) => ({ id: g.agentId, label: AGENT_SHORT[g.agentId] ?? g.label }))]
-  }, [groups])
+    const providerTabs = groups.map((g) => ({
+      id: g.agentId,
+      label: AGENT_SHORT[g.agentId] ?? g.label,
+    }))
+    return allowAuto
+      ? [{ id: 'auto' as const, label: 'Auto' }, ...providerTabs]
+      : providerTabs
+  }, [allowAuto, groups])
 
   const initialTab = useMemo(() => {
     if (selection.kind === 'manual') return selection.agentId
-    return 'auto' as const
-  }, [selection])
+    return tabs[0]?.id ?? 'auto'
+  }, [selection, tabs])
 
   const [activeTab, setActiveTab] = useState<typeof tabs[number]['id']>(initialTab)
 

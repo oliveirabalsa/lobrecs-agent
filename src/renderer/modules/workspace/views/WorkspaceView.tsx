@@ -654,6 +654,7 @@ export function WorkspaceView({
                         modelOverride={
                           activeSession?.modelOverride ?? activeSession?.routingDecision?.model
                         }
+                        planMode={activeSession?.planMode}
                         diffProposals={diffProposals}
                         approvalRequest={approvalRequest}
                         onApprovalRequest={onApprovalRequest}

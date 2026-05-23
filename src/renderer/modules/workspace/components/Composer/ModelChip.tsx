@@ -14,6 +14,7 @@ interface ModelChipProps {
   manualOption: ModelOption | null
   routerPreview: RoutingDecision | null
   onSelect: (selection: ModelSelection) => void
+  allowAuto?: boolean
 }
 
 /**
@@ -27,6 +28,7 @@ export function ModelChip({
   manualOption,
   routerPreview,
   onSelect,
+  allowAuto = true,
 }: ModelChipProps) {
   const [open, setOpen] = useState(false)
 
@@ -43,7 +45,7 @@ export function ModelChip({
     const model = formatModelLabel(routerPreview.agentId, routerPreview.model)
     label = `Auto · ${agent} ${model}`
   } else {
-    label = 'Auto'
+    label = allowAuto ? 'Auto' : 'Select model'
   }
 
   const thinking = selection.thinking && selection.thinking !== 'off' ? selection.thinking : null
@@ -76,6 +78,7 @@ export function ModelChip({
         selection={selection}
         onSelect={handleSelect}
         onClose={() => setOpen(false)}
+        allowAuto={allowAuto}
       />
     </div>
   )

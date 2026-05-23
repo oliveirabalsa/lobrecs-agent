@@ -17,6 +17,7 @@ export interface ActiveSessionMeta {
   agentId?: Project['agentId']
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  planMode?: boolean
   createdAt?: number
 }
 
@@ -34,5 +35,6 @@ export interface StartedSessionSummary {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  planMode?: boolean
   createdAt?: number
 }

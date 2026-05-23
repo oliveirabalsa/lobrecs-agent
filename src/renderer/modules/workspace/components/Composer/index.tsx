@@ -40,6 +40,7 @@ export interface ComposerStartedSession {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  planMode?: boolean
 }
 
 export interface ComposerProps {
@@ -249,6 +250,7 @@ export function Composer({
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
         approvalMode,
+        planMode,
         createdAt: startedAt,
       })
       setDraft('')
