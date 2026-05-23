@@ -4,6 +4,7 @@ import { createAutomationsApi, type AutomationsApi } from './automations'
 import { createCostApi, type CostApi } from './cost'
 import { createRepositoryContextApi, type RepositoryContextApi } from './context'
 import { createEventApi, type AgentForgeEventsApi } from './events'
+import { createExtensionsApi, type ExtensionsApi } from './extensions'
 import { createFeedbackApi, type FeedbackApi } from './feedback'
 import { createGitApi, type GitApi } from './git'
 import { createMemoryApi, type MemoryApi } from './memory'
@@ -28,6 +29,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   feedback: FeedbackApi
   cost: CostApi
   context: RepositoryContextApi
+  extensions: ExtensionsApi
   automations: AutomationsApi
   specs: SpecsApi
   runs: RunsApi
@@ -51,6 +53,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     feedback: createFeedbackApi(ipcRenderer),
     cost: createCostApi(ipcRenderer),
     context: createRepositoryContextApi(ipcRenderer),
+    extensions: createExtensionsApi(ipcRenderer),
     automations: createAutomationsApi(ipcRenderer),
     specs: createSpecsApi(ipcRenderer),
     runs: createRunsApi(ipcRenderer),

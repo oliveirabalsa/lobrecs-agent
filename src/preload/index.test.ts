@@ -51,6 +51,7 @@ describe('preload api shape', () => {
       'feedback',
       'cost',
       'context',
+      'extensions',
       'automations',
       'specs',
       'runs',
@@ -210,6 +211,26 @@ describe('preload api shape', () => {
         ],
       },
       {
+        call: (agentforge) =>
+          agentforge.agent.modelRecoveryDecision({
+            recoveryId: 'recovery-1',
+            sessionId: 'session-1',
+            decision: 'continue',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.4',
+          }),
+        expected: [
+          'agent:model-recovery-decision',
+          {
+            recoveryId: 'recovery-1',
+            sessionId: 'session-1',
+            decision: 'continue',
+            agentId: 'codex',
+            modelOverride: 'gpt-5.4',
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.agent.reject('session-1'),
         expected: ['agent:reject', 'session-1'],
       },
@@ -247,6 +268,7 @@ describe('preload api shape', () => {
         expected: ['cost:by-project', 'project-1'],
       },
       { call: (agentforge) => agentforge.cost.byPeriod(30), expected: ['cost:by-period', 30] },
+      { call: (agentforge) => agentforge.cost.providerUsage(), expected: ['cost:provider-usage'] },
       {
         call: (agentforge) => agentforge.context.index('project-1'),
         expected: ['context:index', 'project-1'],
@@ -259,6 +281,52 @@ describe('preload api shape', () => {
         call: (agentforge) =>
           agentforge.context.search({ projectId: 'project-1', query: 'session routing' }),
         expected: ['context:search', { projectId: 'project-1', query: 'session routing' }],
+      },
+      {
+        call: (agentforge) => agentforge.extensions.getState(),
+        expected: ['extensions:get-state'],
+      },
+      {
+        call: (agentforge) => agentforge.extensions.listCatalog(),
+        expected: ['extensions:list-catalog'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.extensions.searchCatalog({
+            query: 'playwright',
+            categories: ['mcp-server'],
+            targetAgents: ['codex'],
+          }),
+        expected: [
+          'extensions:search-catalog',
+          {
+            query: 'playwright',
+            categories: ['mcp-server'],
+            targetAgents: ['codex'],
+          },
+        ],
+      },
+      {
+        call: (agentforge) => agentforge.extensions.listInstalled(),
+        expected: ['extensions:list-installed'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.extensions.install({
+            extensionId: 'openai-developer-docs',
+            scope: 'project',
+            projectPath: '/tmp/repo',
+            targetAgents: ['codex'],
+          }),
+        expected: [
+          'extensions:install',
+          {
+            extensionId: 'openai-developer-docs',
+            scope: 'project',
+            projectPath: '/tmp/repo',
+            targetAgents: ['codex'],
+          },
+        ],
       },
       {
         call: (agentforge) => agentforge.automations.list('project-1'),
@@ -331,6 +399,10 @@ describe('preload api shape', () => {
         expected: ['runs:verify', 'run-1', 'rtk npm run build'],
       },
       {
+        call: (agentforge) => agentforge.runs.getPromptEvidence('session-1'),
+        expected: ['runs:getPromptEvidence', 'session-1'],
+      },
+      {
         call: (agentforge) => agentforge.git.diff({ projectId: 'project-1' }),
         expected: ['git:diff', { projectId: 'project-1' }],
       },
@@ -360,6 +432,10 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.git.analyzeCommitPlan('project-1'),
         expected: ['git:analyze-commit-plan', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.git.reviewCurrentDiff('project-1'),
+        expected: ['git:review-current-diff', 'project-1', undefined],
       },
       {
         call: (agentforge) =>

@@ -7,6 +7,16 @@ export interface SpecsApi {
   create(data: CreateSpecInput): Promise<Spec>
   update(specId: string, data: UpdateSpecInput): Promise<Spec>
   approve(specId: string): Promise<Spec>
+  suggestDraft(
+    projectId: string,
+    title: string,
+    goal: string,
+  ): Promise<{
+    constraints: string
+    requirements: string[]
+    acceptanceCriteria: string[]
+    targetFiles: string[]
+  }>
 }
 
 export function createSpecsApi(ipcRenderer: IpcInvoker): SpecsApi {
@@ -16,5 +26,8 @@ export function createSpecsApi(ipcRenderer: IpcInvoker): SpecsApi {
     create: (data) => ipcRenderer.invoke('specs:create', data),
     update: (specId, data) => ipcRenderer.invoke('specs:update', specId, data),
     approve: (specId) => ipcRenderer.invoke('specs:approve', specId),
+    suggestDraft: (projectId, title, goal) =>
+      ipcRenderer.invoke('specs:draft-suggest', { projectId, title, goal }),
   }
 }
+

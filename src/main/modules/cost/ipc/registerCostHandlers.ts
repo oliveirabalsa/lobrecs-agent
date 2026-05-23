@@ -1,7 +1,9 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../../../store'
+import type { MainIpcContext } from '../../shared/ipcContext'
+import { listProviderUsage } from '../application/providerUsage'
 
-export function registerCostHandlers(): void {
+export function registerCostHandlers(context: MainIpcContext): void {
   ipcMain.handle('cost:by-project', async (_event, projectId: string) =>
     getDb()
       .prepare(
@@ -38,4 +40,9 @@ export function registerCostHandlers(): void {
       )
       .all(since)
   })
+  ipcMain.handle('cost:provider-usage', async () =>
+    listProviderUsage(getDb(), context.adapters, Date.now(), {
+      runtimes: context.settingsService.getGlobal().agents.runtimes,
+    }),
+  )
 }

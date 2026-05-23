@@ -5,6 +5,7 @@ import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandle
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
 import { registerContextHandlers, repositoryContextService } from '../modules/context'
+import { extensionMarketplaceService, registerExtensionHandlers } from '../modules/extensions'
 import { registerFeedbackHandlers } from '../modules/feedback/ipc/registerFeedbackHandlers'
 import { registerGitHandlers } from '../modules/git/ipc/registerGitHandlers'
 import { projectMemoryService, registerMemoryHandlers } from '../modules/memory'
@@ -23,7 +24,7 @@ import { registerUpdateHandlers } from '../modules/updates'
 import { ModelRouter } from '../router'
 import { capacityFallbackModelsForAgent } from '../router/modelCapacityFallbacks'
 import { sessionManager } from '../session'
-import { projectsStore, threadsStore } from '../store'
+import { projectsStore, runAuditStore, specRunsStore, threadsStore } from '../store'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
 
 
@@ -45,11 +46,12 @@ export function registerIpcHandlers(): void {
   registerSwarmHandlers(context)
   registerRoutingHandlers(context)
   registerFeedbackHandlers(context)
-  registerCostHandlers()
+  registerCostHandlers(context)
   registerContextHandlers(context)
+  registerExtensionHandlers(extensionMarketplaceService)
   registerMemoryHandlers(context)
   registerAutomationHandlers(context)
-  registerSpecHandlers()
+  registerSpecHandlers(context)
   registerRunHandlers(context)
   registerGitHandlers(context)
   registerSettingsHandlers(context)
@@ -84,6 +86,18 @@ function configureSessionManager(context: MainIpcContext): void {
     runQualityGate(input, {
       getSettings: (projectId) => context.settingsService.getEffective(projectId).settings,
       routeModel: (routeInput) => context.modelRouter.route(routeInput),
+      recordAudit: (auditInput) => {
+        runAuditStore.create({
+          ...auditInput,
+          specRunId: specRunsStore.findSpecRunIdBySessionId(auditInput.sessionId) ?? undefined,
+        })
+      },
+      getLastAudit: (sessionId) => {
+        const records = runAuditStore.listForSession(sessionId)
+        const last = records[records.length - 1]
+        if (!last) return null
+        return { recipeId: last.recipeId, exitCode: last.exitCode, phase: last.phase }
+      },
       dispatchRepair: async (repairInput) => {
         const settings = context.settingsService.getEffective(repairInput.projectId).settings
         return context.sessionManager.dispatch({
