@@ -144,13 +144,15 @@ function matchesQuery(extension: MarketplaceExtension, query: string): boolean {
     extension.category,
     extension.source,
     ...extension.tags,
-    ...extension.artifacts.map((artifact) =>
-      artifact.kind === 'mcp-server'
-        ? artifact.serverName
-        : artifact.kind === 'skill'
-          ? artifact.skillName
-          : artifact.packageName,
-    ),
+    ...extension.artifacts.flatMap((artifact) => {
+      if (artifact.kind === 'mcp-server') return [artifact.serverName]
+      if (artifact.kind === 'plugin') return [artifact.packageName]
+      return [
+        artifact.skillName,
+        'packageName' in artifact ? artifact.packageName : '',
+        'cliSkillName' in artifact ? (artifact.cliSkillName ?? '') : '',
+      ]
+    }),
   ]
   return haystack.some((value) => value.toLowerCase().includes(query))
 }

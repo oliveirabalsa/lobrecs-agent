@@ -18,12 +18,23 @@ export interface ExtensionMcpServerArtifact {
   headers?: Record<string, string>
 }
 
-export interface ExtensionSkillArtifact {
+export interface ExtensionInlineSkillArtifact {
   kind: 'skill'
   skillName: string
   description: string
   body: string
 }
+
+export interface ExtensionSkillsCliArtifact {
+  kind: 'skill'
+  skillName: string
+  description: string
+  packageName: string
+  cliSkillName?: string
+  installUrl?: string
+}
+
+export type ExtensionSkillArtifact = ExtensionInlineSkillArtifact | ExtensionSkillsCliArtifact
 
 export interface ExtensionPluginArtifact {
   kind: 'plugin'

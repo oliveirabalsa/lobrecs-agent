@@ -78,6 +78,25 @@ describe('ExtensionMarketplaceService', () => {
     expect(result.publishers).toContain('Microsoft Playwright')
   })
 
+  it('surfaces skills.sh skills as searchable external skill entries', async () => {
+    const service = serviceWithCatalog()
+
+    const result = await service.searchCatalog({
+      query: 'react performance',
+      categories: ['skill'],
+      sources: ['external'],
+      targetAgents: ['codex'],
+    })
+
+    expect(result.items.map((item) => item.id)).toContain('skills-sh-react-best-practices')
+    const reactSkill = result.items.find((item) => item.id === 'skills-sh-react-best-practices')
+    expect(reactSkill?.artifacts[0]).toMatchObject({
+      kind: 'skill',
+      packageName: 'vercel-labs/agent-skills',
+      cliSkillName: 'react-best-practices',
+    })
+  })
+
   it('merges external MCP registry entries into catalog search results', async () => {
     const service = serviceWithCatalog({
       externalCatalog: [
