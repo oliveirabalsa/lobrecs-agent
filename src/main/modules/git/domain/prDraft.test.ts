@@ -18,6 +18,20 @@ describe('buildPrDraftPrompt', () => {
     expect(prompt).toContain('Preserve its headings and checklist items')
     expect(prompt).toContain('markdown PR description that follows the provided template')
   })
+
+  it('includes the code diff when provided', () => {
+    const prompt = buildPrDraftPrompt({
+      headBranch: 'feat/pr-flow',
+      baseBranch: 'main',
+      commits: 'abc123 feat: improve PR flow',
+      diffStat: 'src/main/modules/git/application/pullRequestWorkflowService.ts | 12 +++++',
+      template: '## Summary',
+      diff: '+++ b/src/main/modules/git/application/pullRequestWorkflowService.ts\n+console.log("hello")',
+    })
+
+    expect(prompt).toContain('Code diff:')
+    expect(prompt).toContain('console.log("hello")')
+  })
 })
 
 describe('createDraftTitle', () => {

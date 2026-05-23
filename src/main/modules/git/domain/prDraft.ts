@@ -4,6 +4,7 @@ interface BuildPrDraftPromptInput {
   commits: string
   diffStat: string
   template: string
+  diff?: string
 }
 
 export function buildPrDraftPrompt(input: BuildPrDraftPromptInput): string {
@@ -23,6 +24,7 @@ export function buildPrDraftPrompt(input: BuildPrDraftPromptInput): string {
       : '',
     input.commits ? `\nRecent commits:\n${input.commits}` : '',
     input.diffStat ? `\nChanged files:\n${input.diffStat}` : '',
+    input.diff ? `\nCode diff:\n${input.diff}` : '',
     '\nRespond with ONLY a JSON object (no markdown fences, no extra text):',
     '{"title":"concise PR title under 72 chars","body":"markdown PR description that follows the provided template"}',
   ].filter(Boolean).join('\n')

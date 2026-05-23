@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { buildProcessEnvironment } from '../../../process/environment'
@@ -15,6 +16,14 @@ import type {
 import { getProviderType, isGitHubRemote, isAzureRemote } from '../domain/pullRequest'
 import { buildPrDraftPrompt, createDraftTitle } from '../domain/prDraft'
 import { loadPrTemplate } from '../domain/prTemplate'
+import { getModelForTier } from '../../../router/ModelRouter'
+import { deriveActivityEvents } from '../../../session/activity'
+import type {
+  AgentEvent,
+  AgentRuntimeSettings,
+  ModelTier,
+  SupportedAgentId,
+} from '../../../../shared/types'
 
 export class PullRequestWorkflowService {
   constructor(private readonly context: MainIpcContext) {}
@@ -60,7 +69,7 @@ export class PullRequestWorkflowService {
     const project = requireProject(input.projectId)
     const template = await this.resolveTemplate(input.projectId)
 
-    const [commitsResult, diffStatResult] = await Promise.all([
+    const [commitsResult, diffStatResult, diffResult] = await Promise.all([
       runGit(
         ['log', `origin/${input.baseBranch}..${input.headBranch}`, '--oneline', '--no-merges', '--max-count=20'],
         project.repoPath,
@@ -69,27 +78,34 @@ export class PullRequestWorkflowService {
         ['diff', '--stat', `origin/${input.baseBranch}...${input.headBranch}`],
         project.repoPath,
       ).catch(() => ({ exitCode: 0, stdout: '', stderr: '' })),
+      runGit(
+        ['diff', `origin/${input.baseBranch}...${input.headBranch}`],
+        project.repoPath,
+      ).catch(() => ({ exitCode: 0, stdout: '', stderr: '' })),
     ])
 
     const commits = commitsResult.stdout.trim()
     const diffStat = diffStatResult.stdout.trim()
+    let diff = diffResult.stdout.trim()
+
+    const MAX_DIFF_CHARS = 100_000
+    if (diff.length > MAX_DIFF_CHARS) {
+      diff = diff.slice(0, MAX_DIFF_CHARS) + '\n[diff truncated due to size]'
+    }
 
     const prompt = buildPrDraftPrompt({
       headBranch: input.headBranch,
       baseBranch: input.baseBranch,
       commits,
       diffStat,
+      diff,
       template,
     })
 
     try {
-      const { runCommandText, resolveCommand } = await import('../../../agents/command')
-      const claude = resolveCommand('CLAUDE_COMMAND', 'claude')
-      const output = await runCommandText(
-        claude,
-        ['--print', '--output-format', 'text', '--model', 'claude-haiku-4-5-20251001', prompt],
-        { timeout: 45_000, maxBuffer: 512 * 1024 },
-      )
+      const selection = await selectAnalysisAgent(this.context, input.projectId)
+      const output = await runPrDraftAgent(this.context, selection, project.repoPath, prompt)
+
       const jsonMatch = output.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as { title?: string; body?: string }
@@ -291,4 +307,215 @@ export class PullRequestWorkflowService {
     return { url: data.remoteUrl, number: data.pullRequestId }
   }
 
+}
+
+interface AnalysisAgentSelection {
+  agentId: SupportedAgentId
+  model: string
+  runtimeSettings: AgentRuntimeSettings
+}
+
+interface AssistantTranscriptState {
+  assistantText: string
+  streamedText: string
+}
+
+const ANALYSIS_CANDIDATES: ReadonlyArray<{ agentId: SupportedAgentId; tier: ModelTier }> = [
+  { agentId: 'codex', tier: 'lightweight' },
+  { agentId: 'antigravity', tier: 'lightweight' },
+  { agentId: 'opencode', tier: 'advanced' },
+  { agentId: 'opencode', tier: 'balanced' },
+  { agentId: 'claude-code', tier: 'lightweight' },
+]
+
+async function selectAnalysisAgent(
+  context: MainIpcContext,
+  projectId: string,
+): Promise<AnalysisAgentSelection> {
+  const settings = context.settingsService.getEffective(projectId).settings
+  const enabledAgents = settings.agents.enabledAgentIds.filter(
+    (agentId) => settings.agents.runtimes[agentId].enabled !== false,
+  )
+
+  for (const candidate of ANALYSIS_CANDIDATES) {
+    if (!enabledAgents.includes(candidate.agentId)) continue
+    const adapter = context.adapters.get(candidate.agentId)
+    if (!adapter) continue
+
+    try {
+      if (!(await adapter.isInstalled())) continue
+    } catch {
+      continue
+    }
+
+    return {
+      agentId: candidate.agentId,
+      model: getModelForTier(candidate.agentId, candidate.tier, settings),
+      runtimeSettings: {
+        ...context.settingsService.getAgentRuntime(candidate.agentId, projectId),
+        permissionMode: 'read-only',
+      },
+    }
+  }
+
+  for (const agentId of enabledAgents) {
+    const adapter = context.adapters.get(agentId)
+    if (!adapter) continue
+
+    try {
+      if (!(await adapter.isInstalled())) continue
+    } catch {
+      continue
+    }
+
+    return {
+      agentId,
+      model: getModelForTier(agentId, 'lightweight', settings),
+      runtimeSettings: {
+        ...context.settingsService.getAgentRuntime(agentId, projectId),
+        permissionMode: 'read-only',
+      },
+    }
+  }
+
+  throw new Error('No lightweight analysis model is available. Enable Codex, Antigravity, or OpenCode first.')
+}
+
+async function runPrDraftAgent(
+  context: MainIpcContext,
+  selection: AnalysisAgentSelection,
+  repoPath: string,
+  prompt: string,
+): Promise<string> {
+  const adapter = context.adapters.get(selection.agentId)
+  if (!adapter) {
+    throw new Error(`Agent adapter is unavailable: ${selection.agentId}`)
+  }
+
+  const session = await adapter.dispatch({
+    sessionId: `git-pr-draft-${randomUUID()}`,
+    prompt,
+    repoPath,
+    model: selection.model,
+    runtimeSettings: selection.runtimeSettings,
+  })
+
+  return new Promise((resolve, reject) => {
+    const transcript: AssistantTranscriptState = {
+      assistantText: '',
+      streamedText: '',
+    }
+    const stderr: string[] = []
+    let settled = false
+
+    const timeout = setTimeout(() => {
+      session.cancel()
+      settleWithError(new Error('PR suggestion analysis timed out.'))
+    }, 45_000)
+
+    const settleWithError = (error: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(error)
+    }
+
+    const settleWithSuccess = (text: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(text)
+    }
+
+    session.events.on('event', (event: AgentEvent) => {
+      if (event.type === 'stderr') {
+        const text = extractTextFromPayload(event.payload)
+        if (text.trim()) stderr.push(text.trim())
+        return
+      }
+
+      if (event.type === 'error') {
+        settleWithError(new Error(extractTextFromPayload(event.payload) || 'Analysis failed.'))
+        return
+      }
+
+      for (const activityEvent of deriveActivityEvents(event)) {
+        const payload = activityEvent.payload
+        if (!isAssistantActivityMessage(payload)) continue
+
+        if (payload.stream) {
+          transcript.streamedText += payload.text
+        } else {
+          transcript.assistantText = payload.text
+        }
+      }
+
+      if (event.type !== 'session-complete') return
+
+      if (completionFailed(event.payload)) {
+        settleWithError(
+          new Error(
+            extractTextFromPayload(event.payload) ||
+              stderr.at(-1) ||
+              'The agent failed to analyze the diff.',
+          ),
+        )
+        return
+      }
+
+      const finalText = transcript.assistantText.trim() || transcript.streamedText.trim()
+      if (!finalText) {
+        settleWithError(new Error(stderr.at(-1) || 'The agent returned an empty response.'))
+        return
+      }
+
+      settleWithSuccess(finalText)
+    })
+  })
+}
+
+function extractTextFromPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (!isRecord(payload)) return ''
+
+  if (typeof payload.text === 'string') return payload.text
+
+  for (const field of ['message', 'content', 'delta', 'output', 'result', 'summary', 'error', 'item']) {
+    const value = payload[field]
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) {
+      const nested = value.map((item) => extractTextFromPayload(item)).join('')
+      if (nested) return nested
+    }
+    if (isRecord(value)) {
+      const nested = extractTextFromPayload(value)
+      if (nested) return nested
+    }
+  }
+
+  return ''
+}
+
+function completionFailed(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  if (payload.subtype === 'error' || payload.is_error === true) return true
+  if (payload.status === 'error' || payload.status === 'cancelled') return true
+
+  const exitCode = payload.exitCode ?? payload.exit_code
+  return typeof exitCode === 'number' && exitCode !== 0
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isAssistantActivityMessage(
+  payload: unknown,
+): payload is { kind: 'message'; role: 'assistant'; text: string; stream?: boolean } {
+  return (
+    isRecord(payload) &&
+    payload.kind === 'message' &&
+    payload.role === 'assistant' &&
+    typeof payload.text === 'string'
+  )
 }
