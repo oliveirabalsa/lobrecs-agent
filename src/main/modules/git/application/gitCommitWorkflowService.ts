@@ -10,6 +10,7 @@ import {
   validateCommitSuggestions,
 } from '../domain/commitPlan'
 import { normalizeDiffReview } from '../domain/diffReview'
+import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit, runGitOrThrow } from '../infrastructure/runGit'
 import type {
   AgentEvent,
@@ -121,7 +122,7 @@ export class GitCommitWorkflowService {
         })
       }
 
-      const push = await runGit(['push'], project.repoPath)
+      const push = await pushCurrentBranch(project.repoPath, snapshot.branch)
       if (push.exitCode !== 0) {
         throw new Error(
           `${push.stderr.trim() || push.stdout.trim() || 'git push failed'}\n${formatPartialCommitHint(commits)}`,

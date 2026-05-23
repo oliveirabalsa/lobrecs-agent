@@ -3,6 +3,7 @@ import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
 import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
+import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit } from '../infrastructure/runGit'
 import type {
   GitCommitInput,
@@ -51,7 +52,10 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:push', async (_event, projectId: string) => {
     const project = requireProject(projectId)
-    return runGit(['push'], project.repoPath)
+    const branch = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], project.repoPath)
+    if (branch.exitCode !== 0) return branch
+
+    return pushCurrentBranch(project.repoPath, branch.stdout.trim())
   })
 
   ipcMain.handle('git:get-pending-changes', async (_event, projectId: string) => {
