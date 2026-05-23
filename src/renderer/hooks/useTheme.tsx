@@ -12,24 +12,25 @@ import type { ReactNode } from 'react'
 
 export const THEME_IDS = [
   'midnight',
-  'lobrecs-wolf',
-  'aurora-nebula',
-  'solar-forge',
+  'blue-hour',
+  'night-owl',
+  'palenight',
+  'tokyo-night',
+  'cobalt-deep',
+  'winter-is-coming',
+  'deep-sea',
+  'oceanic-noir',
   'black-ice',
-  'black-ember',
+  'nord-aurora',
+  'one-dark',
+  'dracula',
   'black-violet',
-  'black-forest',
+  'obsidian',
   'blackout',
   'ink-black',
-  'soft-black',
   'carbon-black',
   'ash-black',
-  'blue-hour',
-  'cyber-mint',
-  'crimson-depth',
-  'graphite-rose',
-  'oceanic-noir',
-  'toxic-terminal',
+  'soft-black',
 ] as const
 export type ThemeId = (typeof THEME_IDS)[number]
 
@@ -53,40 +54,75 @@ export const THEME_META: Record<
     description: 'The original cool-grey dark theme with a soft top glow.',
     swatches: ['#0e0e0f', '#1c1c20', '#3b82f6', '#f4f4f5'],
   },
-  'lobrecs-wolf': {
-    label: 'Lobrecs Wolf',
-    description: 'Near-black surfaces with a dark-red wolf glow and red accents.',
-    swatches: ['#0c0708', '#1e1316', '#e0463c', '#fafafa'],
+  'blue-hour': {
+    label: 'Blue Hour',
+    description: 'Deep blue-black dusk surfaces with cobalt gradients and a crisp electric accent.',
+    swatches: ['#050914', '#101827', '#60a5fa', '#eff6ff'],
   },
-  'aurora-nebula': {
-    label: 'Aurora Nebula',
-    description: 'Vibrant neon purple and green theme with deep indigo surfaces and emerald accents.',
-    swatches: ['#090610', '#150f24', '#10b981', '#f5f0ff'],
+  'night-owl': {
+    label: 'Night Owl',
+    description: 'Inky midnight blue surfaces with a cool teal-blue accent, inspired by Night Owl.',
+    swatches: ['#011627', '#0b2a3a', '#7fdbca', '#d6deeb'],
   },
-  'solar-forge': {
-    label: 'Solar Forge',
-    description: 'Warm dark charcoal surfaces with an amber copper glow and orange-gold accents.',
-    swatches: ['#0d0a06', '#1d1710', '#f59e0b', '#fff8eb'],
+  palenight: {
+    label: 'Palenight',
+    description: 'Soft indigo-grey base with periwinkle accents and a calm material feel.',
+    swatches: ['#1e1f2e', '#292d3e', '#82aaff', '#eeffff'],
+  },
+  'tokyo-night': {
+    label: 'Tokyo Night',
+    description: 'Deep navy surfaces with indigo gradients and a glowing blue accent.',
+    swatches: ['#1a1b26', '#24283b', '#7aa2f7', '#c0caf5'],
+  },
+  'cobalt-deep': {
+    label: 'Cobalt Deep',
+    description: 'Rich cobalt-black surfaces with a vivid blue accent and electric highlights.',
+    swatches: ['#031429', '#0a2240', '#0088ff', '#e6f2ff'],
+  },
+  'winter-is-coming': {
+    label: 'Winter Is Coming',
+    description: 'Frosted dark-blue surfaces with ice-blue accents and a crisp wintery glow.',
+    swatches: ['#001629', '#062338', '#5ccfe6', '#d4f1ff'],
+  },
+  'deep-sea': {
+    label: 'Deep Sea',
+    description: 'Abyssal navy black with cyan glow and submerged blue gradients.',
+    swatches: ['#020a18', '#071527', '#22d3ee', '#e0f7ff'],
+  },
+  'oceanic-noir': {
+    label: 'Oceanic Noir',
+    description: 'Deep ocean black with petrol-blue panels, cyan glow, and submerged gradients.',
+    swatches: ['#031014', '#0b1f26', '#22d3ee', '#ecfeff'],
   },
   'black-ice': {
     label: 'Black Ice',
     description: 'Hard black surfaces with blue-white glass edges and a cold cyan glow.',
     swatches: ['#020407', '#101820', '#38bdf8', '#f8fbff'],
   },
-  'black-ember': {
-    label: 'Black Ember',
-    description: 'Matte black with coal-red depth, ember orange accents, and smoky gradients.',
-    swatches: ['#030202', '#17100d', '#fb923c', '#fff4ed'],
+  'nord-aurora': {
+    label: 'Nord Aurora',
+    description: 'Polar night surfaces with a frosted steel-blue accent inspired by Nord.',
+    swatches: ['#0d1117', '#1c2330', '#88c0d0', '#eceff4'],
+  },
+  'one-dark': {
+    label: 'One Dark',
+    description: 'Atom-style charcoal surfaces with a soft slate-blue accent.',
+    swatches: ['#1a1c22', '#282c34', '#61afef', '#e6e6e6'],
+  },
+  dracula: {
+    label: 'Dracula',
+    description: 'Classic Dracula-inspired ink black with a soft purple accent and gentle bloom.',
+    swatches: ['#1a1b26', '#282a36', '#bd93f9', '#f8f8f2'],
   },
   'black-violet': {
     label: 'Black Violet',
     description: 'Ink-black workspace with violet bloom, magenta highlights, and sharp contrast.',
     swatches: ['#050208', '#16101f', '#a855f7', '#faf5ff'],
   },
-  'black-forest': {
-    label: 'Black Forest',
-    description: 'Almost-black green with moss accents, soft emerald glow, and grounded contrast.',
-    swatches: ['#020503', '#0f1a12', '#22c55e', '#f0fff4'],
+  obsidian: {
+    label: 'Obsidian',
+    description: 'Cold obsidian black with neutral grey-white accents and minimal chromatic noise.',
+    swatches: ['#0b0d10', '#15181d', '#dcdfe4', '#f5f7fa'],
   },
   blackout: {
     label: 'Blackout',
@@ -98,11 +134,6 @@ export const THEME_META: Record<
     description: 'Liquid black surfaces with charcoal depth and soft grey highlights.',
     swatches: ['#030303', '#0a0a0a', '#8a8a8a', '#f2f2f2'],
   },
-  'soft-black': {
-    label: 'Soft Black',
-    description: 'Lighter black and dark grey surfaces with a calmer low-contrast feel.',
-    swatches: ['#0a0a0a', '#171717', '#a3a3a3', '#f5f5f5'],
-  },
   'carbon-black': {
     label: 'Carbon Black',
     description: 'Layered carbon grey panels over black with satin monochrome gradients.',
@@ -113,35 +144,10 @@ export const THEME_META: Record<
     description: 'Smoky black with warm dark-grey surfaces and muted ash highlights.',
     swatches: ['#070707', '#181818', '#9ca3af', '#f3f4f6'],
   },
-  'blue-hour': {
-    label: 'Blue Hour',
-    description: 'Deep blue-black dusk surfaces with cobalt gradients and a crisp electric accent.',
-    swatches: ['#050914', '#101827', '#60a5fa', '#eff6ff'],
-  },
-  'cyber-mint': {
-    label: 'Cyber Mint',
-    description: 'Dark graphite with teal-mint gradients, neon controls, and clean glassy panels.',
-    swatches: ['#06100e', '#111d1a', '#2dd4bf', '#ecfeff'],
-  },
-  'crimson-depth': {
-    label: 'Crimson Depth',
-    description: 'Dark wine surfaces with layered ruby gradients and bright red action accents.',
-    swatches: ['#100407', '#211016', '#ef4444', '#fff1f2'],
-  },
-  'graphite-rose': {
-    label: 'Graphite Rose',
-    description: 'Neutral graphite base with rose-pink gradients and restrained warm highlights.',
-    swatches: ['#09090b', '#1b161a', '#f472b6', '#fff7fb'],
-  },
-  'oceanic-noir': {
-    label: 'Oceanic Noir',
-    description: 'Deep ocean black with petrol-blue panels, cyan glow, and submerged gradients.',
-    swatches: ['#031014', '#0b1f26', '#22d3ee', '#ecfeff'],
-  },
-  'toxic-terminal': {
-    label: 'Toxic Terminal',
-    description: 'Dark terminal green with acid-lime accents and a subtle radioactive glow.',
-    swatches: ['#050805', '#101a0c', '#a3e635', '#f7fee7'],
+  'soft-black': {
+    label: 'Soft Black',
+    description: 'Lighter black and dark grey surfaces with a calmer low-contrast feel.',
+    swatches: ['#0a0a0a', '#171717', '#a3a3a3', '#f5f5f5'],
   },
 }
 

@@ -11,12 +11,12 @@
     <!--
       No-flash theme bootstrap. Runs synchronously before <body> paints so the
       persisted theme is applied before React mounts. ThemeProvider would
-      otherwise reapply it one frame late, flashing the Midnight default at
-      users who picked Lobrecs Wolf.
+      otherwise reapply it one frame late, flashing the default theme.
 
       This script lives outside the TS module graph, so it cannot import the
-      shared constants from hooks/useTheme.tsx — it must re-state the storage
-      key 'lobrecs.theme' and the valid ids 'midnight' / 'lobrecs-wolf'.
+      shared THEME_IDS array from hooks/useTheme.tsx. Instead it validates the
+      stored value against a strict kebab-case character class — any unknown
+      id is reconciled to DEFAULT_THEME by ThemeProvider on mount.
 
       Leaving the body empty is SAFE: ThemeProvider still applies the theme on
       mount, so the only cost of not implementing this is the launch flash.
@@ -25,7 +25,7 @@
       (function() {
         try {
           var theme = window.localStorage.getItem('lobrecs.theme');
-          if (theme === 'midnight' || theme === 'lobrecs-wolf') {
+          if (theme && /^[a-z][a-z0-9-]{0,31}$/.test(theme)) {
             document.documentElement.dataset.theme = theme;
           }
         } catch (e) {

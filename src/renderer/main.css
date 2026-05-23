@@ -65,12 +65,13 @@
 /*
  * Theme system
  * ------------
- * Two dark themes selectable at runtime. The @theme block above defines the
- * default ("Midnight") color tokens; the blocks below add the gradient/glow
- * tokens (which @theme cannot express) and the alternate "Lobrecs Wolf"
- * palette. A theme switch only swaps custom-property *values* on <html>, so
- * no component classes change. index.html applies data-theme before React
- * mounts to avoid a flash of the wrong theme.
+ * A set of dark themes selectable at runtime, grouped into a blue family and
+ * a black family. The @theme block above defines the default ("Midnight")
+ * color tokens; the blocks below add the gradient/glow tokens (which @theme
+ * cannot express) and the alternate palettes. A theme switch only swaps
+ * custom-property *values* on <html>, so no component classes change.
+ * index.html applies data-theme before React mounts to avoid a flash of the
+ * wrong theme.
  */
 
 /* Midnight (default) — gradient/glow tokens. The bare :root selector keeps
@@ -87,93 +88,233 @@
   --color-glow: rgba(59, 130, 246, 0.12);
 }
 
-/* Lobrecs Wolf — "dark with a red soul": near-black surfaces with only a warm
- * shift on hairlines/text, accent red reserved for focus/active/links/loader,
- * and a dark-red glow bleeding from the top edge. Only the base text tokens
- * are overridden — the --color-primary/secondary/muted aliases follow them. */
-:root[data-theme='lobrecs-wolf'] {
-  --color-canvas: #0c0708;
-  --color-sidebar: #130c0e;
-  --color-bubble-user: #241619;
-  --color-card: #170e10;
-  --color-card-raised: #1e1316;
-  --color-hairline: rgba(255, 225, 220, 0.07);
-  --color-hairline-strong: rgba(255, 225, 220, 0.13);
+/* === BLUE FAMILY ============================================================
+ * Blue-tinted canvases with blue accent variations. Themes inspired by
+ * popular dev editor themes (Night Owl, Palenight, Tokyo Night, Cobalt,
+ * Winter Is Coming) plus our own deep-blue palettes. */
 
-  --color-text-primary: rgba(255, 250, 249, 0.92);
-  --color-text-secondary: rgba(255, 244, 242, 0.58);
-  --color-text-muted: rgba(255, 244, 242, 0.4);
+/* Blue Hour - dusk blue-black with cobalt gradients. */
+:root[data-theme='blue-hour'] {
+  --color-canvas: #050914;
+  --color-sidebar: #0a1020;
+  --color-bubble-user: #101827;
+  --color-card: #0d1422;
+  --color-card-raised: #121c2e;
+  --color-hairline: rgba(210, 230, 255, 0.08);
+  --color-hairline-strong: rgba(210, 230, 255, 0.15);
 
-  --color-accent-primary: #e0463c;
-  --color-accent-loader: #f0524a;
-  --color-accent-loader-glow: rgba(240, 82, 74, 0.45);
+  --color-text-primary: rgba(239, 246, 255, 0.94);
+  --color-text-secondary: rgba(219, 234, 254, 0.62);
+  --color-text-muted: rgba(219, 234, 254, 0.42);
+
+  --color-accent-primary: #60a5fa;
+  --color-accent-loader: #3b82f6;
+  --color-accent-loader-glow: rgba(96, 165, 250, 0.5);
 
   --gradient-app:
-    radial-gradient(120% 100% at 16% -10%, rgba(224, 70, 60, 0.26) 0%, transparent 45%),
-    radial-gradient(90% 90% at 88% 8%, rgba(255, 140, 120, 0.10) 0%, transparent 40%),
-    linear-gradient(180deg, #2a1013 0%, #14090b 46%, #060304 100%);
+    radial-gradient(120% 95% at 16% -10%, rgba(96, 165, 250, 0.20) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 2%, rgba(99, 102, 241, 0.16) 0%, transparent 42%),
+    linear-gradient(180deg, #111f3a 0%, #07101f 50%, #030511 100%);
   --gradient-sidebar:
-    radial-gradient(100% 80% at 0% 0%, rgba(224, 70, 60, 0.16) 0%, transparent 48%),
-    linear-gradient(180deg, #1a0f11 0%, #130c0e 46%, #0d080a 100%);
-  --color-glow: rgba(224, 70, 60, 0.22);
+    radial-gradient(92% 80% at 0% 0%, rgba(96, 165, 250, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #101827 0%, #0a1020 48%, #060a14 100%);
+  --color-glow: rgba(96, 165, 250, 0.20);
 }
 
-/* Aurora Nebula — "glowing space vibe": deep purple surfaces with a bright
- * emerald green glow and cyan accents. */
-:root[data-theme='aurora-nebula'] {
-  --color-canvas: #090610;
-  --color-sidebar: #0f0b1a;
-  --color-bubble-user: #1f1430;
-  --color-card: #150f24;
-  --color-card-raised: #1d1433;
-  --color-hairline: rgba(220, 200, 255, 0.07);
-  --color-hairline-strong: rgba(220, 200, 255, 0.13);
+/* Night Owl - inky midnight blue with a cool teal-blue accent. */
+:root[data-theme='night-owl'] {
+  --color-canvas: #011627;
+  --color-sidebar: #021e33;
+  --color-bubble-user: #0a2a3f;
+  --color-card: #052238;
+  --color-card-raised: #0b2f47;
+  --color-hairline: rgba(214, 222, 235, 0.08);
+  --color-hairline-strong: rgba(214, 222, 235, 0.15);
 
-  --color-text-primary: rgba(245, 240, 255, 0.94);
-  --color-text-secondary: rgba(230, 220, 255, 0.62);
-  --color-text-muted: rgba(230, 220, 255, 0.42);
+  --color-text-primary: rgba(214, 222, 235, 0.94);
+  --color-text-secondary: rgba(194, 207, 226, 0.62);
+  --color-text-muted: rgba(194, 207, 226, 0.42);
 
-  --color-accent-primary: #10b981; /* Emerald */
-  --color-accent-loader: #06b6d4;  /* Cyan */
-  --color-accent-loader-glow: rgba(6, 182, 212, 0.55);
+  --color-accent-primary: #7fdbca;
+  --color-accent-loader: #82aaff;
+  --color-accent-loader-glow: rgba(127, 219, 202, 0.45);
 
   --gradient-app:
-    radial-gradient(120% 100% at 20% -8%, rgba(16, 185, 129, 0.18) 0%, transparent 45%),
-    radial-gradient(95% 90% at 84% 2%, rgba(168, 85, 247, 0.24) 0%, transparent 44%),
-    linear-gradient(180deg, #25123e 0%, #0f0b1a 46%, #050308 100%);
+    radial-gradient(120% 95% at 16% -10%, rgba(127, 219, 202, 0.18) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 2%, rgba(130, 170, 255, 0.14) 0%, transparent 42%),
+    linear-gradient(180deg, #0a2a3f 0%, #021929 50%, #000914 100%);
   --gradient-sidebar:
-    radial-gradient(95% 80% at 0% 0%, rgba(168, 85, 247, 0.16) 0%, transparent 50%),
-    linear-gradient(180deg, #180f28 0%, #0f0b1a 46%, #090611 100%);
-  --color-glow: rgba(16, 185, 129, 0.18);
+    radial-gradient(92% 80% at 0% 0%, rgba(127, 219, 202, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #082030 0%, #021e33 48%, #00121f 100%);
+  --color-glow: rgba(127, 219, 202, 0.18);
 }
 
-/* Solar Forge — "warm dark terminal": deep charcoal surfaces tinted with amber,
- * orange-gold accent for interactive elements, and a copper glow from the top. */
-:root[data-theme='solar-forge'] {
-  --color-canvas: #0d0a06;
-  --color-sidebar: #131009;
-  --color-bubble-user: #1f1a0e;
-  --color-card: #160f08;
-  --color-card-raised: #1d1710;
-  --color-hairline: rgba(255, 220, 150, 0.07);
-  --color-hairline-strong: rgba(255, 220, 150, 0.13);
+/* Palenight - soft indigo-grey surfaces with periwinkle accent. */
+:root[data-theme='palenight'] {
+  --color-canvas: #1e1f2e;
+  --color-sidebar: #232636;
+  --color-bubble-user: #2e3245;
+  --color-card: #292d3e;
+  --color-card-raised: #343852;
+  --color-hairline: rgba(238, 255, 255, 0.07);
+  --color-hairline-strong: rgba(238, 255, 255, 0.14);
 
-  --color-text-primary: rgba(255, 248, 235, 0.93);
-  --color-text-secondary: rgba(255, 240, 200, 0.60);
-  --color-text-muted: rgba(255, 240, 200, 0.40);
+  --color-text-primary: rgba(238, 255, 255, 0.94);
+  --color-text-secondary: rgba(210, 215, 240, 0.62);
+  --color-text-muted: rgba(210, 215, 240, 0.42);
 
-  --color-accent-primary: #f59e0b;  /* Amber */
-  --color-accent-loader: #f97316;   /* Orange */
-  --color-accent-loader-glow: rgba(249, 115, 22, 0.50);
+  --color-accent-primary: #82aaff;
+  --color-accent-loader: #c792ea;
+  --color-accent-loader-glow: rgba(130, 170, 255, 0.45);
 
   --gradient-app:
-    radial-gradient(120% 100% at 18% -10%, rgba(245, 158, 11, 0.22) 0%, transparent 45%),
-    radial-gradient(90% 85% at 88% 4%, rgba(249, 115, 22, 0.16) 0%, transparent 42%),
-    linear-gradient(180deg, #2b1e06 0%, #130e05 46%, #060402 100%);
+    radial-gradient(118% 92% at 16% -10%, rgba(130, 170, 255, 0.18) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 2%, rgba(199, 146, 234, 0.14) 0%, transparent 42%),
+    linear-gradient(180deg, #2a2e44 0%, #1e1f2e 50%, #131420 100%);
   --gradient-sidebar:
-    radial-gradient(95% 80% at 0% 0%, rgba(245, 158, 11, 0.14) 0%, transparent 48%),
-    linear-gradient(180deg, #1c1409 0%, #131009 46%, #0c0a05 100%);
-  --color-glow: rgba(245, 158, 11, 0.20);
+    radial-gradient(92% 80% at 0% 0%, rgba(130, 170, 255, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #262a3c 0%, #232636 48%, #181a26 100%);
+  --color-glow: rgba(130, 170, 255, 0.18);
+}
+
+/* Tokyo Night - deep navy with indigo gradients and a glowing blue accent. */
+:root[data-theme='tokyo-night'] {
+  --color-canvas: #1a1b26;
+  --color-sidebar: #1f2030;
+  --color-bubble-user: #292e42;
+  --color-card: #24283b;
+  --color-card-raised: #2f334d;
+  --color-hairline: rgba(192, 202, 245, 0.08);
+  --color-hairline-strong: rgba(192, 202, 245, 0.15);
+
+  --color-text-primary: rgba(192, 202, 245, 0.95);
+  --color-text-secondary: rgba(169, 177, 214, 0.60);
+  --color-text-muted: rgba(169, 177, 214, 0.40);
+
+  --color-accent-primary: #7aa2f7;
+  --color-accent-loader: #bb9af7;
+  --color-accent-loader-glow: rgba(122, 162, 247, 0.48);
+
+  --gradient-app:
+    radial-gradient(120% 95% at 16% -10%, rgba(122, 162, 247, 0.20) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 2%, rgba(187, 154, 247, 0.14) 0%, transparent 42%),
+    linear-gradient(180deg, #24283b 0%, #1a1b26 50%, #0f1018 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(122, 162, 247, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #20223a 0%, #1f2030 48%, #15161f 100%);
+  --color-glow: rgba(122, 162, 247, 0.20);
+}
+
+/* Cobalt Deep - rich cobalt-black with vivid electric blue accent. */
+:root[data-theme='cobalt-deep'] {
+  --color-canvas: #031429;
+  --color-sidebar: #051a36;
+  --color-bubble-user: #0a2548;
+  --color-card: #072142;
+  --color-card-raised: #0c2c54;
+  --color-hairline: rgba(200, 225, 255, 0.08);
+  --color-hairline-strong: rgba(200, 225, 255, 0.16);
+
+  --color-text-primary: rgba(230, 242, 255, 0.95);
+  --color-text-secondary: rgba(200, 225, 255, 0.62);
+  --color-text-muted: rgba(200, 225, 255, 0.42);
+
+  --color-accent-primary: #0088ff;
+  --color-accent-loader: #38bdf8;
+  --color-accent-loader-glow: rgba(0, 136, 255, 0.50);
+
+  --gradient-app:
+    radial-gradient(120% 95% at 16% -10%, rgba(0, 136, 255, 0.24) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 2%, rgba(56, 189, 248, 0.16) 0%, transparent 42%),
+    linear-gradient(180deg, #082b54 0%, #031429 50%, #010918 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(0, 136, 255, 0.14) 0%, transparent 48%),
+    linear-gradient(180deg, #0a2447 0%, #051a36 48%, #021022 100%);
+  --color-glow: rgba(0, 136, 255, 0.22);
+}
+
+/* Winter Is Coming - frosted dark-blue with ice-blue accents and crisp glow. */
+:root[data-theme='winter-is-coming'] {
+  --color-canvas: #001629;
+  --color-sidebar: #021d35;
+  --color-bubble-user: #0a2942;
+  --color-card: #06243c;
+  --color-card-raised: #0c2f4b;
+  --color-hairline: rgba(212, 241, 255, 0.08);
+  --color-hairline-strong: rgba(212, 241, 255, 0.15);
+
+  --color-text-primary: rgba(228, 248, 255, 0.94);
+  --color-text-secondary: rgba(195, 230, 250, 0.60);
+  --color-text-muted: rgba(195, 230, 250, 0.42);
+
+  --color-accent-primary: #5ccfe6;
+  --color-accent-loader: #82e2ff;
+  --color-accent-loader-glow: rgba(92, 207, 230, 0.50);
+
+  --gradient-app:
+    radial-gradient(118% 92% at 18% -10%, rgba(92, 207, 230, 0.20) 0%, transparent 44%),
+    radial-gradient(88% 78% at 88% 4%, rgba(130, 226, 255, 0.14) 0%, transparent 40%),
+    linear-gradient(180deg, #022a48 0%, #00132a 50%, #00081a 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(92, 207, 230, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #052340 0%, #021d35 48%, #001020 100%);
+  --color-glow: rgba(92, 207, 230, 0.18);
+}
+
+/* Deep Sea - abyssal navy black with cyan glow and submerged gradients. */
+:root[data-theme='deep-sea'] {
+  --color-canvas: #020a18;
+  --color-sidebar: #051022;
+  --color-bubble-user: #0a1a33;
+  --color-card: #071527;
+  --color-card-raised: #0d2040;
+  --color-hairline: rgba(190, 230, 255, 0.08);
+  --color-hairline-strong: rgba(190, 230, 255, 0.15);
+
+  --color-text-primary: rgba(224, 247, 255, 0.94);
+  --color-text-secondary: rgba(190, 225, 250, 0.60);
+  --color-text-muted: rgba(190, 225, 250, 0.40);
+
+  --color-accent-primary: #22d3ee;
+  --color-accent-loader: #38bdf8;
+  --color-accent-loader-glow: rgba(34, 211, 238, 0.50);
+
+  --gradient-app:
+    radial-gradient(120% 95% at 18% -10%, rgba(34, 211, 238, 0.18) 0%, transparent 45%),
+    radial-gradient(88% 78% at 88% 2%, rgba(56, 189, 248, 0.18) 0%, transparent 42%),
+    linear-gradient(180deg, #042041 0%, #020a18 50%, #00050c 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(34, 211, 238, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #08182d 0%, #051022 48%, #02080f 100%);
+  --color-glow: rgba(34, 211, 238, 0.20);
+}
+
+/* Oceanic Noir - petrol blue-black with underwater cyan gradients. */
+:root[data-theme='oceanic-noir'] {
+  --color-canvas: #031014;
+  --color-sidebar: #06161b;
+  --color-bubble-user: #0b1f26;
+  --color-card: #08191f;
+  --color-card-raised: #0d2530;
+  --color-hairline: rgba(205, 245, 255, 0.08);
+  --color-hairline-strong: rgba(205, 245, 255, 0.15);
+
+  --color-text-primary: rgba(236, 254, 255, 0.94);
+  --color-text-secondary: rgba(207, 250, 254, 0.62);
+  --color-text-muted: rgba(207, 250, 254, 0.42);
+
+  --color-accent-primary: #22d3ee;
+  --color-accent-loader: #06b6d4;
+  --color-accent-loader-glow: rgba(34, 211, 238, 0.5);
+
+  --gradient-app:
+    radial-gradient(120% 95% at 18% -10%, rgba(34, 211, 238, 0.18) 0%, transparent 45%),
+    radial-gradient(92% 82% at 88% 4%, rgba(14, 165, 233, 0.16) 0%, transparent 42%),
+    linear-gradient(180deg, #0a2831 0%, #031014 52%, #010506 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(34, 211, 238, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #0a2028 0%, #06161b 48%, #031014 100%);
+  --color-glow: rgba(34, 211, 238, 0.18);
 }
 
 /* Black Ice - black glass with cold cyan gradients. */
@@ -204,32 +345,93 @@
   --color-glow: rgba(56, 189, 248, 0.20);
 }
 
-/* Black Ember - black coal, orange embers, smoky red depth. */
-:root[data-theme='black-ember'] {
-  --color-canvas: #030202;
-  --color-sidebar: #0b0705;
-  --color-bubble-user: #17100d;
-  --color-card: #100906;
-  --color-card-raised: #17100d;
-  --color-hairline: rgba(255, 216, 190, 0.07);
-  --color-hairline-strong: rgba(255, 216, 190, 0.14);
+/* === BLACK FAMILY ===========================================================
+ * Black canvases with subtle accent tints. Includes themes inspired by
+ * Nord, Atom One Dark, Dracula, and Obsidian, plus the original pure-black
+ * variations. */
 
-  --color-text-primary: rgba(255, 244, 237, 0.94);
-  --color-text-secondary: rgba(255, 226, 210, 0.60);
-  --color-text-muted: rgba(255, 226, 210, 0.40);
+/* Nord Aurora - polar night with frosted steel-blue accent. */
+:root[data-theme='nord-aurora'] {
+  --color-canvas: #0d1117;
+  --color-sidebar: #131822;
+  --color-bubble-user: #1c2330;
+  --color-card: #161c27;
+  --color-card-raised: #1f2733;
+  --color-hairline: rgba(216, 222, 233, 0.08);
+  --color-hairline-strong: rgba(216, 222, 233, 0.15);
 
-  --color-accent-primary: #fb923c;
-  --color-accent-loader: #f97316;
-  --color-accent-loader-glow: rgba(249, 115, 22, 0.52);
+  --color-text-primary: rgba(236, 239, 244, 0.94);
+  --color-text-secondary: rgba(216, 222, 233, 0.60);
+  --color-text-muted: rgba(216, 222, 233, 0.40);
+
+  --color-accent-primary: #88c0d0;
+  --color-accent-loader: #8fbcbb;
+  --color-accent-loader-glow: rgba(136, 192, 208, 0.45);
 
   --gradient-app:
-    radial-gradient(120% 95% at 18% -10%, rgba(251, 146, 60, 0.20) 0%, transparent 45%),
-    radial-gradient(85% 78% at 84% 2%, rgba(185, 28, 28, 0.16) 0%, transparent 40%),
-    linear-gradient(180deg, #170a05 0%, #060302 50%, #010101 100%);
+    radial-gradient(118% 92% at 16% -10%, rgba(136, 192, 208, 0.16) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 4%, rgba(94, 129, 172, 0.18) 0%, transparent 42%),
+    linear-gradient(180deg, #1a2230 0%, #0d1117 50%, #06080c 100%);
   --gradient-sidebar:
-    radial-gradient(90% 82% at 0% 0%, rgba(251, 146, 60, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #120906 0%, #0b0705 48%, #050302 100%);
-  --color-glow: rgba(251, 146, 60, 0.18);
+    radial-gradient(92% 80% at 0% 0%, rgba(136, 192, 208, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #161c27 0%, #131822 48%, #0a0e15 100%);
+  --color-glow: rgba(136, 192, 208, 0.16);
+}
+
+/* One Dark - Atom-style charcoal with a soft slate-blue accent. */
+:root[data-theme='one-dark'] {
+  --color-canvas: #1a1c22;
+  --color-sidebar: #21242b;
+  --color-bubble-user: #2c313a;
+  --color-card: #282c34;
+  --color-card-raised: #353a44;
+  --color-hairline: rgba(230, 230, 230, 0.08);
+  --color-hairline-strong: rgba(230, 230, 230, 0.15);
+
+  --color-text-primary: rgba(230, 230, 230, 0.94);
+  --color-text-secondary: rgba(190, 195, 207, 0.60);
+  --color-text-muted: rgba(190, 195, 207, 0.40);
+
+  --color-accent-primary: #61afef;
+  --color-accent-loader: #c678dd;
+  --color-accent-loader-glow: rgba(97, 175, 239, 0.45);
+
+  --gradient-app:
+    radial-gradient(120% 92% at 18% -10%, rgba(97, 175, 239, 0.18) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 4%, rgba(198, 120, 221, 0.12) 0%, transparent 42%),
+    linear-gradient(180deg, #2c313c 0%, #1a1c22 52%, #0e0f13 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(97, 175, 239, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #23272f 0%, #21242b 48%, #16171c 100%);
+  --color-glow: rgba(97, 175, 239, 0.18);
+}
+
+/* Dracula - inky black with soft purple accent and cyan loader. */
+:root[data-theme='dracula'] {
+  --color-canvas: #1a1b26;
+  --color-sidebar: #21222e;
+  --color-bubble-user: #353747;
+  --color-card: #282a36;
+  --color-card-raised: #383a4a;
+  --color-hairline: rgba(248, 248, 242, 0.08);
+  --color-hairline-strong: rgba(248, 248, 242, 0.15);
+
+  --color-text-primary: rgba(248, 248, 242, 0.94);
+  --color-text-secondary: rgba(220, 220, 230, 0.60);
+  --color-text-muted: rgba(200, 200, 215, 0.40);
+
+  --color-accent-primary: #bd93f9;
+  --color-accent-loader: #8be9fd;
+  --color-accent-loader-glow: rgba(189, 147, 249, 0.45);
+
+  --gradient-app:
+    radial-gradient(120% 95% at 18% -10%, rgba(189, 147, 249, 0.20) 0%, transparent 45%),
+    radial-gradient(88% 80% at 86% 2%, rgba(139, 233, 253, 0.14) 0%, transparent 42%),
+    linear-gradient(180deg, #2d2f3f 0%, #1a1b26 52%, #0f1018 100%);
+  --gradient-sidebar:
+    radial-gradient(92% 80% at 0% 0%, rgba(189, 147, 249, 0.12) 0%, transparent 48%),
+    linear-gradient(180deg, #25263a 0%, #21222e 48%, #16161f 100%);
+  --color-glow: rgba(189, 147, 249, 0.18);
 }
 
 /* Black Violet - black ink with violet and magenta bloom. */
@@ -260,32 +462,32 @@
   --color-glow: rgba(168, 85, 247, 0.22);
 }
 
-/* Black Forest - black green, moss accents, emerald mist. */
-:root[data-theme='black-forest'] {
-  --color-canvas: #020503;
-  --color-sidebar: #071009;
-  --color-bubble-user: #0f1a12;
-  --color-card: #0a130c;
-  --color-card-raised: #0f1a12;
-  --color-hairline: rgba(210, 255, 225, 0.07);
-  --color-hairline-strong: rgba(210, 255, 225, 0.14);
+/* Obsidian - cool obsidian black with neutral grey-white accent. */
+:root[data-theme='obsidian'] {
+  --color-canvas: #0b0d10;
+  --color-sidebar: #11141a;
+  --color-bubble-user: #1c2028;
+  --color-card: #15181d;
+  --color-card-raised: #1f242c;
+  --color-hairline: rgba(220, 223, 228, 0.08);
+  --color-hairline-strong: rgba(220, 223, 228, 0.15);
 
-  --color-text-primary: rgba(240, 255, 244, 0.94);
-  --color-text-secondary: rgba(215, 245, 225, 0.60);
-  --color-text-muted: rgba(215, 245, 225, 0.40);
+  --color-text-primary: rgba(245, 247, 250, 0.94);
+  --color-text-secondary: rgba(210, 215, 222, 0.60);
+  --color-text-muted: rgba(180, 185, 195, 0.42);
 
-  --color-accent-primary: #22c55e;
-  --color-accent-loader: #84cc16;
-  --color-accent-loader-glow: rgba(132, 204, 22, 0.48);
+  --color-accent-primary: #dcdfe4;
+  --color-accent-loader: #f5f7fa;
+  --color-accent-loader-glow: rgba(220, 223, 228, 0.30);
 
   --gradient-app:
-    radial-gradient(110% 92% at 16% -10%, rgba(34, 197, 94, 0.18) 0%, transparent 44%),
-    radial-gradient(85% 78% at 86% 4%, rgba(132, 204, 22, 0.12) 0%, transparent 40%),
-    linear-gradient(180deg, #0b180f 0%, #020503 54%, #000201 100%);
+    radial-gradient(118% 92% at 18% -10%, rgba(220, 223, 228, 0.10) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 4%, rgba(120, 130, 145, 0.14) 0%, transparent 42%),
+    linear-gradient(180deg, #161a20 0%, #0b0d10 52%, #04050a 100%);
   --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(34, 197, 94, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #0c160e 0%, #071009 48%, #030604 100%);
-  --color-glow: rgba(34, 197, 94, 0.18);
+    radial-gradient(92% 80% at 0% 0%, rgba(220, 223, 228, 0.08) 0%, transparent 48%),
+    linear-gradient(180deg, #12161c 0%, #11141a 48%, #08090d 100%);
+  --color-glow: rgba(220, 223, 228, 0.10);
 }
 
 /* Blackout - pure black with hard grey layers and monochrome gradients. */
@@ -344,34 +546,6 @@
   --color-glow: rgba(180, 180, 180, 0.08);
 }
 
-/* Soft Black - lighter black and dark grey with calmer contrast. */
-:root[data-theme='soft-black'] {
-  --color-canvas: #0a0a0a;
-  --color-sidebar: #111111;
-  --color-bubble-user: #202020;
-  --color-card: #171717;
-  --color-card-raised: #242424;
-  --color-hairline: rgba(245, 245, 245, 0.08);
-  --color-hairline-strong: rgba(245, 245, 245, 0.16);
-
-  --color-text-primary: rgba(250, 250, 250, 0.92);
-  --color-text-secondary: rgba(229, 229, 229, 0.58);
-  --color-text-muted: rgba(212, 212, 212, 0.40);
-
-  --color-accent-primary: #a3a3a3;
-  --color-accent-loader: #d4d4d4;
-  --color-accent-loader-glow: rgba(212, 212, 212, 0.28);
-
-  --gradient-app:
-    radial-gradient(120% 94% at 18% -10%, rgba(245, 245, 245, 0.09) 0%, transparent 45%),
-    radial-gradient(90% 80% at 86% 4%, rgba(115, 115, 115, 0.10) 0%, transparent 42%),
-    linear-gradient(180deg, #1d1d1d 0%, #0a0a0a 54%, #050505 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(245, 245, 245, 0.07) 0%, transparent 48%),
-    linear-gradient(180deg, #181818 0%, #111111 48%, #090909 100%);
-  --color-glow: rgba(245, 245, 245, 0.07);
-}
-
 /* Carbon Black - satin carbon greys stacked over black. */
 :root[data-theme='carbon-black'] {
   --color-canvas: #050505;
@@ -428,172 +602,32 @@
   --color-glow: rgba(229, 231, 235, 0.07);
 }
 
-/* Blue Hour - dusk blue-black with cobalt gradients. */
-:root[data-theme='blue-hour'] {
-  --color-canvas: #050914;
-  --color-sidebar: #0a1020;
-  --color-bubble-user: #101827;
-  --color-card: #0d1422;
-  --color-card-raised: #121c2e;
-  --color-hairline: rgba(210, 230, 255, 0.08);
-  --color-hairline-strong: rgba(210, 230, 255, 0.15);
+/* Soft Black - lighter black and dark grey with calmer contrast. */
+:root[data-theme='soft-black'] {
+  --color-canvas: #0a0a0a;
+  --color-sidebar: #111111;
+  --color-bubble-user: #202020;
+  --color-card: #171717;
+  --color-card-raised: #242424;
+  --color-hairline: rgba(245, 245, 245, 0.08);
+  --color-hairline-strong: rgba(245, 245, 245, 0.16);
 
-  --color-text-primary: rgba(239, 246, 255, 0.94);
-  --color-text-secondary: rgba(219, 234, 254, 0.62);
-  --color-text-muted: rgba(219, 234, 254, 0.42);
+  --color-text-primary: rgba(250, 250, 250, 0.92);
+  --color-text-secondary: rgba(229, 229, 229, 0.58);
+  --color-text-muted: rgba(212, 212, 212, 0.40);
 
-  --color-accent-primary: #60a5fa;
-  --color-accent-loader: #3b82f6;
-  --color-accent-loader-glow: rgba(96, 165, 250, 0.5);
-
-  --gradient-app:
-    radial-gradient(120% 95% at 16% -10%, rgba(96, 165, 250, 0.20) 0%, transparent 45%),
-    radial-gradient(90% 80% at 86% 2%, rgba(99, 102, 241, 0.16) 0%, transparent 42%),
-    linear-gradient(180deg, #111f3a 0%, #07101f 50%, #030511 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(96, 165, 250, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #101827 0%, #0a1020 48%, #060a14 100%);
-  --color-glow: rgba(96, 165, 250, 0.20);
-}
-
-/* Cyber Mint - graphite with neon mint and teal gradients. */
-:root[data-theme='cyber-mint'] {
-  --color-canvas: #06100e;
-  --color-sidebar: #091513;
-  --color-bubble-user: #111d1a;
-  --color-card: #0d1715;
-  --color-card-raised: #13221f;
-  --color-hairline: rgba(205, 255, 245, 0.08);
-  --color-hairline-strong: rgba(205, 255, 245, 0.15);
-
-  --color-text-primary: rgba(236, 254, 255, 0.94);
-  --color-text-secondary: rgba(204, 251, 241, 0.62);
-  --color-text-muted: rgba(204, 251, 241, 0.42);
-
-  --color-accent-primary: #2dd4bf;
-  --color-accent-loader: #5eead4;
-  --color-accent-loader-glow: rgba(45, 212, 191, 0.5);
+  --color-accent-primary: #a3a3a3;
+  --color-accent-loader: #d4d4d4;
+  --color-accent-loader-glow: rgba(212, 212, 212, 0.28);
 
   --gradient-app:
-    radial-gradient(120% 95% at 18% -10%, rgba(45, 212, 191, 0.18) 0%, transparent 45%),
-    radial-gradient(90% 80% at 88% 4%, rgba(20, 184, 166, 0.14) 0%, transparent 42%),
-    linear-gradient(180deg, #0d2520 0%, #07110f 52%, #020605 100%);
+    radial-gradient(120% 94% at 18% -10%, rgba(245, 245, 245, 0.09) 0%, transparent 45%),
+    radial-gradient(90% 80% at 86% 4%, rgba(115, 115, 115, 0.10) 0%, transparent 42%),
+    linear-gradient(180deg, #1d1d1d 0%, #0a0a0a 54%, #050505 100%);
   --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(45, 212, 191, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #10201d 0%, #091513 48%, #050b0a 100%);
-  --color-glow: rgba(45, 212, 191, 0.18);
-}
-
-/* Crimson Depth - wine-black with ruby gradients. */
-:root[data-theme='crimson-depth'] {
-  --color-canvas: #100407;
-  --color-sidebar: #17080d;
-  --color-bubble-user: #211016;
-  --color-card: #18090f;
-  --color-card-raised: #241118;
-  --color-hairline: rgba(255, 220, 225, 0.08);
-  --color-hairline-strong: rgba(255, 220, 225, 0.15);
-
-  --color-text-primary: rgba(255, 241, 242, 0.94);
-  --color-text-secondary: rgba(255, 220, 225, 0.60);
-  --color-text-muted: rgba(255, 220, 225, 0.40);
-
-  --color-accent-primary: #ef4444;
-  --color-accent-loader: #fb7185;
-  --color-accent-loader-glow: rgba(251, 113, 133, 0.5);
-
-  --gradient-app:
-    radial-gradient(120% 100% at 16% -10%, rgba(239, 68, 68, 0.22) 0%, transparent 45%),
-    radial-gradient(90% 78% at 88% 4%, rgba(190, 24, 93, 0.18) 0%, transparent 42%),
-    linear-gradient(180deg, #2a0810 0%, #100407 52%, #050102 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(239, 68, 68, 0.14) 0%, transparent 48%),
-    linear-gradient(180deg, #210a11 0%, #17080d 48%, #0a0305 100%);
-  --color-glow: rgba(239, 68, 68, 0.20);
-}
-
-/* Graphite Rose - neutral graphite with rose gradient highlights. */
-:root[data-theme='graphite-rose'] {
-  --color-canvas: #09090b;
-  --color-sidebar: #121013;
-  --color-bubble-user: #1b161a;
-  --color-card: #161315;
-  --color-card-raised: #211a20;
-  --color-hairline: rgba(255, 220, 240, 0.08);
-  --color-hairline-strong: rgba(255, 220, 240, 0.15);
-
-  --color-text-primary: rgba(255, 247, 251, 0.94);
-  --color-text-secondary: rgba(245, 225, 235, 0.60);
-  --color-text-muted: rgba(245, 225, 235, 0.40);
-
-  --color-accent-primary: #f472b6;
-  --color-accent-loader: #fb7185;
-  --color-accent-loader-glow: rgba(244, 114, 182, 0.48);
-
-  --gradient-app:
-    radial-gradient(115% 95% at 17% -10%, rgba(244, 114, 182, 0.16) 0%, transparent 44%),
-    radial-gradient(88% 80% at 86% 4%, rgba(168, 85, 247, 0.10) 0%, transparent 40%),
-    linear-gradient(180deg, #1c151b 0%, #0d0d10 52%, #050506 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(244, 114, 182, 0.10) 0%, transparent 48%),
-    linear-gradient(180deg, #181418 0%, #121013 48%, #09090b 100%);
-  --color-glow: rgba(244, 114, 182, 0.16);
-}
-
-/* Oceanic Noir - petrol blue-black with underwater cyan gradients. */
-:root[data-theme='oceanic-noir'] {
-  --color-canvas: #031014;
-  --color-sidebar: #06161b;
-  --color-bubble-user: #0b1f26;
-  --color-card: #08191f;
-  --color-card-raised: #0d2530;
-  --color-hairline: rgba(205, 245, 255, 0.08);
-  --color-hairline-strong: rgba(205, 245, 255, 0.15);
-
-  --color-text-primary: rgba(236, 254, 255, 0.94);
-  --color-text-secondary: rgba(207, 250, 254, 0.62);
-  --color-text-muted: rgba(207, 250, 254, 0.42);
-
-  --color-accent-primary: #22d3ee;
-  --color-accent-loader: #06b6d4;
-  --color-accent-loader-glow: rgba(34, 211, 238, 0.5);
-
-  --gradient-app:
-    radial-gradient(120% 95% at 18% -10%, rgba(34, 211, 238, 0.18) 0%, transparent 45%),
-    radial-gradient(92% 82% at 88% 4%, rgba(14, 165, 233, 0.16) 0%, transparent 42%),
-    linear-gradient(180deg, #0a2831 0%, #031014 52%, #010506 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(34, 211, 238, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #0a2028 0%, #06161b 48%, #031014 100%);
-  --color-glow: rgba(34, 211, 238, 0.18);
-}
-
-/* Toxic Terminal - dark green terminal with acid-lime glow. */
-:root[data-theme='toxic-terminal'] {
-  --color-canvas: #050805;
-  --color-sidebar: #091008;
-  --color-bubble-user: #101a0c;
-  --color-card: #0c1308;
-  --color-card-raised: #14200d;
-  --color-hairline: rgba(230, 255, 180, 0.08);
-  --color-hairline-strong: rgba(230, 255, 180, 0.15);
-
-  --color-text-primary: rgba(247, 254, 231, 0.94);
-  --color-text-secondary: rgba(225, 245, 190, 0.62);
-  --color-text-muted: rgba(225, 245, 190, 0.42);
-
-  --color-accent-primary: #a3e635;
-  --color-accent-loader: #bef264;
-  --color-accent-loader-glow: rgba(190, 242, 100, 0.50);
-
-  --gradient-app:
-    radial-gradient(115% 92% at 18% -10%, rgba(163, 230, 53, 0.18) 0%, transparent 45%),
-    radial-gradient(90% 78% at 88% 6%, rgba(34, 197, 94, 0.12) 0%, transparent 40%),
-    linear-gradient(180deg, #14220b 0%, #060905 52%, #020302 100%);
-  --gradient-sidebar:
-    radial-gradient(92% 80% at 0% 0%, rgba(163, 230, 53, 0.12) 0%, transparent 48%),
-    linear-gradient(180deg, #121d0b 0%, #091008 48%, #040604 100%);
-  --color-glow: rgba(163, 230, 53, 0.18);
+    radial-gradient(92% 80% at 0% 0%, rgba(245, 245, 245, 0.07) 0%, transparent 48%),
+    linear-gradient(180deg, #181818 0%, #111111 48%, #090909 100%);
+  --color-glow: rgba(245, 245, 245, 0.07);
 }
 
 /* Smooth theme-aware transitions for elements that adapt to custom variables */
