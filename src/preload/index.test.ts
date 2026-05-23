@@ -426,6 +426,26 @@ describe('preload api shape', () => {
         expected: ['git:push', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.git.createBranch('project-1', 'feat/git-menu'),
+        expected: ['git:create-branch', 'project-1', 'feat/git-menu'],
+      },
+      {
+        call: (agentforge) => agentforge.git.checkoutBranch('project-1', 'main'),
+        expected: ['git:checkout-branch', 'project-1', 'main'],
+      },
+      {
+        call: (agentforge) => agentforge.git.listBranches('project-1'),
+        expected: ['git:list-branches', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.git.fetch('project-1'),
+        expected: ['git:fetch', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.git.pull('project-1'),
+        expected: ['git:pull', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.git.getPendingChanges('project-1'),
         expected: ['git:get-pending-changes', 'project-1'],
       },

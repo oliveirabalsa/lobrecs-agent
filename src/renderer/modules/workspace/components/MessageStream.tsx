@@ -173,10 +173,11 @@ export function editedFileCardsForFallbackFiles(
  *    repo baseline. Authoritative about *content*, but global to the session,
  *    so a proposal cannot be attributed to a single turn on its own.
  *
- * `editedFileCardsForFallbackFiles` already covers the first stream. This
- * function adds the missing half: a card for every proposal that no
- * file-change row accounted for — which is how a file edited only via
- * `apply_patch` (proposal, no `file-change` activity) still gets a card.
+ * `editedFileCardsForFallbackFiles` already covers the first stream. When a
+ * turn has no file-change rows at all, this function adds the missing half: a
+ * proposal-only card. Once a turn has concrete file-change rows, unmatched
+ * proposals are ignored because `liveProposals` may include earlier thread
+ * sessions and cannot be safely attributed to this turn.
  *
  * `includeUnmatchedProposals` gates the proposal-only cards. `liveProposals`
  * is session-global, so if every turn appended them the same file would
@@ -189,6 +190,7 @@ export function editedFileCards(
 ): EditedFileCardModel[] {
   const fallbackCards = editedFileCardsForFallbackFiles(liveProposals, fallbackFiles)
   if (!options.includeUnmatchedProposals) return fallbackCards
+  if (fallbackFiles.length > 0) return fallbackCards
 
   const coveredProposalPaths = new Set(
     fallbackCards.flatMap((card) => card.proposals.map((proposal) => proposal.filePath)),
@@ -198,22 +200,11 @@ export function editedFileCards(
   )
   if (unmatchedProposals.length === 0) return fallbackCards
 
-  if (fallbackCards.length === 0) {
-    return [
-      {
-        id: EDITED_FILES_CARD_ID,
-        proposals: [...unmatchedProposals],
-        fallbackFiles: [],
-      },
-    ]
-  }
-
-  const [card] = fallbackCards
   return [
     {
-      ...card,
       id: EDITED_FILES_CARD_ID,
-      proposals: [...card.proposals, ...unmatchedProposals],
+      proposals: [...unmatchedProposals],
+      fallbackFiles: [],
     },
   ]
 }

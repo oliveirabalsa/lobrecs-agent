@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3'
+import { spawn } from 'node:child_process'
 import type { AgentAdapter } from '../../../agents'
 import { resolveCommand, runCommandText } from '../../../agents/command'
+import { buildProcessEnvironment } from '../../../process/environment'
 import {
   AGENT_LABELS,
   SUPPORTED_AGENT_IDS,
@@ -24,6 +26,12 @@ interface ProviderUsageOptions {
     agentId: SupportedAgentId,
     runtime?: AgentRuntimeSettings,
   ) => Promise<ProviderUsageRow['limit']>
+}
+
+interface ParsedLimitBucket {
+  usedPercent: number | null
+  windowDurationMins: number | null
+  resetsAt: number | null
 }
 
 export async function listProviderUsage(
@@ -111,16 +119,12 @@ async function collectCliProviderLimit(
 ): Promise<ProviderUsageRow['limit']> {
   if (agentId === 'claude-code') return collectClaudeUsage(runtime)
   if (agentId === 'opencode') return collectOpenCodeUsage(runtime)
-  if (agentId === 'codex') {
-    return providerLimitUnavailable(
-      'Quota telemetry unavailable',
-      'Codex CLI does not expose a stable non-interactive subscription usage command yet.',
-    )
-  }
+  if (agentId === 'codex') return collectCodexUsage(runtime)
 
   return providerLimitUnavailable(
     'Quota telemetry unavailable',
-    'This CLI does not expose stable quota or reset telemetry yet.',
+    'Antigravity CLI plan limits depend on Google AI plan status, but the CLI does not expose stable local quota/reset telemetry yet.',
+    'antigravity docs',
   )
 }
 
@@ -142,7 +146,25 @@ async function collectClaudeUsage(
     })
   }
 
-  return parseClaudeUsage(output)
+  const contextOutput = await runCommandText(
+    command,
+    ['-p', '--output-format', 'json', '--no-session-persistence', '/context'],
+    {
+      timeout: 8000,
+      maxBuffer: 2 * 1024 * 1024,
+    },
+  ).catch(() => '')
+
+  return parseClaudeUsage(output, contextOutput)
+}
+
+async function collectCodexUsage(
+  runtime?: AgentRuntimeSettings,
+): Promise<ProviderUsageRow['limit']> {
+  const command = resolveCommand('CODEX_COMMAND', 'codex', runtime?.command)
+  const result = await readCodexAppServerRateLimits(command)
+
+  return parseCodexRateLimits(result)
 }
 
 async function collectOpenCodeUsage(
@@ -157,11 +179,19 @@ async function collectOpenCodeUsage(
   return parseOpenCodeStats(output)
 }
 
-function parseClaudeUsage(output: string): ProviderUsageRow['limit'] {
+export function parseClaudeUsage(output: string, contextOutput = ''): ProviderUsageRow['limit'] {
   const payload = parseJsonObject(output)
   const rawResult = typeof payload?.result === 'string' ? payload.result : output
-  const detail = compactWhitespace(stripAnsi(rawResult)) || 'Claude Code returned usage telemetry.'
-  const percent = percentFromText(detail)
+  const usageDetail =
+    compactWhitespace(stripAnsi(rawResult)) || 'Claude Code returned usage telemetry.'
+  const context = parseClaudeContextUsage(contextOutput)
+  const percent = percentFromText(usageDetail)
+  const detail = [
+    usageDetail,
+    context ? `Context window, not subscription quota: ${context.detail}.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return {
     status: 'available',
@@ -170,6 +200,54 @@ function parseClaudeUsage(output: string): ProviderUsageRow['limit'] {
     resetsAt: null,
     usedPercent: percent,
     source: 'claude /usage',
+  }
+}
+
+export function parseCodexRateLimits(payload: unknown): ProviderUsageRow['limit'] {
+  const root = asRecord(payload)
+  const rateLimits = asRecord(root?.rateLimits)
+  const primary = parseCodexBucket(rateLimits?.primary)
+  const secondary = parseCodexBucket(rateLimits?.secondary)
+  const rateLimitReachedType =
+    typeof rateLimits?.rateLimitReachedType === 'string'
+      ? rateLimits.rateLimitReachedType
+      : null
+  const planType = typeof rateLimits?.planType === 'string' ? rateLimits.planType : null
+  const credits = asRecord(rateLimits?.credits)
+  const creditBalance = typeof credits?.balance === 'string' ? credits.balance : null
+  const namedLimitDetails = parseNamedCodexLimits(root?.rateLimitsByLimitId)
+
+  if (!primary && !secondary) {
+    return providerLimitUnavailable(
+      'Rate limits unavailable',
+      'Codex app-server did not return rate-limit buckets for this account.',
+      'codex app-server',
+    )
+  }
+
+  const windowLabel = primary?.windowDurationMins
+    ? formatWindowDuration(primary.windowDurationMins)
+    : 'primary'
+  const label =
+    primary?.usedPercent === null || primary?.usedPercent === undefined
+      ? 'Codex limits loaded'
+      : `${formatPercent(primary.usedPercent)} used in ${windowLabel} window`
+  const detailParts = [
+    primary ? `Primary ${formatBucketDetail(primary)}` : null,
+    secondary ? `Weekly ${formatBucketDetail(secondary)}` : null,
+    planType ? `Plan ${planType}` : null,
+    creditBalance ? `Credits ${creditBalance}` : null,
+    rateLimitReachedType ? `Limit state ${rateLimitReachedType}` : null,
+    ...namedLimitDetails,
+  ].filter(Boolean)
+
+  return {
+    status: 'available',
+    label,
+    detail: detailParts.join('; ') || 'Codex app-server returned rate-limit telemetry.',
+    resetsAt: primary?.resetsAt ?? null,
+    usedPercent: primary?.usedPercent ?? null,
+    source: 'codex app-server',
   }
 }
 
@@ -195,20 +273,27 @@ function parseOpenCodeStats(output: string): ProviderUsageRow['limit'] {
   return {
     status: 'available',
     label: cost ? `Last 7 days: $${cost}` : 'Last 7 days loaded',
-    detail: detailParts.join(', ') || 'OpenCode returned usage statistics.',
+    detail:
+      `${detailParts.join(', ') || 'OpenCode returned usage statistics.'}. ` +
+      'OpenCode stats does not expose remaining quota or reset timestamps; OpenCode Go plan limits are account-level.',
     resetsAt: null,
     usedPercent: null,
     source: 'opencode stats',
   }
 }
 
-function providerLimitUnavailable(label = 'Limit unavailable', detail = 'This CLI does not expose stable quota or reset telemetry yet.'): ProviderUsageRow['limit'] {
+function providerLimitUnavailable(
+  label = 'Limit unavailable',
+  detail = 'This CLI does not expose stable quota or reset telemetry yet.',
+  source?: string,
+): ProviderUsageRow['limit'] {
   return {
     status: 'unavailable',
     label,
     detail,
     resetsAt: null,
     usedPercent: null,
+    source,
   }
 }
 
@@ -245,6 +330,12 @@ function parseJsonObject(value: string): Record<string, unknown> | null {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
 function percentFromText(value: string): number | null {
   const match = value.match(/(\d+(?:\.\d+)?)\s*%\s+used/i)
   if (!match) return null
@@ -258,4 +349,161 @@ function formatPercent(value: number): string {
 
 function firstMatch(value: string, pattern: RegExp): string | null {
   return value.match(pattern)?.[1] ?? null
+}
+
+function parseClaudeContextUsage(output: string): { usedPercent: number; detail: string } | null {
+  const payload = parseJsonObject(output)
+  const rawResult = typeof payload?.result === 'string' ? payload.result : output
+  const text = stripAnsi(rawResult)
+  const tokensLine = firstMatch(text, /\*\*Tokens:\*\*\s*([^\n]+)/i)
+  if (!tokensLine) return null
+
+  const percentMatch = tokensLine.match(/\((\d+(?:\.\d+)?)%\)/)
+  const usedPercent = percentMatch ? Number(percentMatch[1]) : Number.NaN
+  if (!Number.isFinite(usedPercent)) return null
+
+  return {
+    usedPercent,
+    detail: compactWhitespace(tokensLine),
+  }
+}
+
+function parseCodexBucket(value: unknown): ParsedLimitBucket | null {
+  const bucket = asRecord(value)
+  if (!bucket) return null
+
+  return {
+    usedPercent: numberOrNull(bucket.usedPercent),
+    windowDurationMins: numberOrNull(bucket.windowDurationMins),
+    resetsAt: unixSecondsToMilliseconds(numberOrNull(bucket.resetsAt)),
+  }
+}
+
+function parseNamedCodexLimits(value: unknown): string[] {
+  const byLimitId = asRecord(value)
+  if (!byLimitId) return []
+
+  return Object.values(byLimitId)
+    .map((entry) => {
+      const limit = asRecord(entry)
+      if (!limit) return null
+      const name =
+        typeof limit.limitName === 'string' && limit.limitName.trim()
+          ? limit.limitName.trim()
+          : typeof limit.limitId === 'string'
+            ? limit.limitId
+            : null
+      if (!name) return null
+      const primary = parseCodexBucket(limit.primary)
+      const secondary = parseCodexBucket(limit.secondary)
+      if (!primary && !secondary) return null
+
+      return `${name}: ${[primary ? formatBucketDetail(primary) : null, secondary ? `weekly ${formatBucketDetail(secondary)}` : null]
+        .filter(Boolean)
+        .join(', ')}`
+    })
+    .filter((detail): detail is string => Boolean(detail))
+}
+
+function formatBucketDetail(bucket: ParsedLimitBucket): string {
+  const parts = [
+    bucket.windowDurationMins ? formatWindowDuration(bucket.windowDurationMins) : null,
+    bucket.usedPercent === null ? null : `${formatPercent(bucket.usedPercent)} used`,
+    bucket.resetsAt ? `resets ${new Date(bucket.resetsAt).toLocaleString()}` : null,
+  ].filter(Boolean)
+
+  return parts.join(' ') || 'loaded'
+}
+
+function formatWindowDuration(minutes: number): string {
+  if (minutes % (60 * 24) === 0) return `${minutes / (60 * 24)}d`
+  if (minutes % 60 === 0) return `${minutes / 60}h`
+  return `${minutes}m`
+}
+
+function numberOrNull(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function unixSecondsToMilliseconds(value: number | null): number | null {
+  if (value === null) return null
+  return value > 10_000_000_000 ? value : value * 1000
+}
+
+function readCodexAppServerRateLimits(command: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, ['app-server', '--listen', 'stdio://'], {
+      env: buildProcessEnvironment(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const readId = 3
+    const timeout = setTimeout(() => {
+      finish(new Error('Timed out while reading Codex rate limits.'))
+    }, 8000)
+
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+      const lines = stdout.split('\n')
+      stdout = lines.pop() ?? ''
+      for (const line of lines) handleCodexLine(line)
+    })
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    child.on('error', (error) => finish(error))
+    child.on('exit', () => {
+      if (!settled) finish(new Error(compactWhitespace(stderr) || 'Codex app-server exited before returning rate limits.'))
+    })
+
+    child.stdin.write(
+      [
+        JSON.stringify({
+          id: 1,
+          method: 'initialize',
+          params: {
+            clientInfo: {
+              name: 'lobrecs_agent',
+              title: 'Lobrecs Agent',
+              version: '0.0.0',
+            },
+          },
+        }),
+        JSON.stringify({ method: 'initialized' }),
+        JSON.stringify({ id: readId, method: 'account/rateLimits/read' }),
+      ].join('\n') + '\n',
+    )
+
+    function handleCodexLine(line: string): void {
+      const message = parseJsonObject(line)
+      if (!message || message.id !== readId) return
+
+      const error = asRecord(message.error)
+      if (error) {
+        const errorMessage = typeof error.message === 'string' ? error.message : 'Codex rate-limit request failed.'
+        finish(new Error(errorMessage))
+        return
+      }
+
+      finish(null, message.result)
+    }
+
+    function finish(error: Error | null, result?: unknown): void {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      if (!child.killed) child.kill()
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve(result)
+    }
+  })
 }

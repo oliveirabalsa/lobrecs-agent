@@ -347,7 +347,7 @@ describe('editedFileCardsForFallbackFiles', () => {
 })
 
 describe('editedFileCards', () => {
-  it('keeps proposal-only files in the same edited-files card for the last turn', () => {
+  it('does not mix unmatched global proposals into a turn-scoped edited-files card', () => {
     const appProposal = {
       filePath: '/Users/leo/project/src/app.ts',
       originalContent: 'old\n',
@@ -372,7 +372,7 @@ describe('editedFileCards', () => {
     ).toEqual([
       {
         id: 'edited-files',
-        proposals: [appProposal, configProposal],
+        proposals: [appProposal],
         fallbackFiles: [
           {
             filePath: '/Users/leo/project/src/app.ts',

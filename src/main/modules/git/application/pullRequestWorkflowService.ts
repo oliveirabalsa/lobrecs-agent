@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
+import { buildProcessEnvironment } from '../../../process/environment'
 import { runGit } from '../infrastructure/runGit'
+import { buildGhPrCreateArgs, resolveGhCommand } from '../infrastructure/githubCli'
 import type {
   GitRemoteInfo,
   CreatePullRequestInput,
@@ -11,6 +14,16 @@ import type {
   GitProviderType,
 } from '../../../../shared/contracts/git'
 import { getProviderType, isGitHubRemote, isAzureRemote } from '../domain/pullRequest'
+import { buildPrDraftPrompt, createDraftTitle } from '../domain/prDraft'
+import { loadPrTemplate } from '../domain/prTemplate'
+import { getModelForTier } from '../../../router/ModelRouter'
+import { deriveActivityEvents } from '../../../session/activity'
+import type {
+  AgentEvent,
+  AgentRuntimeSettings,
+  ModelTier,
+  SupportedAgentId,
+} from '../../../../shared/types'
 
 export class PullRequestWorkflowService {
   constructor(private readonly context: MainIpcContext) {}
@@ -56,7 +69,7 @@ export class PullRequestWorkflowService {
     const project = requireProject(input.projectId)
     const template = await this.resolveTemplate(input.projectId)
 
-    const [commitsResult, diffStatResult] = await Promise.all([
+    const [commitsResult, diffStatResult, diffResult] = await Promise.all([
       runGit(
         ['log', `origin/${input.baseBranch}..${input.headBranch}`, '--oneline', '--no-merges', '--max-count=20'],
         project.repoPath,
@@ -65,28 +78,34 @@ export class PullRequestWorkflowService {
         ['diff', '--stat', `origin/${input.baseBranch}...${input.headBranch}`],
         project.repoPath,
       ).catch(() => ({ exitCode: 0, stdout: '', stderr: '' })),
+      runGit(
+        ['diff', `origin/${input.baseBranch}...${input.headBranch}`],
+        project.repoPath,
+      ).catch(() => ({ exitCode: 0, stdout: '', stderr: '' })),
     ])
 
     const commits = commitsResult.stdout.trim()
     const diffStat = diffStatResult.stdout.trim()
+    let diff = diffResult.stdout.trim()
 
-    const prompt = [
-      'Generate a pull request title and description for these Git changes.',
-      `Source branch: ${input.headBranch}  →  Target: ${input.baseBranch}`,
-      commits ? `\nRecent commits:\n${commits}` : '',
-      diffStat ? `\nChanged files:\n${diffStat}` : '',
-      '\nRespond with ONLY a JSON object (no markdown fences, no extra text):',
-      '{"title":"concise PR title under 72 chars","body":"markdown PR description with ## Summary and ## Changes sections"}',
-    ].filter(Boolean).join('\n')
+    const MAX_DIFF_CHARS = 100_000
+    if (diff.length > MAX_DIFF_CHARS) {
+      diff = diff.slice(0, MAX_DIFF_CHARS) + '\n[diff truncated due to size]'
+    }
+
+    const prompt = buildPrDraftPrompt({
+      headBranch: input.headBranch,
+      baseBranch: input.baseBranch,
+      commits,
+      diffStat,
+      diff,
+      template,
+    })
 
     try {
-      const { runCommandText, resolveCommand } = await import('../../../agents/command')
-      const claude = resolveCommand('CLAUDE_COMMAND', 'claude')
-      const output = await runCommandText(
-        claude,
-        ['--print', '--output-format', 'text', '--model', 'claude-haiku-4-5-20251001', prompt],
-        { timeout: 45_000, maxBuffer: 512 * 1024 },
-      )
+      const selection = await selectAnalysisAgent(this.context, input.projectId)
+      const output = await runPrDraftAgent(this.context, selection, project.repoPath, prompt)
+
       const jsonMatch = output.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as { title?: string; body?: string }
@@ -118,41 +137,7 @@ export class PullRequestWorkflowService {
   async resolveTemplate(projectId: string): Promise<string> {
     const project = requireProject(projectId)
     const remoteInfo = await this.getRemoteInfo(projectId)
-
-    const candidates =
-      remoteInfo.provider === 'github'
-        ? [
-            '.github/PULL_REQUEST_TEMPLATE.md',
-            '.github/pull_request_template.md',
-            'docs/pull_request_template.md',
-            'pull_request_template.md',
-          ]
-        : remoteInfo.provider === 'azure'
-          ? [
-              '.azuredevops/pull_request_template.md',
-              'docs/pull_request_template.md',
-              'pull_request_template.md',
-            ]
-          : []
-
-    const { promises: fs } = await import('node:fs')
-    for (const candidate of candidates) {
-      const fullPath = `${project.repoPath}/${candidate}`
-      try {
-        const stat = await fs.stat(fullPath)
-        if (stat.isFile()) {
-          return (await fs.readFile(fullPath, 'utf-8')).trim()
-        }
-      } catch {
-        continue
-      }
-    }
-
-    return remoteInfo.provider === 'github'
-      ? this.defaultGitHubTemplate()
-      : remoteInfo.provider === 'azure'
-        ? this.defaultAzureTemplate()
-        : ''
+    return loadPrTemplate(project.repoPath, remoteInfo.provider)
   }
 
   private detectRemote(remoteUrl: string, providerType: GitProviderType): GitRemoteInfo {
@@ -233,12 +218,14 @@ export class PullRequestWorkflowService {
     input: Omit<CreatePullRequestInput, 'projectId'>,
   ): Promise<CreatePullRequestResult> {
     const { spawn } = await import('node:child_process')
+    const command = resolveGhCommand()
+    const env = buildProcessEnvironment()
 
     return new Promise((resolve, reject) => {
       const child = spawn(
-        'gh',
-        ['pr', 'create', '--title', input.title, '--body', input.body, '--base', input.baseBranch],
-        { cwd: repoPath, stdio: ['pipe', 'pipe', 'pipe'] },
+        command,
+        buildGhPrCreateArgs(input),
+        { cwd: repoPath, env, stdio: ['pipe', 'pipe', 'pipe'] },
       )
 
       let stdout = ''
@@ -250,8 +237,15 @@ export class PullRequestWorkflowService {
       child.stderr?.on('data', (chunk: Buffer) => {
         stderr += chunk.toString()
       })
-      child.on('error', (error) => {
-        reject(new Error(`gh CLI not found: ${error.message}`))
+      child.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') {
+          reject(new Error(
+            'GitHub CLI was not found from the app process. Install `gh`, set GH_COMMAND to its full path, or set GITHUB_TOKEN/GH_TOKEN.',
+          ))
+          return
+        }
+
+        reject(new Error(error.message))
       })
       child.on('close', (code) => {
         if (code !== 0) {
@@ -313,69 +307,215 @@ export class PullRequestWorkflowService {
     return { url: data.remoteUrl, number: data.pullRequestId }
   }
 
-  private defaultGitHubTemplate(): string {
-    return `## Description
-
-<!-- Provide a brief description of the changes -->
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-
-<!-- Describe testing performed -->
-
-## Checklist
-
-- [ ] Code follows project style
-- [ ] Tests pass
-- [ ] Documentation updated
-`
-  }
-
-  private defaultAzureTemplate(): string {
-    return `## Description
-
-<!-- Describe your changes here -->
-
-## Type of Change
-
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactoring
-
-## Related Work Items
-
-<!-- Link to Azure DevOps work items if applicable -->
-
-## Testing
-
-<!-- Describe testing performed -->
-`
-  }
 }
 
-function createDraftTitle(headBranch: string, baseBranch: string): string {
-  const normalized = headBranch
-    .trim()
-    .replace(/^refs\/heads\//, '')
-    .replace(/^[a-z]+\/+/i, '')
-    .replace(/[-_]+/g, ' ')
-    .trim()
-
-  const summary = normalized.length > 0
-    ? normalized
-    : `changes from ${headBranch || 'current branch'}`
-
-  const sentence = capitalize(summary)
-  return `feat: ${sentence} -> ${baseBranch.trim() || 'main'}`
+interface AnalysisAgentSelection {
+  agentId: SupportedAgentId
+  model: string
+  runtimeSettings: AgentRuntimeSettings
 }
 
-function capitalize(value: string): string {
-  if (!value) return value
-  return value.charAt(0).toUpperCase() + value.slice(1)
+interface AssistantTranscriptState {
+  assistantText: string
+  streamedText: string
+}
+
+const ANALYSIS_CANDIDATES: ReadonlyArray<{ agentId: SupportedAgentId; tier: ModelTier }> = [
+  { agentId: 'codex', tier: 'lightweight' },
+  { agentId: 'antigravity', tier: 'lightweight' },
+  { agentId: 'opencode', tier: 'advanced' },
+  { agentId: 'opencode', tier: 'balanced' },
+  { agentId: 'claude-code', tier: 'lightweight' },
+]
+
+async function selectAnalysisAgent(
+  context: MainIpcContext,
+  projectId: string,
+): Promise<AnalysisAgentSelection> {
+  const settings = context.settingsService.getEffective(projectId).settings
+  const enabledAgents = settings.agents.enabledAgentIds.filter(
+    (agentId) => settings.agents.runtimes[agentId].enabled !== false,
+  )
+
+  for (const candidate of ANALYSIS_CANDIDATES) {
+    if (!enabledAgents.includes(candidate.agentId)) continue
+    const adapter = context.adapters.get(candidate.agentId)
+    if (!adapter) continue
+
+    try {
+      if (!(await adapter.isInstalled())) continue
+    } catch {
+      continue
+    }
+
+    return {
+      agentId: candidate.agentId,
+      model: getModelForTier(candidate.agentId, candidate.tier, settings),
+      runtimeSettings: {
+        ...context.settingsService.getAgentRuntime(candidate.agentId, projectId),
+        permissionMode: 'read-only',
+      },
+    }
+  }
+
+  for (const agentId of enabledAgents) {
+    const adapter = context.adapters.get(agentId)
+    if (!adapter) continue
+
+    try {
+      if (!(await adapter.isInstalled())) continue
+    } catch {
+      continue
+    }
+
+    return {
+      agentId,
+      model: getModelForTier(agentId, 'lightweight', settings),
+      runtimeSettings: {
+        ...context.settingsService.getAgentRuntime(agentId, projectId),
+        permissionMode: 'read-only',
+      },
+    }
+  }
+
+  throw new Error('No lightweight analysis model is available. Enable Codex, Antigravity, or OpenCode first.')
+}
+
+async function runPrDraftAgent(
+  context: MainIpcContext,
+  selection: AnalysisAgentSelection,
+  repoPath: string,
+  prompt: string,
+): Promise<string> {
+  const adapter = context.adapters.get(selection.agentId)
+  if (!adapter) {
+    throw new Error(`Agent adapter is unavailable: ${selection.agentId}`)
+  }
+
+  const session = await adapter.dispatch({
+    sessionId: `git-pr-draft-${randomUUID()}`,
+    prompt,
+    repoPath,
+    model: selection.model,
+    runtimeSettings: selection.runtimeSettings,
+  })
+
+  return new Promise((resolve, reject) => {
+    const transcript: AssistantTranscriptState = {
+      assistantText: '',
+      streamedText: '',
+    }
+    const stderr: string[] = []
+    let settled = false
+
+    const timeout = setTimeout(() => {
+      session.cancel()
+      settleWithError(new Error('PR suggestion analysis timed out.'))
+    }, 45_000)
+
+    const settleWithError = (error: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      reject(error)
+    }
+
+    const settleWithSuccess = (text: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      resolve(text)
+    }
+
+    session.events.on('event', (event: AgentEvent) => {
+      if (event.type === 'stderr') {
+        const text = extractTextFromPayload(event.payload)
+        if (text.trim()) stderr.push(text.trim())
+        return
+      }
+
+      if (event.type === 'error') {
+        settleWithError(new Error(extractTextFromPayload(event.payload) || 'Analysis failed.'))
+        return
+      }
+
+      for (const activityEvent of deriveActivityEvents(event)) {
+        const payload = activityEvent.payload
+        if (!isAssistantActivityMessage(payload)) continue
+
+        if (payload.stream) {
+          transcript.streamedText += payload.text
+        } else {
+          transcript.assistantText = payload.text
+        }
+      }
+
+      if (event.type !== 'session-complete') return
+
+      if (completionFailed(event.payload)) {
+        settleWithError(
+          new Error(
+            extractTextFromPayload(event.payload) ||
+              stderr.at(-1) ||
+              'The agent failed to analyze the diff.',
+          ),
+        )
+        return
+      }
+
+      const finalText = transcript.assistantText.trim() || transcript.streamedText.trim()
+      if (!finalText) {
+        settleWithError(new Error(stderr.at(-1) || 'The agent returned an empty response.'))
+        return
+      }
+
+      settleWithSuccess(finalText)
+    })
+  })
+}
+
+function extractTextFromPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload
+  if (!isRecord(payload)) return ''
+
+  if (typeof payload.text === 'string') return payload.text
+
+  for (const field of ['message', 'content', 'delta', 'output', 'result', 'summary', 'error', 'item']) {
+    const value = payload[field]
+    if (typeof value === 'string') return value
+    if (Array.isArray(value)) {
+      const nested = value.map((item) => extractTextFromPayload(item)).join('')
+      if (nested) return nested
+    }
+    if (isRecord(value)) {
+      const nested = extractTextFromPayload(value)
+      if (nested) return nested
+    }
+  }
+
+  return ''
+}
+
+function completionFailed(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  if (payload.subtype === 'error' || payload.is_error === true) return true
+  if (payload.status === 'error' || payload.status === 'cancelled') return true
+
+  const exitCode = payload.exitCode ?? payload.exit_code
+  return typeof exitCode === 'number' && exitCode !== 0
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isAssistantActivityMessage(
+  payload: unknown,
+): payload is { kind: 'message'; role: 'assistant'; text: string; stream?: boolean } {
+  return (
+    isRecord(payload) &&
+    payload.kind === 'message' &&
+    payload.role === 'assistant' &&
+    typeof payload.text === 'string'
+  )
 }

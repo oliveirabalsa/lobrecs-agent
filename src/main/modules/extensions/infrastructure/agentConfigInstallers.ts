@@ -1,12 +1,16 @@
+import { execFile } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import type {
   ExtensionArtifact,
   ExtensionInstallAction,
   ExtensionInstallScope,
+  ExtensionInlineSkillArtifact,
   ExtensionMcpServerArtifact,
   ExtensionPluginArtifact,
   ExtensionSkillArtifact,
+  ExtensionSkillsCliArtifact,
   ExtensionTargetAgent,
 } from '../../../../shared/types'
 import {
@@ -16,6 +20,10 @@ import {
   writeJsonObject,
   writeTextFile,
 } from './configFiles'
+
+const execFileAsync = promisify(execFile)
+const SKILLS_CLI_TIMEOUT_MS = 120_000
+const SKILLS_CLI_PATH_MARKER = '__LOBRECS_AGENT_SKILLS_PATH__'
 
 interface InstallArtifactInput {
   artifact: ExtensionArtifact
@@ -52,6 +60,10 @@ async function installSkill(
   artifact: ExtensionSkillArtifact,
   input: InstallArtifactInput,
 ): Promise<ExtensionInstallAction> {
+  if (isSkillsCliArtifact(artifact)) {
+    return installSkillsCliSkill(artifact, input)
+  }
+
   if (input.agentId === 'codex') return installCodexSkill(artifact, input)
   if (input.agentId === 'opencode') return installOpenCodeInstruction(artifact, input)
 
@@ -61,6 +73,124 @@ async function installSkill(
     status: 'skipped',
     message: 'Claude Code skills are distributed through Claude plugins; no direct skill file was written.',
   }
+}
+
+async function installSkillsCliSkill(
+  artifact: ExtensionSkillsCliArtifact,
+  input: InstallArtifactInput,
+): Promise<ExtensionInstallAction> {
+  const cwd = input.scope === 'project' ? requireProjectPath(input) : os.homedir()
+  const args = skillsCliArgs(artifact, input)
+  const options = {
+    cwd,
+    timeout: SKILLS_CLI_TIMEOUT_MS,
+    maxBuffer: 1024 * 1024,
+    env: {
+      ...process.env,
+      DISABLE_TELEMETRY: process.env.DISABLE_TELEMETRY ?? '1',
+    },
+  }
+
+  try {
+    await execSkillsCli(args, options)
+  } catch (error) {
+    throw new Error(
+      `Failed to install ${artifact.skillName} with skills.sh: ${formatExecFailure(error)}`,
+    )
+  }
+
+  return {
+    agentId: input.agentId,
+    artifactKind: artifact.kind,
+    status: 'installed',
+    message: `Installed ${artifact.skillName} for ${agentLabel(input.agentId)} with skills.sh.`,
+    filePath: cwd,
+    followUpCommand: formatCommand('npx', args),
+  }
+}
+
+async function execSkillsCli(
+  args: string[],
+  options: {
+    cwd: string
+    timeout: number
+    maxBuffer: number
+    env: NodeJS.ProcessEnv
+  },
+): Promise<void> {
+  try {
+    await execFileAsync('npx', args, options)
+    return
+  } catch (error) {
+    if (!isCommandNotFoundError(error)) throw error
+  }
+
+  const resolvedNpx = await resolveNpxFromLoginShell(options.env)
+  if (!resolvedNpx) {
+    throw new Error(
+      'npx was not found from the app process or the login shell. Install Node.js/npm or make npx available in your shell PATH, then retry.',
+    )
+  }
+
+  await execFileAsync(resolvedNpx.command, args, {
+    ...options,
+    env: {
+      ...options.env,
+      PATH: resolvedNpx.pathEnv,
+    },
+  })
+}
+
+async function resolveNpxFromLoginShell(
+  env: NodeJS.ProcessEnv,
+): Promise<{ command: string; pathEnv: string } | null> {
+  for (const shell of loginShellCandidates()) {
+    try {
+      const result = await execFileAsync(
+        shell,
+        [
+          '-lc',
+          `command -v npx\nprintf '\\n${SKILLS_CLI_PATH_MARKER}\\n'\nprintf '%s' "$PATH"`,
+        ],
+        {
+          timeout: 5_000,
+          maxBuffer: 64 * 1024,
+          env,
+        },
+      )
+      const [commandOutput, pathOutput = ''] = bufferToString(execFileStdout(result)).split(
+        `\n${SKILLS_CLI_PATH_MARKER}\n`,
+      )
+      const command = commandOutput.trim().split('\n').at(-1)?.trim()
+      if (command && path.isAbsolute(command)) {
+        return {
+          command,
+          pathEnv: mergePathEnv(path.dirname(command), pathOutput, env.PATH),
+        }
+      }
+    } catch {
+      // Try the next common shell before surfacing a user-facing npx error.
+    }
+  }
+
+  return null
+}
+
+function loginShellCandidates(): string[] {
+  if (process.platform === 'win32') return []
+  return uniqueStrings([process.env.SHELL ?? '', '/bin/zsh', '/bin/bash', '/bin/sh'])
+}
+
+function mergePathEnv(...values: Array<string | undefined>): string {
+  return uniqueStrings(values.flatMap(pathEntries)).join(path.delimiter)
+}
+
+function pathEntries(value: string | undefined): string[] {
+  return value?.split(path.delimiter).filter((entry) => entry.length > 0) ?? []
+}
+
+function isCommandNotFoundError(error: unknown): boolean {
+  return isExecError(error) && error.code === 'ENOENT'
 }
 
 async function installPlugin(
@@ -157,7 +287,7 @@ async function installOpenCodeMcp(
 }
 
 async function installCodexSkill(
-  artifact: ExtensionSkillArtifact,
+  artifact: ExtensionInlineSkillArtifact,
   input: InstallArtifactInput,
 ): Promise<ExtensionInstallAction> {
   const base =
@@ -177,7 +307,7 @@ async function installCodexSkill(
 }
 
 async function installOpenCodeInstruction(
-  artifact: ExtensionSkillArtifact,
+  artifact: ExtensionInlineSkillArtifact,
   input: InstallArtifactInput,
 ): Promise<ExtensionInstallAction> {
   const configPath = openCodeConfigPath(input)
@@ -278,6 +408,74 @@ function openCodeConfigPath(input: InstallArtifactInput): string {
   return input.scope === 'project'
     ? path.join(requireProjectPath(input), 'opencode.json')
     : path.join(os.homedir(), '.config/opencode/opencode.json')
+}
+
+function skillsCliArgs(
+  artifact: ExtensionSkillsCliArtifact,
+  input: InstallArtifactInput,
+): string[] {
+  const args = ['-y', 'skills', 'add', artifact.packageName]
+  if (artifact.cliSkillName) args.push('--skill', artifact.cliSkillName)
+  if (input.scope === 'global') args.push('--global')
+  args.push('--agent', input.agentId, '--copy', '--yes')
+  return args
+}
+
+function isSkillsCliArtifact(
+  artifact: ExtensionSkillArtifact,
+): artifact is ExtensionSkillsCliArtifact {
+  return 'packageName' in artifact
+}
+
+function agentLabel(agentId: ExtensionTargetAgent): string {
+  if (agentId === 'claude-code') return 'Claude Code'
+  if (agentId === 'codex') return 'Codex'
+  return 'OpenCode'
+}
+
+function formatCommand(command: string, args: readonly string[]): string {
+  return [command, ...args].map(quoteArg).join(' ')
+}
+
+function quoteArg(value: string): string {
+  return /^[A-Za-z0-9_./:@=-]+$/.test(value) ? value : JSON.stringify(value)
+}
+
+function formatExecFailure(error: unknown): string {
+  if (!isExecError(error)) {
+    return error instanceof Error ? error.message : 'unknown error'
+  }
+
+  const output = [error.stderr, error.stdout]
+    .map(bufferToString)
+    .filter((value) => value.trim().length > 0)
+    .join('\n')
+    .trim()
+  return output ? output.slice(0, 1200) : error.message
+}
+
+function isExecError(
+  error: unknown,
+): error is Error & {
+  code?: string | number
+  stdout?: string | Buffer
+  stderr?: string | Buffer
+} {
+  return error instanceof Error
+}
+
+function bufferToString(value: string | Buffer | undefined): string {
+  if (Buffer.isBuffer(value)) return value.toString('utf8')
+  return typeof value === 'string' ? value : ''
+}
+
+function execFileStdout(value: unknown): string | Buffer | undefined {
+  if (typeof value === 'string' || Buffer.isBuffer(value)) return value
+  if (isRecord(value)) {
+    const stdout = value.stdout
+    if (typeof stdout === 'string' || Buffer.isBuffer(stdout)) return stdout
+  }
+  return undefined
 }
 
 function scopedPath(

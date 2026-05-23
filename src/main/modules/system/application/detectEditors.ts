@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { resolveExecutable } from '../../../process/environment'
 
 const execFileAsync = promisify(execFile)
 
@@ -28,6 +29,7 @@ const CLI_CANDIDATES: readonly CliCandidate[] = [
   { id: 'vim', name: 'Vim', command: 'vim' },
   { id: 'nvim', name: 'Neovim', command: 'nvim' },
   { id: 'helix', name: 'Helix', command: 'hx' },
+  { id: 'lazygit', name: 'LazyGit', command: 'lazygit' },
 ]
 
 const ID_MAPPINGS: { keyword: string; id: string }[] = [
@@ -69,6 +71,9 @@ async function pathExists(filePath: string): Promise<boolean> {
 }
 
 async function findCliBinary(command: string): Promise<string | null> {
+  const resolved = resolveExecutable(command)
+  if (resolved) return resolved
+
   try {
     const result = await execFileAsync('/usr/bin/which', [command], {
       timeout: 1500,

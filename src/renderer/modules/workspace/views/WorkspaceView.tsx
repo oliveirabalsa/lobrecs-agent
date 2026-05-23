@@ -38,6 +38,8 @@ import { CommitAndPushDialog } from '../components/CommitAndPushDialog'
 import { CreatePullRequestDialog } from '../components/CreatePullRequestDialog'
 import { Composer } from '../components/Composer'
 import { ProjectContextDialog } from '../components/ProjectContextDialog'
+import { CliEditorTerminalOverlay } from '../components/CliEditorTerminalOverlay'
+import { BranchManagerDialog } from '../components/BranchManagerDialog'
 import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
@@ -225,6 +227,10 @@ export function WorkspaceView({
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
   const [prDialogOpen, setPrDialogOpen] = useState(false)
+  const [branchesDialogOpen, setBranchesDialogOpen] = useState(false)
+  const [overlayEditor, setOverlayEditor] = useState<{ id: string; name: string } | null>(null)
+  const [currentBranch, setCurrentBranch] = useState<string | null>(null)
+  const [gitOperationRunning, setGitOperationRunning] = useState(false)
   const [gitMenuOpen, setGitMenuOpen] = useState(false)
   /** Number of uncommitted files in the working tree, from a lightweight `git status` probe. */
   const [pendingChangeCount, setPendingChangeCount] = useState(0)
@@ -296,6 +302,134 @@ export function WorkspaceView({
   useEffect(() => {
     refreshPendingChanges()
   }, [refreshPendingChanges, busy, commitDialogOpen, gitMenuOpen])
+
+  // Load and refresh the current branch name
+  const refreshCurrentBranch = useCallback(() => {
+    if (!selectedProject?.id) {
+      setCurrentBranch(null)
+      return
+    }
+    window.agentforge.git.getCurrentBranch(selectedProject.id)
+      .then((branch) => {
+        setCurrentBranch(branch)
+      })
+      .catch(() => {
+        setCurrentBranch(null)
+      })
+  }, [selectedProject?.id])
+
+  useEffect(() => {
+    refreshCurrentBranch()
+  }, [refreshCurrentBranch, branchesDialogOpen])
+
+  const handleGitPull = useCallback(async () => {
+    if (!selectedProject || gitOperationRunning) return
+    setGitOperationRunning(true)
+    try {
+      const result = await window.agentforge.git.pull(selectedProject.id)
+      if (result.exitCode === 0) {
+        window.alert('Git pull succeeded:\n' + result.stdout)
+      } else {
+        window.alert('Git pull failed:\n' + result.stderr)
+      }
+    } catch (error: unknown) {
+      window.alert(
+        `Git pull failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
+    } finally {
+      setGitOperationRunning(false)
+      refreshPendingChanges()
+      refreshCurrentBranch()
+    }
+  }, [selectedProject, gitOperationRunning, refreshPendingChanges, refreshCurrentBranch])
+
+  const handleGitFetch = useCallback(async () => {
+    if (!selectedProject || gitOperationRunning) return
+    setGitOperationRunning(true)
+    try {
+      const result = await window.agentforge.git.fetch(selectedProject.id)
+      if (result.exitCode === 0) {
+        window.alert('Git fetch succeeded.')
+      } else {
+        window.alert('Git fetch failed:\n' + result.stderr)
+      }
+    } catch (error: unknown) {
+      window.alert(
+        `Git fetch failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      )
+    } finally {
+      setGitOperationRunning(false)
+      refreshPendingChanges()
+      refreshCurrentBranch()
+    }
+  }, [selectedProject, gitOperationRunning, refreshPendingChanges, refreshCurrentBranch])
+
+  // Global chorded shortcuts: Space + g + g (LazyGit) and Space + v + v (Vim)
+  useEffect(() => {
+    let lastKeys: string[] = []
+    let lastKeyTime = 0
+
+    function handleGlobalKeyDown(e: KeyboardEvent) {
+      if (!selectedProject?.repoPath) return
+      if (overlayEditor || branchesDialogOpen || commitDialogOpen || prDialogOpen) return
+
+      const active = document.activeElement
+      if (active) {
+        const tagName = active.tagName.toLowerCase()
+        if (
+          tagName === 'a' ||
+          tagName === 'button' ||
+          tagName === 'input' ||
+          tagName === 'select' ||
+          tagName === 'textarea' ||
+          (active instanceof HTMLElement && active.isContentEditable) ||
+          active.classList.contains('xterm-helper-textarea') ||
+          active.closest?.('.monaco-editor')
+        ) {
+          return
+        }
+      }
+
+      const now = Date.now()
+      if (now - lastKeyTime > 1000) {
+        lastKeys = []
+      }
+      lastKeyTime = now
+
+      let keyName = e.key.toLowerCase()
+      if (keyName === ' ') keyName = 'space'
+      if (keyName === 'space' || lastKeys[0] === 'space') {
+        e.preventDefault()
+      }
+
+      lastKeys.push(keyName)
+      if (lastKeys.length > 3) {
+        lastKeys.shift()
+      }
+
+      const sequence = lastKeys.join('+')
+      if (sequence === 'space+g+g') {
+        e.preventDefault()
+        setOverlayEditor({ id: 'lazygit', name: 'LazyGit' })
+        lastKeys = []
+      } else if (sequence === 'space+v+v') {
+        e.preventDefault()
+        setOverlayEditor({ id: 'vim', name: 'Vim' })
+        lastKeys = []
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [
+    branchesDialogOpen,
+    commitDialogOpen,
+    overlayEditor,
+    prDialogOpen,
+    selectedProject?.repoPath,
+  ])
 
   // Files also change outside the agent — via the integrated terminal and Vim.
   // Re-probe (debounced) whenever a CLI-editor terminal emits output, and
@@ -521,6 +655,11 @@ export function WorkspaceView({
   const handleOpenCliEditor = useCallback(
     (editor: EditorInfo) => {
       if (!selectedProject?.repoPath) return
+
+      if (editor.id !== 'shell') {
+        setOverlayEditor({ id: editor.id, name: editor.name })
+        return
+      }
 
       const action = resolveBottomTerminalOpenAction({
         hasPanel: Boolean(bottomPanelInitialTab),
@@ -749,7 +888,7 @@ export function WorkspaceView({
                           type="button"
                           onClick={() => handleOpenCliEditor({ id: 'vim', name: 'Vim', kind: 'cli' })}
                           className="flex h-8 w-8 items-center justify-center rounded border border-hairline text-muted transition-colors hover:border-white/15 hover:bg-white/5 hover:text-secondary"
-                          title="Open Vim"
+                          title="Open Vim (Space V V)"
                           aria-label="Open Vim"
                         >
                           <QuickVimIcon />
@@ -788,8 +927,63 @@ export function WorkspaceView({
                         {gitMenuOpen ? (
                           <div
                             role="menu"
-                            className="absolute bottom-10 right-0 z-50 w-44 overflow-hidden rounded-card border border-hairline bg-card-raised/95 py-1 shadow-xl shadow-black/40 backdrop-blur-md"
+                            className="absolute bottom-10 right-0 z-50 w-56 overflow-hidden rounded-card border border-hairline bg-card-raised/95 py-1 shadow-xl shadow-black/40 backdrop-blur-md"
                           >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                setBranchesDialogOpen(true)
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                            >
+                              <QuickBranchIcon />
+                              <span className="flex-1">Branches</span>
+                              <span className="max-w-[92px] truncate text-[10px] font-normal text-muted">
+                                {currentBranch?.trim() || 'unknown'}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={gitOperationRunning}
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                void handleGitFetch()
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                            >
+                              <QuickFetchIcon />
+                              <span className="flex-1">Fetch</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={gitOperationRunning}
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                void handleGitPull()
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent"
+                            >
+                              <QuickPullIcon />
+                              <span className="flex-1">Pull</span>
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setGitMenuOpen(false)
+                                setOverlayEditor({ id: 'lazygit', name: 'LazyGit' })
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                            >
+                              <QuickLazyGitIcon />
+                              <span className="flex-1">LazyGit</span>
+                              <span className="text-[10px] font-normal text-muted">Space G G</span>
+                            </button>
+                            <div className="my-1 h-px bg-hairline" />
                             <button
                               type="button"
                               role="menuitem"
@@ -999,6 +1193,15 @@ export function WorkspaceView({
               open={prDialogOpen}
               onOpenChange={setPrDialogOpen}
             />
+            <BranchManagerDialog
+              project={selectedProject}
+              open={branchesDialogOpen}
+              onOpenChange={setBranchesDialogOpen}
+              onBranchChanged={() => {
+                refreshPendingChanges()
+                refreshCurrentBranch()
+              }}
+            />
             <MarkdownPreviewer
               state={markdownPreview}
               onOpenChange={(open) => {
@@ -1006,6 +1209,18 @@ export function WorkspaceView({
               }}
               onOpenMarkdown={openMarkdownLink}
             />
+            {overlayEditor ? (
+              <CliEditorTerminalOverlay
+                editorId={overlayEditor.id}
+                editorName={overlayEditor.name}
+                repoPath={selectedProject.repoPath}
+                onClose={() => {
+                  setOverlayEditor(null)
+                  refreshPendingChanges()
+                  refreshCurrentBranch()
+                }}
+              />
+            ) : null}
           </>
         ) : (
           <>
@@ -1171,6 +1386,48 @@ function QuickCommitIcon() {
       <line x1="3" y1="12" x2="9" y2="12" />
       <line x1="15" y1="12" x2="21" y2="12" />
       <path d="M17 6l4 6-4 6" />
+    </svg>
+  )
+}
+
+function QuickBranchIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  )
+}
+
+function QuickFetchIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function QuickPullIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+      <path d="M3 21v-5h5" />
+    </svg>
+  )
+}
+
+function QuickLazyGitIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="m8 10 2.5 2L8 14" />
+      <path d="M13 14h3" />
     </svg>
   )
 }

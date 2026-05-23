@@ -21,6 +21,8 @@ describe('buildPlanModeContext', () => {
     expect(context).toMatch(/implementation plan itself/i)
     expect(context).toMatch(/actual work request/i)
     expect(context).toMatch(/even if the UI says the user asked for a plan/i)
+    expect(context).toMatch(/read-only/i)
+    expect(context).toMatch(/do not run commands/i)
     expect(context).toMatch(/do not create a plan for drafting another plan/i)
     expect(context).toMatch(/planning the planning process/i)
     expect(context).toMatch(/this response is the plan/i)

@@ -5,6 +5,8 @@ import type {
   CreatePullRequestResult,
   GitRemoteInfo,
 } from '../../../../shared/types'
+import { buildProcessEnvironment } from '../../../process/environment'
+import { buildGhPrCreateArgs, resolveGhCommand } from './githubCli'
 
 // git@github.com:owner/repo.git  and  git@github.com:owner/repo
 const GITHUB_SSH_RE = /^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/
@@ -54,9 +56,9 @@ async function tryGhCli(
 ): Promise<CreatePullRequestResult | null> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      'gh',
-      ['pr', 'create', '--title', input.title, '--body', input.body, '--base', input.baseBranch, '--head', input.headBranch],
-      { cwd: repoPath, stdio: 'pipe' },
+      resolveGhCommand(),
+      buildGhPrCreateArgs(input),
+      { cwd: repoPath, env: buildProcessEnvironment(), stdio: 'pipe' },
     )
 
     let stdout = ''

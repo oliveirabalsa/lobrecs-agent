@@ -446,12 +446,13 @@ function ExtensionDetail({
                 >
                   <div className="font-medium text-primary">{artifactLabel(artifact.kind)}</div>
                   <div className="mt-1 font-mono text-muted">
-                    {artifact.kind === 'mcp-server'
-                      ? artifact.serverName
-                      : artifact.kind === 'skill'
-                        ? artifact.skillName
-                        : artifact.packageName}
+                    {artifactIdentifier(artifact)}
                   </div>
+                  {artifact.kind === 'skill' && 'packageName' in artifact ? (
+                    <div className="mt-2 break-all font-mono text-[10px] leading-4 text-muted">
+                      {skillsCliPreview(artifact.packageName, artifact.cliSkillName)}
+                    </div>
+                  ) : null}
                 </div>
               ))
             ) : (
@@ -613,6 +614,20 @@ function artifactLabel(kind: string): string {
   if (kind === 'mcp-server') return 'MCP server'
   if (kind === 'skill') return 'Skill'
   return 'Plugin'
+}
+
+function artifactIdentifier(extension: MarketplaceExtension['artifacts'][number]): string {
+  if (extension.kind === 'mcp-server') return extension.serverName
+  if (extension.kind === 'plugin') return extension.packageName
+  return 'packageName' in extension
+    ? `${extension.packageName} / ${extension.cliSkillName ?? extension.skillName}`
+    : extension.skillName
+}
+
+function skillsCliPreview(packageName: string, skillName?: string): string {
+  return ['npx skills add', packageName, skillName ? `--skill ${skillName}` : '']
+    .filter(Boolean)
+    .join(' ')
 }
 
 function SearchIcon() {

@@ -19,6 +19,7 @@ import {
   DiffReviewCard,
   RunAuditTimelineCard,
 } from '../components/artifacts'
+import type { DiffReviewFixSelection } from '../components/artifacts'
 import { PlanPromptModal } from '../components/modals/PlanPromptModal'
 import {
   emitPlanModeReset,
@@ -33,8 +34,10 @@ import {
 import { UserMessage } from '../components/UserMessage'
 import { useAttentionSound } from '../hooks/useAttentionSound'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
-import type { DiffProposalScope } from '../hooks/useWorkspaceController'
-import { diffProposalsFromThreadEvents } from '../lib/threadDiffProposals'
+import {
+  mergeDiffProposals,
+  type DiffProposalScope,
+} from '../hooks/useWorkspaceController'
 import { buildUserQuestionFollowUpDispatchParams } from '../lib/userQuestionFollowUp'
 import type { StartedSessionSummary } from '../../sessions/types'
 import { Button, Modal } from '../../../components/ui'
@@ -107,8 +110,21 @@ export function RunWorkspace({
   onPreviewMarkdown,
   onContextPercent,
 }: RunWorkspaceProps) {
+  const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
+  const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
+  const [diffReview, setDiffReview] = useState<GitDiffReviewResult | null>(null)
+  const [diffReviewLoading, setDiffReviewLoading] = useState(false)
+  const [diffReviewError, setDiffReviewError] = useState<string | null>(null)
+  const [sessionDiffProposals, setSessionDiffProposals] = useState<DiffProposal[]>([])
+  const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
+  const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
+  const [submittingQuestion, setSubmittingQuestion] = useState(false)
+  const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
+  const lastPlanReviewResetKeyRef = useRef<string | null>(null)
+
   const handleSessionDiffProposals = useCallback(
     (proposals: DiffProposal[]) => {
+      setSessionDiffProposals((current) => mergeDiffProposals(current, proposals))
       onDiffProposals(proposals, {
         sessionId,
         threadId: threadId ?? null,
@@ -133,78 +149,6 @@ export function RunWorkspace({
   })
 
   useEffect(() => {
-    if (!threadId) return
-
-    let cancelled = false
-    const sessionUnsubscribers = new Map<string, () => void>()
-
-    const subscribeToDiffEvents = (threadSession: { id: string; createdAt: number }) => {
-      if (sessionUnsubscribers.has(threadSession.id)) return
-
-      const unsubscribe = window.agentforge.on(`session:${threadSession.id}`, (event) => {
-        if (event.type !== 'diff') return
-
-        const proposals = diffProposalsFromThreadEvents([
-          {
-            sessionId: threadSession.id,
-            createdAt: threadSession.createdAt,
-            events: [event],
-          },
-        ])
-        if (proposals.length === 0) return
-
-        onDiffProposals(proposals, {
-          sessionId: event.sessionId,
-          threadId,
-        })
-      })
-      sessionUnsubscribers.set(threadSession.id, unsubscribe)
-    }
-
-    const syncThreadDiffs = async () => {
-      const threadSessions = await window.agentforge.sessions
-        .list(project.id)
-        .then((sessions) =>
-          sessions
-            .filter((session) => session.threadId === threadId)
-            .sort((left, right) => left.createdAt - right.createdAt),
-        )
-        .catch(() => [])
-
-      if (cancelled) return
-
-      threadSessions.forEach(subscribeToDiffEvents)
-
-      const eventBatches = await Promise.all(
-        threadSessions.map(async (threadSession) => ({
-          sessionId: threadSession.id,
-          createdAt: threadSession.createdAt,
-          events: await window.agentforge.sessions.listEvents(threadSession.id).catch(() => []),
-        })),
-      )
-
-      if (cancelled) return
-
-      const proposals = diffProposalsFromThreadEvents(eventBatches)
-      if (proposals.length > 0) {
-        onDiffProposals(proposals, { threadId })
-      }
-    }
-
-    void syncThreadDiffs()
-
-    const unsubscribeThreadUpdates = window.agentforge.threads.onUpdated((event) => {
-      if (event.thread.id === threadId) void syncThreadDiffs()
-    })
-
-    return () => {
-      cancelled = true
-      unsubscribeThreadUpdates()
-      sessionUnsubscribers.forEach((unsubscribe) => unsubscribe())
-    }
-  }, [onDiffProposals, project.id, threadId])
-
-  useEffect(() => {
     if (!onContextPercent) return
     if (tokensIn === null) {
       onContextPercent(null)
@@ -212,17 +156,6 @@ export function RunWorkspace({
     }
     onContextPercent(Math.min(100, Math.round((tokensIn / 200_000) * 100)))
   }, [tokensIn, onContextPercent])
-  const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
-  const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
-  const [diffReview, setDiffReview] = useState<GitDiffReviewResult | null>(null)
-  const [diffReviewLoading, setDiffReviewLoading] = useState(false)
-  const [diffReviewError, setDiffReviewError] = useState<string | null>(null)
-  const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
-  const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
-  const [submittingQuestion, setSubmittingQuestion] = useState(false)
-  const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
-  const lastPlanReviewResetKeyRef = useRef<string | null>(null)
-
   // Audible "agent needs you" alert — chimes on new questions, approvals, and
   // finished runs. Tune *when* it fires in src/renderer/lib/attentionSound.ts.
   useAttentionSound({
@@ -257,6 +190,7 @@ export function RunWorkspace({
     setAuditRecords([])
     setDiffReview(null)
     setDiffReviewError(null)
+    setSessionDiffProposals([])
   }, [sessionId])
 
   useEffect(() => {
@@ -320,6 +254,10 @@ export function RunWorkspace({
     diffReview !== null ||
     diffReviewLoading ||
     diffReviewError !== null
+  const showBottomFooter =
+    auditRecords.length > 0 ||
+    showDiffReview ||
+    (approvalRequest !== null && approvalRequest.risk !== 'high')
   const seedUserMessage = useMemo(() => {
     if (!prompt) return undefined
     if (startedAt === undefined) {
@@ -356,14 +294,14 @@ export function RunWorkspace({
   }, [project.id, threadId])
 
   const handleFixDiffReview = useCallback(
-    async (review: GitDiffReviewResult) => {
+    async (review: GitDiffReviewResult, selection: DiffReviewFixSelection) => {
       const fixPrompt = buildDiffReviewFixPrompt(review)
       const createdAt = Date.now()
       const result = await window.agentforge.agent.dispatch({
         projectId: project.id,
         prompt: fixPrompt,
-        agentId: toSupportedAgentId(agentId),
-        modelOverride,
+        agentId: selection.agentId,
+        modelOverride: selection.modelId,
         threadId: threadId ?? undefined,
       })
       onSessionStarted?.({
@@ -371,17 +309,17 @@ export function RunWorkspace({
         threadId: result.threadId,
         prompt: fixPrompt,
         routingDecision: null,
-        agentId: toSupportedAgentId(agentId),
-        modelOverride,
+        agentId: selection.agentId,
+        modelOverride: selection.modelId,
         createdAt,
       })
     },
-    [agentId, modelOverride, onSessionStarted, project.id, threadId],
+    [onSessionStarted, project.id, threadId],
   )
 
   const streamHandlers = useMemo(
     () => ({
-      diffProposals,
+      diffProposals: sessionDiffProposals,
       approvalRequest,
       pendingUserQuestionPromptId: pendingUserQuestion?.promptId ?? null,
       onReviewFile: handleReviewFile,
@@ -397,7 +335,7 @@ export function RunWorkspace({
       onPreviewMarkdown,
     }),
     [
-      diffProposals,
+      sessionDiffProposals,
       approvalRequest,
       pendingUserQuestion?.promptId,
       handleReviewFile,
@@ -519,23 +457,28 @@ export function RunWorkspace({
             seedUserMessage={seedUserMessage}
             streamHandlers={streamHandlers}
           />
-          <RunAuditTimelineCard records={auditRecords} />
-          {showDiffReview ? (
-            <DiffReviewCard
-              result={diffReview}
-              loading={diffReviewLoading}
-              error={diffReviewError}
-              onReview={handleReviewCurrentDiff}
-              onFix={handleFixDiffReview}
-              onOpenAgentPanel={onOpenAgentPanel}
-            />
-          ) : null}
-          {approvalRequest && approvalRequest.risk !== 'high' ? (
-            <ApprovalCallout
-              request={approvalRequest}
-              onApprove={onApproveApproval}
-              onReject={onRejectApproval}
-            />
+          {showBottomFooter ? (
+            <div className="flex flex-col gap-4">
+              <RunAuditTimelineCard records={auditRecords} />
+              {showDiffReview ? (
+                <DiffReviewCard
+                  result={diffReview}
+                  loading={diffReviewLoading}
+                  error={diffReviewError}
+                  onReview={handleReviewCurrentDiff}
+                  onFix={handleFixDiffReview}
+                  onOpenAgentPanel={onOpenAgentPanel}
+                  defaultFixModel={defaultDiffReviewFixModel(agentId, modelOverride ?? model)}
+                />
+              ) : null}
+              {approvalRequest && approvalRequest.risk !== 'high' ? (
+                <ApprovalCallout
+                  request={approvalRequest}
+                  onApprove={onApproveApproval}
+                  onReject={onRejectApproval}
+                />
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : (
@@ -640,6 +583,14 @@ function toSupportedAgentId(agentId: Project['agentId'] | undefined): SupportedA
     return agentId as SupportedAgentId
   }
   return undefined
+}
+
+function defaultDiffReviewFixModel(
+  agentId: Project['agentId'] | undefined,
+  modelId: string | undefined,
+): DiffReviewFixSelection | null {
+  const supportedAgentId = toSupportedAgentId(agentId)
+  return supportedAgentId && modelId ? { agentId: supportedAgentId, modelId } : null
 }
 
 function isFinishedSessionStatus(status: SessionStatus | null): boolean {

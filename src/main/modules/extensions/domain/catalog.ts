@@ -1,5 +1,56 @@
 import type { MarketplaceExtension } from '../../../../shared/types'
 
+type SkillsShCatalogInput = {
+  id: string
+  name: string
+  summary: string
+  description: string
+  publisher: string
+  packageName: string
+  skillName: string
+  tags: string[]
+  homepageUrl: string
+  featured?: boolean
+  recommended?: boolean
+}
+
+const SKILLS_SH_TARGET_AGENTS = ['claude-code', 'codex', 'opencode'] as const
+
+function skillsShSkill(input: SkillsShCatalogInput): MarketplaceExtension {
+  const extension: MarketplaceExtension = {
+    id: input.id,
+    name: input.name,
+    summary: input.summary,
+    description: input.description,
+    publisher: input.publisher,
+    category: 'skill',
+    source: 'external',
+    tags: ['skill', 'skills.sh', ...input.tags],
+    targetAgents: [...SKILLS_SH_TARGET_AGENTS],
+    homepageUrl: input.homepageUrl,
+    documentationUrl: 'https://www.skills.sh/docs/cli',
+    setupNotes: [
+      'Runs the official skills.sh CLI with npx from the main process.',
+      'Project scope runs in the selected repository; global scope adds --global.',
+      'Lobrecs Agent sets DISABLE_TELEMETRY=1 for the install command.',
+    ],
+    permissions: ['Downloads skill files from the configured skills.sh source'],
+    artifacts: [
+      {
+        kind: 'skill',
+        skillName: input.skillName,
+        cliSkillName: input.skillName,
+        packageName: input.packageName,
+        installUrl: input.homepageUrl,
+        description: input.summary,
+      },
+    ],
+  }
+  if (input.featured !== undefined) extension.featured = input.featured
+  if (input.recommended !== undefined) extension.recommended = input.recommended
+  return extension
+}
+
 export const EXTENSION_CATALOG: MarketplaceExtension[] = [
   {
     id: 'openai-developer-docs',
@@ -266,6 +317,264 @@ export const EXTENSION_CATALOG: MarketplaceExtension[] = [
         ].join('\n'),
       },
     ],
+  },
+  ...[
+    skillsShSkill({
+      id: 'skills-sh-find-skills',
+      name: 'Find Skills',
+      summary: 'Adds a workflow for discovering and vetting skills from the open skills ecosystem.',
+      description:
+        'Use this when an agent should search skills.sh, compare install counts, and recommend useful skills before starting specialized work.',
+      publisher: 'Vercel Labs',
+      packageName: 'https://github.com/vercel-labs/add-skill',
+      skillName: 'find-skills',
+      tags: ['discovery', 'workflow', 'marketplace'],
+      homepageUrl: 'https://skills.sh/vercel-labs/add-skill/find-skills',
+      featured: true,
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-frontend-design',
+      name: 'Frontend Design',
+      summary: 'Anthropic frontend implementation guidance for polished UI work.',
+      description:
+        'A popular skills.sh skill for agents working on layouts, interaction quality, and frontend implementation details.',
+      publisher: 'Anthropic',
+      packageName: 'anthropics/skills',
+      skillName: 'frontend-design',
+      tags: ['frontend', 'design', 'ui'],
+      homepageUrl: 'https://skills.sh/anthropics/skills/frontend-design',
+      featured: true,
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-skill-creator',
+      name: 'Skill Creator',
+      summary: 'Guides agents through authoring reusable Agent Skills.',
+      description:
+        'Useful when a repeated workflow should become a portable SKILL.md package with clear trigger rules and supporting references.',
+      publisher: 'Anthropic',
+      packageName: 'anthropics/skills',
+      skillName: 'skill-creator',
+      tags: ['skills', 'authoring', 'agents'],
+      homepageUrl: 'https://skills.sh/anthropics/skills/skill-creator',
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-pdf',
+      name: 'PDF',
+      summary: 'Adds PDF reading and transformation workflows for document-heavy tasks.',
+      description:
+        'Use this when agents need structured guidance for handling PDFs, extracting information, or preparing document outputs.',
+      publisher: 'Anthropic',
+      packageName: 'anthropics/skills',
+      skillName: 'pdf',
+      tags: ['documents', 'pdf'],
+      homepageUrl: 'https://skills.sh/anthropics/skills/pdf',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-pptx',
+      name: 'PPTX',
+      summary: 'Adds PowerPoint deck creation and editing guidance.',
+      description:
+        'A document skill for slide deck workflows, presentation structure, and PPTX-oriented agent tasks.',
+      publisher: 'Anthropic',
+      packageName: 'anthropics/skills',
+      skillName: 'pptx',
+      tags: ['documents', 'slides', 'presentations'],
+      homepageUrl: 'https://skills.sh/anthropics/skills/pptx',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-docx',
+      name: 'DOCX',
+      summary: 'Adds Word document creation and editing workflows.',
+      description:
+        'Use this for document-generation agents that need Word-oriented structure and editing conventions.',
+      publisher: 'Anthropic',
+      packageName: 'anthropics/skills',
+      skillName: 'docx',
+      tags: ['documents', 'word'],
+      homepageUrl: 'https://skills.sh/anthropics/skills/docx',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-react-best-practices',
+      name: 'React Best Practices',
+      summary: 'Vercel Engineering guidance for React and Next.js performance.',
+      description:
+        'Covers waterfalls, bundle size, server rendering, client data fetching, rerenders, and related React performance concerns.',
+      publisher: 'Vercel Labs',
+      packageName: 'vercel-labs/agent-skills',
+      skillName: 'react-best-practices',
+      tags: ['react', 'nextjs', 'performance'],
+      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/react-best-practices',
+      featured: true,
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-web-design-guidelines',
+      name: 'Web Design Guidelines',
+      summary: 'Audits frontend UI code against accessibility, UX, and performance rules.',
+      description:
+        'Useful for review agents checking forms, focus states, dark mode, navigation state, motion, images, and touch interactions.',
+      publisher: 'Vercel Labs',
+      packageName: 'vercel-labs/agent-skills',
+      skillName: 'web-design-guidelines',
+      tags: ['frontend', 'accessibility', 'review'],
+      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/web-design-guidelines',
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-react-native-guidelines',
+      name: 'React Native Guidelines',
+      summary: 'React Native and Expo guidance for performance and platform-specific UI.',
+      description:
+        'Adds mobile-focused guidance for layout, keyboard behavior, animation, images, state management, and platform APIs.',
+      publisher: 'Vercel Labs',
+      packageName: 'vercel-labs/agent-skills',
+      skillName: 'react-native-guidelines',
+      tags: ['react-native', 'expo', 'mobile'],
+      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/react-native-guidelines',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-composition-patterns',
+      name: 'Composition Patterns',
+      summary: 'React composition guidance for scalable component APIs.',
+      description:
+        'Helps agents refactor prop-heavy components into clearer composition patterns, compound components, and reusable APIs.',
+      publisher: 'Vercel Labs',
+      packageName: 'vercel-labs/agent-skills',
+      skillName: 'composition-patterns',
+      tags: ['react', 'architecture', 'components'],
+      homepageUrl: 'https://skills.sh/vercel-labs/agent-skills/composition-patterns',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-supabase-postgres-best-practices',
+      name: 'Supabase Postgres Best Practices',
+      summary: 'Supabase and Postgres implementation guidance for database-backed apps.',
+      description:
+        'Useful for agents designing tables, policies, migrations, and data-access flows in Supabase/Postgres projects.',
+      publisher: 'Supabase',
+      packageName: 'supabase/agent-skills',
+      skillName: 'supabase-postgres-best-practices',
+      tags: ['database', 'postgres', 'supabase'],
+      homepageUrl: 'https://skills.sh/supabase/agent-skills/supabase-postgres-best-practices',
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-shadcn',
+      name: 'shadcn',
+      summary: 'Guidance for building and extending shadcn/ui interfaces.',
+      description:
+        'Adds shadcn/ui conventions for component composition, styling, and UI implementation workflows.',
+      publisher: 'shadcn',
+      packageName: 'shadcn/ui',
+      skillName: 'shadcn',
+      tags: ['ui', 'components', 'tailwind'],
+      homepageUrl: 'https://skills.sh/shadcn/ui/shadcn',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-tdd',
+      name: 'TDD',
+      summary: 'Matt Pocock testing workflow for test-first implementation.',
+      description:
+        'Use this when agents should pin behavior with tests first, implement narrowly, and iterate through focused verification.',
+      publisher: 'Matt Pocock',
+      packageName: 'mattpocock/skills',
+      skillName: 'tdd',
+      tags: ['testing', 'quality', 'workflow'],
+      homepageUrl: 'https://skills.sh/mattpocock/skills/tdd',
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-improve-codebase-architecture',
+      name: 'Improve Codebase Architecture',
+      summary: 'Guidance for architecture cleanup and higher-signal refactors.',
+      description:
+        'A code-quality skill for agents planning architectural improvements without drifting into broad formatting churn.',
+      publisher: 'Matt Pocock',
+      packageName: 'mattpocock/skills',
+      skillName: 'improve-codebase-architecture',
+      tags: ['architecture', 'refactor', 'quality'],
+      homepageUrl: 'https://skills.sh/mattpocock/skills/improve-codebase-architecture',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-to-prd',
+      name: 'To PRD',
+      summary: 'Turns rough product requests into structured product requirements.',
+      description:
+        'Useful for product agents that need to turn early ideas into scoped requirements before implementation starts.',
+      publisher: 'Matt Pocock',
+      packageName: 'mattpocock/skills',
+      skillName: 'to-prd',
+      tags: ['product', 'planning', 'requirements'],
+      homepageUrl: 'https://skills.sh/mattpocock/skills/to-prd',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-to-issues',
+      name: 'To Issues',
+      summary: 'Breaks product or engineering plans into issue-ready work items.',
+      description:
+        'Use this when agents need to convert plans into actionable backlog tickets with concrete acceptance criteria.',
+      publisher: 'Matt Pocock',
+      packageName: 'mattpocock/skills',
+      skillName: 'to-issues',
+      tags: ['planning', 'issues', 'backlog'],
+      homepageUrl: 'https://skills.sh/mattpocock/skills/to-issues',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-systematic-debugging',
+      name: 'Systematic Debugging',
+      summary: 'Superpowers debugging workflow for reproducing and isolating failures.',
+      description:
+        'A structured debugging skill for agents that should gather evidence, form hypotheses, and verify fixes before handoff.',
+      publisher: 'Superpowers',
+      packageName: 'obra/superpowers',
+      skillName: 'systematic-debugging',
+      tags: ['debugging', 'workflow', 'quality'],
+      homepageUrl: 'https://skills.sh/obra/superpowers/systematic-debugging',
+      recommended: true,
+    }),
+    skillsShSkill({
+      id: 'skills-sh-executing-plans',
+      name: 'Executing Plans',
+      summary: 'Superpowers execution workflow for working through existing plans.',
+      description:
+        'Useful when an agent should follow an established checklist, keep status visible, and avoid skipping verification steps.',
+      publisher: 'Superpowers',
+      packageName: 'obra/superpowers',
+      skillName: 'executing-plans',
+      tags: ['planning', 'execution', 'workflow'],
+      homepageUrl: 'https://skills.sh/obra/superpowers/executing-plans',
+    }),
+    skillsShSkill({
+      id: 'skills-sh-writing-plans',
+      name: 'Writing Plans',
+      summary: 'Superpowers workflow for creating concrete implementation plans.',
+      description:
+        'Adds planning guidance for agents that need to decompose work before editing code or coordinating several tasks.',
+      publisher: 'Superpowers',
+      packageName: 'obra/superpowers',
+      skillName: 'writing-plans',
+      tags: ['planning', 'workflow'],
+      homepageUrl: 'https://skills.sh/obra/superpowers/writing-plans',
+    }),
+  ],
+  {
+    id: 'skills-sh-provider',
+    name: 'skills.sh Provider',
+    summary: 'Tracks skills.sh as a future online source for searchable agent skills.',
+    description:
+      'Provider lane for the open Agent Skills ecosystem. Curated skills are installable now; live API search can be enabled later when an API key is configured.',
+    publisher: 'Vercel',
+    category: 'provider',
+    source: 'external',
+    tags: ['provider', 'skills', 'skills.sh'],
+    targetAgents: ['claude-code', 'codex', 'opencode'],
+    featured: true,
+    homepageUrl: 'https://skills.sh',
+    documentationUrl: 'https://www.skills.sh/docs/api',
+    setupNotes: ['The public skills.sh API requires an API key; this release ships curated entries.'],
+    artifacts: [],
   },
   {
     id: 'mcp-registry-provider',

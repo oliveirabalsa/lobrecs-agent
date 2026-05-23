@@ -1121,7 +1121,7 @@ describe('SessionManager', () => {
   })
 
   it('adds plan-mode instructions without turning the task into a plan request', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1174,8 +1174,56 @@ describe('SessionManager', () => {
     expect((planReview?.payload as { reviewId?: string }).reviewId).toBeTruthy()
   })
 
+  it('forces plan mode into a disposable worktree even when worktree isolation is off', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'add a settings page',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      planMode: true,
+    })
+
+    const worktreePath = adapter.dispatchedParams?.repoPath
+    expect(worktreePath).toBeTruthy()
+    expect(worktreePath).not.toBe(project.repoPath)
+
+    // Even if the planning agent writes into its checkout, the repo the user
+    // opened must stay untouched until approval.
+    await fs.writeFile(path.join(worktreePath ?? '', 'existing.ts'), 'planning edit\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          (event.payload as { kind?: string }).kind === 'plan-review',
+      ),
+    )
+
+    await expect(fs.readFile(path.join(project.repoPath, 'existing.ts'), 'utf-8')).resolves.toBe(
+      'original\n',
+    )
+  })
+
   it('dispatches the gated execution session only after the plan is approved', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1231,7 +1279,7 @@ describe('SessionManager', () => {
   })
 
   it('dispatches execution with edited plan instructions when approval includes edits', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1275,7 +1323,7 @@ describe('SessionManager', () => {
   })
 
   it('dispatches execution with the implementation agent and model selected at approval time', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const planningAdapter = new FakeAdapter('claude-code')
     const implementationAdapter = new FakeAdapter('codex')
     const broadcasts: AgentEvent[] = []
@@ -1321,7 +1369,7 @@ describe('SessionManager', () => {
   })
 
   it('applies execution overrides when approving a plan with a different implementation model', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1383,7 +1431,7 @@ describe('SessionManager', () => {
   })
 
   it('keeps a plan review pending when approval dispatch fails so the user can retry', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1436,7 +1484,7 @@ describe('SessionManager', () => {
   })
 
   it('does not dispatch an execution session when the plan is rejected', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1563,7 +1611,7 @@ describe('SessionManager', () => {
   })
 
   it('dispatches queued follow-ups when a plan is rejected', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1626,7 +1674,7 @@ describe('SessionManager', () => {
   })
 
   it('retrieves execution-session context with the original task, not the approval prompt', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const contextQueries: string[] = []
@@ -1671,7 +1719,7 @@ describe('SessionManager', () => {
   })
 
   it('leaves the queue intact when a plan is rejected while the thread is still busy', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({
@@ -1739,7 +1787,7 @@ describe('SessionManager', () => {
   })
 
   it('ignores a plan-review decision whose sessionId does not match the planning session', async () => {
-    const project = createProject()
+    const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
     const manager = new SessionManager({

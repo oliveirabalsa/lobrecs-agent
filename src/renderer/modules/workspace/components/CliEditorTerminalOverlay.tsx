@@ -18,6 +18,7 @@ import {
   writeTerminalWithCursorState,
 } from './cliEditorCursorState'
 import { CliEditorCursorBadge } from './CliEditorCursorBadge'
+import { closeCliEditorOverlay } from './cliEditorOverlayEscape'
 
 interface CliEditorTerminalOverlayProps {
   editorId: string
@@ -35,12 +36,29 @@ export function CliEditorTerminalOverlay({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const sessionIdRef = useRef(createTerminalSessionId())
   const exitedRef = useRef(false)
+  const onCloseRef = useRef(onClose)
   const [session, setSession] = useState<CliEditorTerminalSession | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [exitEvent, setExitEvent] = useState<CliEditorTerminalExitEvent | null>(null)
   const [cursorState, setCursorState] = useState<CliEditorCursorState>(
     DEFAULT_CLI_EDITOR_CURSOR_STATE,
   )
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!exitEvent) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      closeCliEditorOverlay(event, () => onCloseRef.current())
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [exitEvent])
 
   useEffect(() => {
     const container = containerRef.current
@@ -81,6 +99,12 @@ export function CliEditorTerminalOverlay({
 
     const dataDisposable = term.onData((data) => {
       void window.agentforge.system.writeCliEditorTerminal({ sessionId, data })
+    })
+
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.key !== 'Escape') return true
+      closeCliEditorOverlay(event, () => onCloseRef.current())
+      return false
     })
 
     applyCliEditorCursorState(term, cursorTracker.state)
@@ -156,41 +180,42 @@ export function CliEditorTerminalOverlay({
         : 'Starting'
 
   return (
-    <div className="absolute inset-0 z-40 flex min-w-0 flex-col bg-canvas text-primary">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline bg-canvas px-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-7 shrink-0 items-center gap-1 rounded px-2 text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
-        >
-          <BackIcon />
-          <span>Back</span>
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-primary">
-            {session?.command ?? (editorId === 'shell' ? editorName : `${editorName} .`)}
+    <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-md flex items-center justify-center p-6 sm:p-8">
+      <div className="relative w-full h-full bg-card rounded-2xl border border-white/10 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-hairline bg-card-raised/50 px-5">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-primary">
+              {editorId === 'lazygit' ? 'LazyGit' : editorName}
+            </span>
+            <span className="text-xs text-muted truncate max-w-xs md:max-w-md">
+              {repoPath}
+            </span>
           </div>
-          <div className="truncate text-[10px] text-muted">{repoPath}</div>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          <CliEditorCursorBadge cursorState={cursorState} />
-          <div
-            className={`rounded px-2 py-0.5 text-[10px] font-medium ${
-              error
-                ? 'bg-accent-del/10 text-accent-del'
-                : exitEvent
-                  ? 'bg-white/5 text-muted'
-                  : 'bg-accent-add/10 text-accent-add'
-            }`}
-          >
-            {statusLabel}
+          <div className="flex items-center gap-3">
+            <CliEditorCursorBadge cursorState={cursorState} />
+            <div
+              className={`rounded-md px-2.5 py-1 text-[10px] font-semibold tracking-wider uppercase ${
+                error
+                  ? 'bg-accent-del/10 text-accent-del'
+                  : exitEvent
+                    ? 'bg-white/5 text-muted'
+                    : 'bg-accent-add/10 text-accent-add'
+              }`}
+            >
+              {statusLabel}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-secondary hover:text-primary hover:bg-white/5 transition-colors border border-hairline hover:border-white/15"
+            >
+              <span>Close</span>
+              <kbd className="text-[10px] opacity-60">Esc</kbd>
+            </button>
           </div>
         </div>
+        <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden bg-canvas p-4" />
       </div>
-
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-hidden bg-canvas p-2" />
     </div>
   )
 }
@@ -200,23 +225,4 @@ function createTerminalSessionId(): string {
   if (randomId) return randomId
 
   return `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
-
-function BackIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m12 19-7-7 7-7" />
-      <path d="M19 12H5" />
-    </svg>
-  )
 }

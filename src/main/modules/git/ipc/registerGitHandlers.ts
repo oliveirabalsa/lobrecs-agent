@@ -3,6 +3,7 @@ import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
 import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
+import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit } from '../infrastructure/runGit'
 import type {
   GitCommitInput,
@@ -51,7 +52,10 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:push', async (_event, projectId: string) => {
     const project = requireProject(projectId)
-    return runGit(['push'], project.repoPath)
+    const branch = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], project.repoPath)
+    if (branch.exitCode !== 0) return branch
+
+    return pushCurrentBranch(project.repoPath, branch.stdout.trim())
   })
 
   ipcMain.handle('git:get-pending-changes', async (_event, projectId: string) => {
@@ -114,4 +118,48 @@ export function registerGitHandlers(context: MainIpcContext): void {
       baseBranch: input.baseBranch,
     })
   })
+
+  ipcMain.handle('git:create-branch', async (_event, projectId: string, branchName: string) => {
+    const project = requireProject(projectId)
+    const name = await validateBranchName(branchName, project.repoPath)
+    return runGit(['switch', '-c', name], project.repoPath)
+  })
+
+  ipcMain.handle('git:checkout-branch', async (_event, projectId: string, branchName: string) => {
+    const project = requireProject(projectId)
+    const name = await validateBranchName(branchName, project.repoPath)
+    return runGit(['switch', name], project.repoPath)
+  })
+
+  ipcMain.handle('git:list-branches', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    const result = await runGit(['branch', '--format=%(refname:short)'], project.repoPath)
+    if (result.exitCode !== 0) return []
+    return result.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+  })
+
+  ipcMain.handle('git:pull', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    return runGit(['pull'], project.repoPath)
+  })
+
+  ipcMain.handle('git:fetch', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    return runGit(['fetch'], project.repoPath)
+  })
+}
+
+async function validateBranchName(branchName: string, repoPath: string): Promise<string> {
+  const name = branchName.trim()
+  if (!name) {
+    throw new Error('Branch name is required.')
+  }
+
+  const result = await runGit(['check-ref-format', '--branch', name], repoPath)
+  if (result.exitCode === 0) return name
+
+  throw new Error(result.stderr.trim() || result.stdout.trim() || 'Invalid branch name.')
 }
