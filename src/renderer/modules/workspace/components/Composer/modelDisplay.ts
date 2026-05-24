@@ -69,16 +69,20 @@ export const AGENT_SHORT: Record<SupportedAgentId, string> = {
   antigravity: 'Antigravity',
 }
 
-/** Advanced + Frontier tiers expose a thinking-depth control. */
-export function supportsThinking(tier: ModelTier): boolean {
-  return tier === 'advanced' || tier === 'frontier'
+/** Thinking support comes from the CLI model catalog, not broad model tiers. */
+export function supportsThinking(
+  model: { supportedThinkingLevels?: readonly Exclude<ThinkingLevel, 'off'>[] } | null,
+): boolean {
+  return (model?.supportedThinkingLevels?.length ?? 0) > 0
 }
 
-export const THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high']
+export const THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'xhigh', 'max']
 
 export const THINKING_LABEL: Record<ThinkingLevel, string> = {
   off: 'Off',
   low: 'Low',
   medium: 'Medium',
   high: 'High',
+  xhigh: 'Extra High',
+  max: 'Max',
 }

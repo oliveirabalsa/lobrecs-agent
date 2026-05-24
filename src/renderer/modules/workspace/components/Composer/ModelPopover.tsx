@@ -3,12 +3,18 @@ import { Modal } from '../../../../components/ui'
 import {
   AGENT_SHORT,
   THINKING_LABEL,
-  THINKING_LEVELS,
   TIER_LABEL,
   TIER_TONE,
   supportsThinking,
 } from './modelDisplay'
 import type { ModelGroup, ModelOption, ModelSelection, ThinkingLevel } from './types'
+
+const AUTO_THINKING_LEVELS: Array<Exclude<ThinkingLevel, 'off'>> = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]
 
 interface ModelPickerModalProps {
   open: boolean
@@ -65,8 +71,9 @@ export function ModelPopover({
   }
 
   function pickModel(option: ModelOption) {
-    const next: ModelSelection = supportsThinking(option.tier) && thinking !== 'off'
-      ? { kind: 'manual', agentId: option.agentId, modelId: option.modelId, thinking }
+    const nextThinking = thinkingForOption(option, thinking)
+    const next: ModelSelection = nextThinking
+      ? { kind: 'manual', agentId: option.agentId, modelId: option.modelId, thinking: nextThinking }
       : { kind: 'manual', agentId: option.agentId, modelId: option.modelId }
     onSelect(next)
     onClose()
@@ -94,7 +101,9 @@ export function ModelPopover({
       : null
   const showThinking =
     showThinkingControl &&
-    (autoActive ? true : selectedOption ? supportsThinking(selectedOption.tier) : false)
+    (autoActive ? true : selectedOption ? supportsThinking(selectedOption) : false)
+  const visibleThinkingLevels = ['off' as const, ...thinkingLevelsForSelection(selectedOption, autoActive)]
+  const selectedThinking = visibleThinkingLevels.includes(thinking) ? thinking : 'off'
 
   return (
     <Modal
@@ -209,8 +218,8 @@ export function ModelPopover({
                 aria-label="Thinking depth"
                 className="flex shrink-0 items-center gap-0.5 rounded-pill border border-hairline bg-card-raised p-0.5"
               >
-                {THINKING_LEVELS.map((level) => {
-                  const active = thinking === level
+                {visibleThinkingLevels.map((level) => {
+                  const active = selectedThinking === level
                   return (
                     <button
                       key={level}
@@ -235,4 +244,20 @@ export function ModelPopover({
       </div>
     </Modal>
   )
+}
+
+function thinkingForOption(
+  option: ModelOption,
+  thinking: ThinkingLevel,
+): Exclude<ThinkingLevel, 'off'> | undefined {
+  if (thinking === 'off') return undefined
+  return option.supportedThinkingLevels?.includes(thinking) ? thinking : undefined
+}
+
+function thinkingLevelsForSelection(
+  selectedOption: ModelOption | null,
+  autoActive: boolean,
+): Array<Exclude<ThinkingLevel, 'off'>> {
+  if (autoActive) return AUTO_THINKING_LEVELS
+  return selectedOption?.supportedThinkingLevels ?? []
 }

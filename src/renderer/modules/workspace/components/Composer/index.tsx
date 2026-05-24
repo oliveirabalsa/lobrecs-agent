@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom'
 import type {
   AgentId,
   AgentApprovalMode,
+  AgentThinkingLevel,
   ImageAttachment,
   Project,
   RoutingDecision,
@@ -51,6 +52,7 @@ export interface ComposerStartedSession {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
   planMode?: boolean
 }
 
@@ -87,6 +89,7 @@ export interface ComposerProps {
     agentId?: AgentId,
     modelOverride?: string,
     approvalMode?: AgentApprovalMode,
+    thinking?: AgentThinkingLevel,
   ) => void | Promise<void>
 }
 
@@ -287,6 +290,7 @@ export function Composer({
           manualOption?.agentId,
           manualOption?.modelId,
           approvalMode,
+          modelSelection.thinking,
         )
         setDraft('')
         clearAttachments()
@@ -314,6 +318,7 @@ export function Composer({
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
         approvalMode,
+        thinking: modelSelection.thinking,
         imageAttachments: sentAttachments,
         threadId: activeThreadId ?? undefined,
         planMode: planMode || undefined,
@@ -327,6 +332,7 @@ export function Composer({
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
         approvalMode,
+        thinking: modelSelection.thinking,
         planMode,
         createdAt: startedAt,
       })
@@ -350,6 +356,7 @@ export function Composer({
     clearAttachments,
     draft,
     manualOption,
+    modelSelection.thinking,
     onEnqueue,
     onSessionStarted,
     planMode,

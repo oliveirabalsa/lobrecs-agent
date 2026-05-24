@@ -1,6 +1,7 @@
 import type {
   ImageAttachment,
   AgentApprovalMode,
+  AgentThinkingLevel,
   Project,
   RoutingDecision,
   SessionStatus,
@@ -17,6 +18,7 @@ export interface ActiveSessionMeta {
   agentId?: Project['agentId']
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
   planMode?: boolean
   createdAt?: number
 }
@@ -35,6 +37,7 @@ export interface StartedSessionSummary {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
   planMode?: boolean
   createdAt?: number
 }

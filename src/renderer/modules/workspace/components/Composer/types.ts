@@ -1,6 +1,7 @@
 import type {
   AgentModelCatalog,
   AgentApprovalMode,
+  AgentThinkingLevel,
   ImageAttachment,
   ModelTier,
   RoutingDecision,
@@ -10,7 +11,7 @@ import type {
 export type ApprovalMode = AgentApprovalMode
 
 /** Reasoning/thinking depth requested for the selected model. */
-export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
+export type ThinkingLevel = AgentThinkingLevel
 
 /** `'auto'` = router picks; otherwise pinned to a specific agent + model. */
 export type ModelSelection =
@@ -30,6 +31,8 @@ export interface ModelOption {
   modelId: string
   label: string
   tier: ModelTier
+  defaultThinkingLevel?: Exclude<ThinkingLevel, 'off'>
+  supportedThinkingLevels?: Array<Exclude<ThinkingLevel, 'off'>>
 }
 
 export interface ModelGroup {

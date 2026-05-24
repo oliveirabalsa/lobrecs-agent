@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   AgentId,
+  AgentThinkingLevel,
   ApprovalRequest,
   DiffProposal,
   Project,
@@ -318,6 +319,7 @@ export function useWorkspaceController() {
       agentId: summary.agentId,
       modelOverride: summary.modelOverride,
       approvalMode: summary.approvalMode,
+      thinking: summary.thinking,
       planMode: summary.planMode,
       createdAt: summary.createdAt ?? Date.now(),
     })
@@ -456,6 +458,7 @@ export function useWorkspaceController() {
     agentId?: AgentId,
     modelOverride?: string,
     approvalMode?: StartedSessionSummary['approvalMode'],
+    thinking?: AgentThinkingLevel,
   ): Promise<void> {
     if (!selectedProject || !activeThreadId) return
 
@@ -467,6 +470,7 @@ export function useWorkspaceController() {
         agentId,
         modelOverride,
         approvalMode,
+        thinking,
       })
       setBannerError(null)
     } catch (error: unknown) {
@@ -481,6 +485,7 @@ export function useWorkspaceController() {
       agentId?: AgentId
       modelOverride?: string
       approvalMode?: StartedSessionSummary['approvalMode']
+      thinking?: AgentThinkingLevel
     },
   ): Promise<void> {
     if (!selectedProject || !activeSessionId) return
@@ -493,6 +498,7 @@ export function useWorkspaceController() {
         agentId: options?.agentId,
         modelOverride: options?.modelOverride,
         approvalMode: options?.approvalMode,
+        thinking: options?.thinking,
       })
       handleSessionStarted({
         sessionId: result.sessionId,
@@ -502,6 +508,7 @@ export function useWorkspaceController() {
         agentId: toStartedSessionAgentId(options?.agentId ?? activeSession?.agentId),
         modelOverride: options?.modelOverride ?? activeSession?.modelOverride,
         approvalMode: options?.approvalMode ?? activeSession?.approvalMode,
+        thinking: options?.thinking ?? activeSession?.thinking,
         createdAt: Date.now(),
       })
     } catch (error: unknown) {
@@ -526,6 +533,7 @@ export function useWorkspaceController() {
         agentId: queuedMessage.agentId,
         modelOverride: queuedMessage.model,
         approvalMode: queuedMessage.approvalMode,
+        thinking: queuedMessage.thinking,
       })
       setBannerError(null)
     } catch (error: unknown) {

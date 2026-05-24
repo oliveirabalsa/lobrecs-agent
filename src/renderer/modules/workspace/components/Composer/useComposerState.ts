@@ -40,7 +40,16 @@ function readApprovalMode(): ApprovalMode {
 }
 
 function parseThinking(value: unknown): ThinkingLevel | undefined {
-  if (value === 'off' || value === 'low' || value === 'medium' || value === 'high') return value
+  if (
+    value === 'off' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+  ) {
+    return value
+  }
   return undefined
 }
 
