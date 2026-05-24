@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../../../shared/types'
 import {
   deriveSessionActivities,
+  latestHistoricalLiveDiffProposals,
   shouldReplayHistoricalSessionEvent,
 } from './useSessionEvents'
 
@@ -176,6 +177,106 @@ describe('deriveSessionActivities', () => {
     expect(shouldReplayHistoricalSessionEvent(historicalLiveDiff)).toBe(false)
     expect(shouldReplayHistoricalSessionEvent(completionDiff)).toBe(true)
     expect(deriveSessionActivities([historicalLiveDiff])).toEqual([])
+  })
+
+  it('restores the latest live diff snapshot when no completion diff superseded it', () => {
+    const firstLiveDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/first.ts',
+            originalContent: 'old\n',
+            proposedContent: 'new\n',
+          },
+        ],
+      },
+      timestamp: 1,
+    }
+    const latestLiveDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/latest.ts',
+            originalContent: 'before\n',
+            proposedContent: 'after\n',
+          },
+        ],
+      },
+      timestamp: 2,
+    }
+
+    expect(latestHistoricalLiveDiffProposals([firstLiveDiff, latestLiveDiff])).toEqual([
+      expect.objectContaining({
+        filePath: '/repo/latest.ts',
+        additions: 1,
+        deletions: 1,
+        status: 'pending',
+      }),
+    ])
+  })
+
+  it('does not restore live diff snapshots after a completion diff is available', () => {
+    const liveDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/live.ts',
+            originalContent: 'old\n',
+            proposedContent: 'new\n',
+          },
+        ],
+      },
+      timestamp: 1,
+    }
+    const completionDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: [
+        {
+          filePath: '/repo/final.ts',
+          originalContent: 'before\n',
+          proposedContent: 'after\n',
+        },
+      ],
+      timestamp: 2,
+    }
+
+    expect(latestHistoricalLiveDiffProposals([liveDiff, completionDiff])).toEqual([])
+  })
+
+  it('does not restore live diff snapshots after an empty completion diff is available', () => {
+    const liveDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/live.ts',
+            originalContent: 'old\n',
+            proposedContent: 'new\n',
+          },
+        ],
+      },
+      timestamp: 1,
+    }
+    const emptyCompletionDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: [],
+      timestamp: 2,
+    }
+
+    expect(latestHistoricalLiveDiffProposals([liveDiff, emptyCompletionDiff])).toEqual([])
   })
 })
 

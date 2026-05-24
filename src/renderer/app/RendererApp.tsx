@@ -420,7 +420,6 @@ export function RendererApp() {
           busy={workspace.isBusy || Boolean(workspace.approvalRequest)}
           busyReason={workspace.busyReason}
           onBannerError={workspace.handleWorkspaceError}
-          onMainViewChange={workspace.setMainView}
           onSwarmOpenChange={workspace.setSwarmOpen}
           onCancelSession={workspace.handleCancelSession}
           onRerunSession={() => void handleRerunSession()}

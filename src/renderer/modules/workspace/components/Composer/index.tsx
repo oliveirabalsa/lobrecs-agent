@@ -76,6 +76,7 @@ export interface ComposerProps {
   worktreeBranch?: string | null
   hasProjectContext?: boolean
   onContextClick?: () => void
+  onOpenSwarm?: () => void
   onSessionStarted: (session: ComposerStartedSession) => void
   /**
    * When provided, submitting while `busy` queues the message instead of
@@ -137,6 +138,7 @@ export function Composer({
   worktreeBranch = null,
   hasProjectContext = false,
   onContextClick,
+  onOpenSwarm,
   onSessionStarted,
   onEnqueue,
 }: ComposerProps) {
@@ -653,6 +655,17 @@ export function Composer({
                 Plan
               </button>
             ) : null}
+            {onOpenSwarm ? (
+              <button
+                type="button"
+                onClick={onOpenSwarm}
+                aria-label="Open swarm builder"
+                title="Open swarm builder"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary"
+              >
+                <BeeIcon />
+              </button>
+            ) : null}
             {busyReason && !queueAllowed ? (
               <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
             ) : null}
@@ -751,6 +764,32 @@ function PlanModeIcon() {
       <path d="M4 12h10" />
       <path d="M4 18h7" />
       <path d="m15 16 2 2 4-4" />
+    </svg>
+  )
+}
+
+function BeeIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7.5 8.5c-1.8-1.4-3.5-1.6-4.6-.5-.9.9-.5 2.5.9 3.5 1.1.8 2.5 1 3.8.6" />
+      <path d="M16.5 8.5c1.8-1.4 3.5-1.6 4.6-.5.9.9.5 2.5-.9 3.5-1.1.8-2.5 1-3.8.6" />
+      <path d="M8 9.5c.8-1.4 2.2-2.2 4-2.2s3.2.8 4 2.2c.9 1.5.9 4.1 0 5.6-.8 1.4-2.2 2.2-4 2.2s-3.2-.8-4-2.2c-.9-1.5-.9-4.1 0-5.6Z" />
+      <path d="M9 11h6" />
+      <path d="M8.8 14h6.4" />
+      <path d="M9.5 5.5 8 3.5" />
+      <path d="m14.5 5.5 1.5-2" />
+      <path d="M11 18.5 9.5 21" />
+      <path d="m13 18.5 1.5 2.5" />
     </svg>
   )
 }

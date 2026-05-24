@@ -83,6 +83,10 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
       .listEvents(sessionId)
       .then((loadedEvents) => {
         if (cancelled) return
+        const liveDiffProposals = latestHistoricalLiveDiffProposals(loadedEvents)
+        if (liveDiffProposals.length > 0) {
+          optionsRef.current.onDiffProposals?.(liveDiffProposals)
+        }
         loadedEvents.filter(shouldReplayHistoricalSessionEvent).forEach(append)
       })
       .finally(() => {
@@ -172,6 +176,21 @@ export function deriveSessionActivities(events: readonly AgentEvent[]): AgentAct
 
 export function shouldReplayHistoricalSessionEvent(event: AgentEvent): boolean {
   return !(event.type === 'diff' && isLiveDiffPayload(event.payload))
+}
+
+export function latestHistoricalLiveDiffProposals(
+  events: readonly AgentEvent[],
+): DiffProposal[] {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]
+    if (event.type !== 'diff') continue
+
+    if (!isLiveDiffPayload(event.payload)) return []
+
+    return normalizeDiffPayload(event.payload)
+  }
+
+  return []
 }
 
 function timedActivitiesFromEvents(events: readonly AgentEvent[]): TimedActivity[] {

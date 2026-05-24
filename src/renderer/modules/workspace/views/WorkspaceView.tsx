@@ -61,7 +61,6 @@ interface WorkspaceViewProps {
   busy: boolean
   busyReason?: string
   onBannerError: (message: string) => void
-  onMainViewChange: Dispatch<SetStateAction<MainView>>
   onSwarmOpenChange: Dispatch<SetStateAction<boolean>>
   onCancelSession: (sessionId: string) => void | Promise<void>
   onRerunSession?: () => void | Promise<void>
@@ -111,13 +110,6 @@ interface WorkspaceViewProps {
   onToggleSidebar?: () => void
 }
 
-const MAIN_VIEWS: MainView[] = ['workspace', 'costs', 'automations', 'memory']
-const MAIN_VIEW_LABELS: Record<MainView, string> = {
-  workspace: 'Workspace',
-  costs: 'Usage',
-  automations: 'Automations',
-  memory: 'Memory',
-}
 const RIGHT_PANEL_FULLSCREEN_CLASS =
   'absolute inset-0 z-50 flex min-w-0 flex-col border-l border-hairline bg-canvas shadow-2xl shadow-black/50'
 const RIGHT_PANEL_DOCKED_CLASS =
@@ -173,7 +165,6 @@ export function WorkspaceView({
   busy,
   busyReason,
   onBannerError,
-  onMainViewChange,
   onSwarmOpenChange,
   onCancelSession,
   onRerunSession,
@@ -758,31 +749,6 @@ export function WorkspaceView({
               onToggleSidebar={onToggleSidebar}
             />
 
-            <div className="flex h-9 shrink-0 items-center gap-2 border-b border-hairline bg-canvas px-3 py-1.5">
-              {MAIN_VIEWS.map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => onMainViewChange(view)}
-                  className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors ${
-                    mainView === view
-                      ? 'bg-white/10 text-primary'
-                      : 'text-muted hover:bg-white/5 hover:text-secondary'
-                  }`}
-                >
-                  {MAIN_VIEW_LABELS[view]}
-                </button>
-              ))}
-              <div className="flex-1" />
-              <button
-                type="button"
-                onClick={() => onSwarmOpenChange(true)}
-                className="shrink-0 whitespace-nowrap rounded border border-hairline bg-card px-2 py-1 text-[11px] font-medium text-secondary hover:bg-card-raised hover:text-primary"
-              >
-                Swarm
-              </button>
-            </div>
-
             {bannerError ? (
               <div className="shrink-0 break-words border-b border-accent-del/40 bg-accent-del/10 px-4 py-2 text-xs text-accent-del">
                 {bannerError}
@@ -860,6 +826,7 @@ export function WorkspaceView({
                           contextPercent={contextPercent}
                           hasProjectContext={Boolean(selectedProject.context?.trim())}
                           onContextClick={openContextExplorer}
+                          onOpenSwarm={() => onSwarmOpenChange(true)}
                           onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
                         />
                       </div>
