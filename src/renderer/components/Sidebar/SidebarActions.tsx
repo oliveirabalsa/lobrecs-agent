@@ -5,6 +5,8 @@ export interface SidebarActionsProps {
   onSearch?: () => void
   onPlugins?: () => void
   onAutomations?: () => void
+  onCliTools?: () => void
+  cliToolsActive?: boolean
 }
 
 interface ActionRowProps {
@@ -13,6 +15,7 @@ interface ActionRowProps {
   onClick?: () => void
   disabled?: boolean
   shortcut?: string
+  active?: boolean
 }
 
 export function SidebarActions({
@@ -20,6 +23,8 @@ export function SidebarActions({
   onSearch,
   onPlugins,
   onAutomations,
+  onCliTools,
+  cliToolsActive = false,
 }: SidebarActionsProps) {
   return (
     <nav className="flex flex-col px-1.5 py-1">
@@ -43,6 +48,14 @@ export function SidebarActions({
           onClick={onPlugins}
         />
       ) : null}
+      {onCliTools ? (
+        <ActionRow
+          icon={<CliToolsIcon />}
+          label="CLIs"
+          onClick={onCliTools}
+          active={cliToolsActive}
+        />
+      ) : null}
       {onAutomations ? (
         <ActionRow
           icon={<AutomationsIcon />}
@@ -54,11 +67,13 @@ export function SidebarActions({
   )
 }
 
-function ActionRow({ icon, label, onClick, disabled, shortcut }: ActionRowProps) {
+function ActionRow({ icon, label, onClick, disabled, shortcut, active }: ActionRowProps) {
   const baseClasses =
     'no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left transition-colors'
   const stateClasses = disabled
     ? 'cursor-not-allowed text-muted/60'
+    : active
+      ? 'bg-white/10 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary active:bg-white/10'
 
   return (
@@ -69,7 +84,11 @@ function ActionRow({ icon, label, onClick, disabled, shortcut }: ActionRowProps)
       className={`${baseClasses} ${stateClasses}`}
       title={disabled ? `${label} (coming soon)` : undefined}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted">
+      <span
+        className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+          active ? 'text-primary' : 'text-muted'
+        }`}
+      >
         {icon}
       </span>
       <span className="flex-1 truncate text-[13px] leading-none">{label}</span>
@@ -149,6 +168,26 @@ function AutomationsIcon() {
       aria-hidden="true"
     >
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  )
+}
+
+function CliToolsIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M8 9l3 3-3 3" />
+      <path d="M13 15h3" />
     </svg>
   )
 }

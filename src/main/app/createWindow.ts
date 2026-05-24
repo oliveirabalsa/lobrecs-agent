@@ -1,10 +1,12 @@
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getAppIconPath } from './appIcon'
+import { getInitialWindowBounds } from './windowBounds'
 
 export function createMainWindow(): BrowserWindow {
   const icon = getAppIconPath()
+  const initialBounds = getInitialWindowBounds(screen.getPrimaryDisplay().workArea)
 
   const macOptions =
     process.platform === 'darwin'
@@ -12,8 +14,7 @@ export function createMainWindow(): BrowserWindow {
       : {}
 
   const mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...initialBounds,
     minWidth: 980,
     minHeight: 640,
     title: 'Lobrecs Agent',

@@ -599,6 +599,26 @@ describe('preload api shape', () => {
         expected: ['system:list-verification-recipes', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.system.listManagedCliRuntimes(),
+        expected: ['system:list-managed-cli-runtimes'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.runManagedCliAction({
+            agentId: 'codex',
+            actionId: 'doctor',
+            repoPath: '/tmp/repo',
+          }),
+        expected: [
+          'system:run-managed-cli-action',
+          {
+            agentId: 'codex',
+            actionId: 'doctor',
+            repoPath: '/tmp/repo',
+          },
+        ],
+      },
+      {
         call: (agentforge) =>
           agentforge.system.saveImageAttachment({
             dataUrl: 'data:image/png;base64,AAAA',

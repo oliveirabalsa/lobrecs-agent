@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3'
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import { homedir, platform } from 'node:os'
+import path from 'node:path'
+import { promisify } from 'node:util'
 import type { AgentAdapter } from '../../../agents'
 import { resolveCommand, runCommandText } from '../../../agents/command'
 import { buildProcessEnvironment } from '../../../process/environment'
@@ -11,6 +15,12 @@ import {
   type ProviderUsageSummary,
   type SupportedAgentId,
 } from '../../../../shared/types'
+
+const execFileAsync = promisify(execFile)
+const ANTHROPIC_OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+const ANTIGRAVITY_QUOTA_URL =
+  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota'
+const HTTP_TIMEOUT_MS = 8000
 
 interface UsageAggregateRow {
   agent_id: string
@@ -120,15 +130,39 @@ async function collectCliProviderLimit(
   if (agentId === 'claude-code') return collectClaudeUsage(runtime)
   if (agentId === 'opencode') return collectOpenCodeUsage(runtime)
   if (agentId === 'codex') return collectCodexUsage(runtime)
+  if (agentId === 'antigravity') return collectAntigravityUsage()
 
   return providerLimitUnavailable(
     'Quota telemetry unavailable',
-    'Antigravity CLI plan limits depend on Google AI plan status, but the CLI does not expose stable local quota/reset telemetry yet.',
-    'antigravity docs',
+    'This CLI does not expose stable local quota/reset telemetry yet.',
   )
 }
 
 async function collectClaudeUsage(
+  runtime?: AgentRuntimeSettings,
+): Promise<ProviderUsageRow['limit']> {
+  const oauthResult = await collectClaudeOauthUsage().catch(() => null)
+  if (oauthResult) return oauthResult
+
+  return collectClaudeCliUsage(runtime)
+}
+
+async function collectClaudeOauthUsage(): Promise<ProviderUsageRow['limit'] | null> {
+  const token = await readClaudeOauthToken()
+  if (!token) return null
+
+  const response = await fetchJsonWithTimeout(ANTHROPIC_OAUTH_USAGE_URL, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'anthropic-beta': 'oauth-2025-04-20',
+      'User-Agent': 'lobrecs-agent/usage',
+    },
+  })
+
+  return parseAnthropicOauthUsage(response)
+}
+
+async function collectClaudeCliUsage(
   runtime?: AgentRuntimeSettings,
 ): Promise<ProviderUsageRow['limit']> {
   const command = resolveCommand('CLAUDE_COMMAND', 'claude', runtime?.command)
@@ -136,12 +170,12 @@ async function collectClaudeUsage(
 
   try {
     output = await runCommandText(command, ['-p', '--output-format', 'json', '--no-session-persistence', '/usage'], {
-      timeout: 8000,
+      timeout: HTTP_TIMEOUT_MS,
       maxBuffer: 2 * 1024 * 1024,
     })
   } catch {
     output = await runCommandText(command, ['-p', '--output-format', 'json', '/usage'], {
-      timeout: 8000,
+      timeout: HTTP_TIMEOUT_MS,
       maxBuffer: 2 * 1024 * 1024,
     })
   }
@@ -150,12 +184,34 @@ async function collectClaudeUsage(
     command,
     ['-p', '--output-format', 'json', '--no-session-persistence', '/context'],
     {
-      timeout: 8000,
+      timeout: HTTP_TIMEOUT_MS,
       maxBuffer: 2 * 1024 * 1024,
     },
   ).catch(() => '')
 
   return parseClaudeUsage(output, contextOutput)
+}
+
+async function collectAntigravityUsage(): Promise<ProviderUsageRow['limit']> {
+  const credentials = await readGeminiOauthCredentials()
+  if (!credentials) {
+    return providerLimitUnavailable(
+      'Antigravity login required',
+      'Sign in to Antigravity (or run `antigravity login`) to load remote quota telemetry. No Google OAuth credentials were found on disk.',
+      'antigravity',
+    )
+  }
+
+  const response = await fetchJsonWithTimeout(ANTIGRAVITY_QUOTA_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${credentials.accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  })
+
+  return parseAntigravityQuota(response)
 }
 
 async function collectCodexUsage(
@@ -200,6 +256,139 @@ export function parseClaudeUsage(output: string, contextOutput = ''): ProviderUs
     resetsAt: null,
     usedPercent: percent,
     source: 'claude /usage',
+  }
+}
+
+const CLAUDE_OAUTH_WINDOW_LABELS: Record<string, { label: string; windowMinutes: number }> = {
+  five_hour: { label: 'Session', windowMinutes: 300 },
+  seven_day: { label: 'Weekly', windowMinutes: 10080 },
+  seven_day_opus: { label: 'Weekly Opus', windowMinutes: 10080 },
+  seven_day_sonnet: { label: 'Weekly Sonnet', windowMinutes: 10080 },
+  seven_day_cowork: { label: 'Weekly Cowork', windowMinutes: 10080 },
+  seven_day_omelette: { label: 'Weekly Designs', windowMinutes: 10080 },
+  seven_day_oauth_apps: { label: 'Weekly OAuth apps', windowMinutes: 10080 },
+  seven_day_design: { label: 'Designs', windowMinutes: 10080 },
+  seven_day_routines: { label: 'Daily Routines', windowMinutes: 10080 },
+}
+
+export function parseAnthropicOauthUsage(payload: unknown): ProviderUsageRow['limit'] {
+  const root = asRecord(payload)
+  if (!root) {
+    return providerLimitUnavailable(
+      'Unexpected usage payload',
+      'Anthropic /api/oauth/usage returned a non-object response.',
+      'claude.ai api',
+    )
+  }
+
+  const primary = parseAnthropicBucket(root.five_hour)
+  const weekly = parseAnthropicBucket(root.seven_day)
+  const namedDetails: string[] = []
+
+  for (const [key, value] of Object.entries(root)) {
+    if (key === 'five_hour' || key === 'seven_day' || key === 'extra_usage') continue
+    const meta = CLAUDE_OAUTH_WINDOW_LABELS[key]
+    if (!meta) continue
+    const bucket = parseAnthropicBucket(value)
+    if (!bucket || bucket.usedPercent === null) continue
+    namedDetails.push(
+      `${meta.label} ${formatPercent(bucket.usedPercent)} used${
+        bucket.resetsAt ? `, resets ${new Date(bucket.resetsAt).toLocaleString()}` : ''
+      }`,
+    )
+  }
+
+  if (!primary && !weekly && namedDetails.length === 0) {
+    return providerLimitUnavailable(
+      'Subscription usage empty',
+      'Anthropic returned a usage payload without any rate-limit buckets for this account.',
+      'claude.ai api',
+    )
+  }
+
+  const headlinePercent = primary?.usedPercent ?? weekly?.usedPercent ?? null
+  const headlineWindow = primary
+    ? formatWindowDuration(300)
+    : weekly
+      ? formatWindowDuration(10080)
+      : null
+  const label =
+    headlinePercent === null
+      ? 'Subscription usage loaded'
+      : headlineWindow
+        ? `${formatPercent(headlinePercent)} used in ${headlineWindow} window`
+        : `${formatPercent(headlinePercent)} used`
+
+  const detailParts = [
+    primary
+      ? `Session 5h ${formatPercent(primary.usedPercent ?? 0)} used${
+          primary.resetsAt ? `, resets ${new Date(primary.resetsAt).toLocaleString()}` : ''
+        }`
+      : null,
+    weekly
+      ? `Weekly 7d ${formatPercent(weekly.usedPercent ?? 0)} used${
+          weekly.resetsAt ? `, resets ${new Date(weekly.resetsAt).toLocaleString()}` : ''
+        }`
+      : null,
+    ...namedDetails,
+    parseAnthropicExtraUsage(root.extra_usage),
+  ].filter((part): part is string => Boolean(part))
+
+  return {
+    status: 'available',
+    label,
+    detail: detailParts.join('; ') || 'Anthropic returned subscription usage telemetry.',
+    resetsAt: primary?.resetsAt ?? weekly?.resetsAt ?? null,
+    usedPercent: headlinePercent,
+    source: 'claude.ai api',
+  }
+}
+
+export function parseAntigravityQuota(payload: unknown): ProviderUsageRow['limit'] {
+  const root = asRecord(payload)
+  const buckets = Array.isArray(root?.buckets) ? (root.buckets as unknown[]) : []
+  if (buckets.length === 0) {
+    return providerLimitUnavailable(
+      'Quota telemetry empty',
+      'Antigravity returned no quota buckets for this account.',
+      'antigravity api',
+    )
+  }
+
+  const parsed = buckets
+    .map((bucket) => parseAntigravityBucket(bucket))
+    .filter((bucket): bucket is NonNullable<ReturnType<typeof parseAntigravityBucket>> => bucket !== null)
+
+  if (parsed.length === 0) {
+    return providerLimitUnavailable(
+      'Quota telemetry malformed',
+      'Antigravity quota buckets did not include usable fraction or model fields.',
+      'antigravity api',
+    )
+  }
+
+  const headline = parsed.reduce((worst, bucket) =>
+    bucket.usedPercent > worst.usedPercent ? bucket : worst,
+  )
+  const detail = parsed
+    .map(
+      (bucket) =>
+        `${bucket.modelId} ${formatPercent(bucket.usedPercent)} used${
+          bucket.resetsAt ? `, resets ${new Date(bucket.resetsAt).toLocaleString()}` : ''
+        }`,
+    )
+    .join('; ')
+
+  return {
+    status: 'available',
+    label:
+      headline.usedPercent === 0
+        ? 'Antigravity quota fully available'
+        : `${formatPercent(headline.usedPercent)} used (${headline.modelId})`,
+    detail,
+    resetsAt: headline.resetsAt,
+    usedPercent: headline.usedPercent,
+    source: 'antigravity api',
   }
 }
 
@@ -429,6 +618,136 @@ function numberOrNull(value: unknown): number | null {
 function unixSecondsToMilliseconds(value: number | null): number | null {
   if (value === null) return null
   return value > 10_000_000_000 ? value : value * 1000
+}
+
+function parseAnthropicBucket(value: unknown): ParsedLimitBucket | null {
+  const bucket = asRecord(value)
+  if (!bucket) return null
+
+  const usedPercent = numberOrNull(bucket.utilization)
+  const resetsAtRaw = bucket.resets_at ?? bucket.resetsAt
+  const resetsAt = typeof resetsAtRaw === 'string' ? Date.parse(resetsAtRaw) : null
+
+  if (usedPercent === null && !resetsAt) return null
+
+  return {
+    usedPercent,
+    windowDurationMins: null,
+    resetsAt: Number.isFinite(resetsAt as number) ? (resetsAt as number) : null,
+  }
+}
+
+function parseAnthropicExtraUsage(value: unknown): string | null {
+  const extra = asRecord(value)
+  if (!extra || extra.is_enabled !== true) return null
+
+  const used = numberOrNull(extra.used_credits)
+  const limit = numberOrNull(extra.monthly_limit)
+  const currency = typeof extra.currency === 'string' ? ` ${extra.currency}` : ''
+
+  if (used === null && limit === null) return null
+
+  return `Extra credits ${used ?? '?'}/${limit ?? '?'}${currency}`
+}
+
+function parseAntigravityBucket(value: unknown): {
+  modelId: string
+  usedPercent: number
+  resetsAt: number | null
+} | null {
+  const bucket = asRecord(value)
+  if (!bucket) return null
+
+  const modelId = typeof bucket.modelId === 'string' ? bucket.modelId : null
+  const remaining = numberOrNull(bucket.remainingFraction)
+  if (!modelId || remaining === null) return null
+
+  const resetsAtRaw = typeof bucket.resetTime === 'string' ? Date.parse(bucket.resetTime) : NaN
+
+  return {
+    modelId,
+    usedPercent: Math.max(0, Math.min(100, Math.round((1 - remaining) * 1000) / 10)),
+    resetsAt: Number.isFinite(resetsAtRaw) ? resetsAtRaw : null,
+  }
+}
+
+async function readClaudeOauthToken(): Promise<string | null> {
+  const fromKeychain = await readClaudeKeychainToken()
+  if (fromKeychain) return fromKeychain
+
+  return readClaudeCredentialFile()
+}
+
+async function readClaudeKeychainToken(): Promise<string | null> {
+  if (platform() !== 'darwin') return null
+
+  try {
+    const { stdout } = await execFileAsync(
+      'security',
+      ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { timeout: 4000 },
+    )
+    return extractClaudeAccessToken(stdout)
+  } catch {
+    return null
+  }
+}
+
+async function readClaudeCredentialFile(): Promise<string | null> {
+  try {
+    const filePath = path.join(homedir(), '.claude', '.credentials.json')
+    const text = await readFile(filePath, 'utf8')
+    return extractClaudeAccessToken(text)
+  } catch {
+    return null
+  }
+}
+
+function extractClaudeAccessToken(raw: string): string | null {
+  const payload = parseJsonObject(raw.trim())
+  const oauth = asRecord(payload?.claudeAiOauth)
+  const token = oauth?.accessToken
+  if (typeof token !== 'string' || !token) return null
+
+  const expiresAt = numberOrNull(oauth?.expiresAt)
+  if (expiresAt !== null && expiresAt < Date.now()) return null
+
+  return token
+}
+
+async function readGeminiOauthCredentials(): Promise<{ accessToken: string } | null> {
+  try {
+    const filePath = path.join(homedir(), '.gemini', 'oauth_creds.json')
+    const text = await readFile(filePath, 'utf8')
+    const payload = parseJsonObject(text)
+    const accessToken = typeof payload?.access_token === 'string' ? payload.access_token : null
+    if (!accessToken) return null
+
+    const expiry = numberOrNull(payload?.expiry_date)
+    if (expiry !== null && expiry < Date.now()) return null
+
+    return { accessToken }
+  } catch {
+    return null
+  }
+}
+
+async function fetchJsonWithTimeout(
+  url: string,
+  init: RequestInit,
+): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal })
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`.trim())
+    }
+    return await response.json()
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 function readCodexAppServerRateLimits(command: string): Promise<unknown> {

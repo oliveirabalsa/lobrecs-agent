@@ -7,7 +7,7 @@ export function registerUpdateHandlers(service: AppUpdateService = appUpdateServ
   ipcMain.handle('updates:check', async () => service.checkForUpdates())
   ipcMain.handle('updates:download', async () => service.downloadUpdate())
   ipcMain.handle('updates:install-and-restart', async () => {
-    service.installDownloadedUpdate()
+    await service.installDownloadedUpdate()
   })
   ipcMain.handle('updates:open-release-url', async () => service.openReleaseUrl())
 }

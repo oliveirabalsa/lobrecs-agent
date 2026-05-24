@@ -26,10 +26,12 @@ interface SidebarProps {
   onActiveThreadDeleted?: () => void
   onSearch?: () => void
   onPlugins?: () => void
+  onCliTools?: () => void
   onAutomations?: () => void
   onOpenUsage?: () => void
   onOpenSettings?: () => void
   settingsActive?: boolean
+  cliToolsActive?: boolean
   usageActive?: boolean
   /**
    * Optional slot overrides — if provided, these replace the corresponding
@@ -72,10 +74,12 @@ export function Sidebar({
   onActiveThreadDeleted,
   onSearch,
   onPlugins,
+  onCliTools,
   onAutomations,
   onOpenUsage,
   onOpenSettings,
   settingsActive,
+  cliToolsActive,
   usageActive,
   slots,
 }: SidebarProps) {
@@ -206,6 +210,8 @@ export function Sidebar({
         onNewChat={onNewChat}
         onSearch={onSearch}
         onPlugins={onPlugins}
+        onCliTools={onCliTools}
+        cliToolsActive={cliToolsActive}
         onAutomations={onAutomations}
       />
     )

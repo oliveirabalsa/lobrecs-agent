@@ -1,5 +1,5 @@
 import type { AdapterCapability, VerificationRecipe } from './runs'
-import type { ImageAttachment } from './agents'
+import type { ImageAttachment, SupportedAgentId } from './agents'
 
 export type SelectedDirectoryPath = string | null
 
@@ -87,6 +87,58 @@ export interface TerminalFailureContext {
   signal?: number
   outputTail: string
   capturedAt: number
+}
+
+export type ManagedCliActionId =
+  | 'install'
+  | 'upgrade'
+  | 'auth-status'
+  | 'doctor'
+  | 'models'
+
+export interface ManagedCliAction {
+  id: ManagedCliActionId
+  label: string
+  description: string
+  commandPreview: string
+  requiresInstalled: boolean
+  available: boolean
+  unavailableReason?: string
+}
+
+export interface ManagedCliStatus {
+  agentId: SupportedAgentId
+  name: string
+  command: string
+  commandPath?: string
+  installed: boolean
+  version?: string
+  versionError?: string
+  latestVersion?: string
+  latestVersionError?: string
+  updateAvailable: boolean
+  docsUrl: string
+  installSummary: string
+  notes: string[]
+  actions: ManagedCliAction[]
+}
+
+export interface RunManagedCliActionInput {
+  agentId: SupportedAgentId
+  actionId: ManagedCliActionId
+  repoPath?: string
+}
+
+export interface ManagedCliActionResult {
+  agentId: SupportedAgentId
+  actionId: ManagedCliActionId
+  command: string
+  exitCode: number | null
+  signal?: string | null
+  stdout: string
+  stderr: string
+  startedAt: number
+  finishedAt: number
 }
 
 export type { AdapterCapability, VerificationRecipe }

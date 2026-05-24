@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEven
 import type { ThreadSearchResult } from '../../shared/types'
 import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
+import { CliToolsView } from '../modules/cli-tools'
 import { ExtensionMarketplaceView } from '../modules/extensions'
 import { SettingsView, useSettings } from '../modules/settings'
 import { AppUpdateBanner } from '../modules/updates'
@@ -43,7 +44,9 @@ export function RendererApp() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [shellView, setShellView] = useState<'workspace' | 'settings' | 'extensions'>('workspace')
+  const [shellView, setShellView] = useState<'workspace' | 'settings' | 'extensions' | 'cli-tools'>(
+    'workspace',
+  )
   const [openTerminalOnMount, setOpenTerminalOnMount] = useState(false)
 
   // Keep the mobile drawer mounted while opening, and during the close
@@ -178,6 +181,11 @@ export function RendererApp() {
     setMobileSidebarOpen(false)
   }, [])
 
+  const handleOpenCliTools = useCallback(() => {
+    setShellView('cli-tools')
+    setMobileSidebarOpen(false)
+  }, [])
+
   const handleOpenSearchResult = useCallback(
     async (result: ThreadSearchResult) => {
       const sessionId = result.sessionId ?? result.thread.lastSessionId
@@ -268,7 +276,7 @@ export function RendererApp() {
   }, [mobileSidebarOpen])
 
   useEffect(() => {
-    if (shellView !== 'settings' && shellView !== 'extensions') return
+    if (shellView !== 'settings' && shellView !== 'extensions' && shellView !== 'cli-tools') return
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') setShellView('workspace')
@@ -301,10 +309,12 @@ export function RendererApp() {
           onActiveThreadDeleted={workspace.handleNewTab}
           onSearch={handleOpenSearch}
           onPlugins={handleOpenExtensions}
+          onCliTools={handleOpenCliTools}
           onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
           onOpenUsage={handleOpenUsage}
           onOpenSettings={handleOpenSettings}
           settingsActive={shellView === 'settings'}
+          cliToolsActive={shellView === 'cli-tools'}
           usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
@@ -353,10 +363,12 @@ export function RendererApp() {
               onActiveThreadDeleted={workspace.handleNewTab}
               onSearch={handleOpenSearch}
               onPlugins={handleOpenExtensions}
+              onCliTools={handleOpenCliTools}
               onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
               onOpenUsage={handleOpenUsage}
               onOpenSettings={handleOpenSettings}
               settingsActive={shellView === 'settings'}
+              cliToolsActive={shellView === 'cli-tools'}
               usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
             />
           </div>
@@ -375,6 +387,15 @@ export function RendererApp() {
           />
         ) : shellView === 'extensions' ? (
           <ExtensionMarketplaceView
+            isMac={isMac}
+            selectedProject={workspace.selectedProject}
+            onOpenSidebar={() => setMobileSidebarOpen(true)}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={toggleSidebar}
+            onClose={handleCloseSettings}
+          />
+        ) : shellView === 'cli-tools' ? (
+          <CliToolsView
             isMac={isMac}
             selectedProject={workspace.selectedProject}
             onOpenSidebar={() => setMobileSidebarOpen(true)}

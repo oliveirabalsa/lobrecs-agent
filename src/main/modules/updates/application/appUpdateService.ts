@@ -1,24 +1,34 @@
 import { app, BrowserWindow, shell } from 'electron'
-import electronUpdater, {
-  type AppUpdater,
-  type ProgressInfo,
-  type UpdateDownloadedEvent,
-  type UpdateInfo,
-} from 'electron-updater'
 import {
   APP_UPDATE_STATUS_CHANNEL,
   type AppUpdateProgress,
-  type AppUpdateRelease,
   type AppUpdateState,
 } from '../../../../shared/types'
-import { createMacosCodeSigningErrorPatch } from '../domain/codeSigningErrors'
+import {
+  LOBRECS_AGENT_REPO,
+  releasesPageUrl,
+  type GithubReleaseAsset,
+} from '../domain/githubRelease'
+import {
+  type CheckOutcome,
+  GithubReleaseChecker,
+} from './githubReleaseChecker'
+import {
+  type DownloadProgress,
+  ManualUpdateDownloader,
+} from './manualUpdateDownloader'
 
 const AUTO_CHECK_DELAY_MS = 3_000
-const { autoUpdater } = electronUpdater
-const RELEASES_URL = 'https://github.com/oliveirabalsa/lobrecs-agent/releases/latest'
+const RELEASES_URL = releasesPageUrl(LOBRECS_AGENT_REPO)
 
 export interface CheckForUpdatesOptions {
   automatic?: boolean
+}
+
+interface PendingDownload {
+  asset: GithubReleaseAsset
+  filePath: string
+  latestVersion: string
 }
 
 export class AppUpdateService {
@@ -26,36 +36,25 @@ export class AppUpdateService {
   private checkPromise: Promise<AppUpdateState> | null = null
   private downloadPromise: Promise<AppUpdateState> | null = null
   private automaticCheckTimer: NodeJS.Timeout | null = null
+  private latestOutcome: CheckOutcome | null = null
+  private pendingDownload: PendingDownload | null = null
 
   constructor(
-    private readonly updater: AppUpdater = autoUpdater,
-    private readonly isPackaged = app.isPackaged,
+    private readonly checker: GithubReleaseChecker = new GithubReleaseChecker(),
+    private readonly downloader: ManualUpdateDownloader = new ManualUpdateDownloader(),
+    private readonly isPackaged: boolean = app.isPackaged,
   ) {
-    if (process.env.LOBRECS_AGENT_FORCE_DEV_UPDATE === '1') {
-      this.updater.forceDevUpdateConfig = true
-    }
-
-    const feedUrl = process.env.LOBRECS_AGENT_UPDATE_URL?.trim()
-    if (feedUrl) {
-      this.updater.setFeedURL(feedUrl)
-    }
-
-    this.updater.autoDownload = false
-    this.updater.autoInstallOnAppQuit = false
-    this.updater.logger = console
     this.state = this.decorateState({
       currentVersion: app.getVersion(),
       phase: this.canUseUpdater() ? 'idle' : 'disabled',
       message: this.canUseUpdater()
         ? undefined
         : 'Updates are available from packaged builds only.',
-      feedUrl: this.getFeedUrl(),
+      feedUrl: RELEASES_URL,
       canCheck: false,
       canDownload: false,
       canInstall: false,
     })
-
-    this.registerUpdaterEvents()
   }
 
   getState(): AppUpdateState {
@@ -102,27 +101,27 @@ export class AppUpdateService {
 
     if (this.state.phase === 'downloaded') return this.state
     if (this.downloadPromise) return this.downloadPromise
-    if (this.state.phase !== 'available') {
+    if (this.state.phase !== 'available' || !this.latestOutcome?.asset) {
       throw new Error('No update is available to download.')
     }
 
-    this.downloadPromise = this.doDownloadUpdate().finally(() => {
+    this.downloadPromise = this.doDownloadUpdate(this.latestOutcome).finally(() => {
       this.downloadPromise = null
     })
 
     return this.downloadPromise
   }
 
-  installDownloadedUpdate(): void {
-    if (this.state.phase !== 'downloaded') {
+  async installDownloadedUpdate(): Promise<void> {
+    if (this.state.phase !== 'downloaded' || !this.pendingDownload) {
       throw new Error('No downloaded update is ready to install.')
     }
 
-    this.updater.quitAndInstall(false, true)
+    await this.downloader.openInstaller(this.pendingDownload.filePath)
   }
 
   async openReleaseUrl(): Promise<void> {
-    await shell.openExternal(RELEASES_URL)
+    await shell.openExternal(this.latestOutcome?.releaseUrl ?? RELEASES_URL)
   }
 
   private async doCheckForUpdates(): Promise<AppUpdateState> {
@@ -136,27 +135,46 @@ export class AppUpdateService {
     })
 
     try {
-      const result = await this.updater.checkForUpdates()
+      const outcome = await this.checker.checkLatest()
+      this.latestOutcome = outcome
 
-      if (!result) {
+      if (!outcome.hasUpdate) {
         return this.setState({
-          phase: 'disabled',
-          message: 'The update provider is not configured for this build.',
+          phase: 'not-available',
+          update: {
+            version: outcome.latestVersion,
+            releaseDate: outcome.publishedAt,
+            releaseNotes: outcome.releaseNotes,
+          },
+          message: 'Lobrecs Agent is up to date.',
         })
       }
 
-      if (!result.isUpdateAvailable) {
+      if (!outcome.asset) {
         return this.setState({
-          phase: 'not-available',
-          update: toRelease(result.updateInfo),
-          message: 'Lobrecs Agent is up to date.',
+          phase: 'error',
+          error: undefined,
+          progress: undefined,
+          update: {
+            version: outcome.latestVersion,
+            releaseDate: outcome.publishedAt,
+            releaseNotes: outcome.releaseNotes,
+          },
+          message:
+            'A new release is available, but no installer is published for your platform yet.',
+          canManualDownload: true,
+          releaseUrl: outcome.releaseUrl,
         })
       }
 
       return this.setState({
         phase: 'available',
-        update: toRelease(result.updateInfo),
-        message: `Version ${result.updateInfo.version} is available.`,
+        update: {
+          version: outcome.latestVersion,
+          releaseDate: outcome.publishedAt,
+          releaseNotes: outcome.releaseNotes,
+        },
+        message: `Version ${outcome.latestVersion} is available.`,
       })
     } catch (error) {
       return this.setState({
@@ -164,123 +182,66 @@ export class AppUpdateService {
         progress: undefined,
         error: errorMessage(error),
         message: 'Could not check for updates.',
+        canManualDownload: true,
+        releaseUrl: RELEASES_URL,
       })
     }
   }
 
-  private async doDownloadUpdate(): Promise<AppUpdateState> {
+  private async doDownloadUpdate(outcome: CheckOutcome): Promise<AppUpdateState> {
+    if (!outcome.asset) {
+      return this.setState({
+        phase: 'error',
+        progress: undefined,
+        error: 'No installer asset available for your platform.',
+        message: 'No installer asset available for your platform.',
+        canManualDownload: true,
+        releaseUrl: outcome.releaseUrl,
+      })
+    }
+
     this.setState({
       phase: 'downloading',
       error: undefined,
       progress: {
         percent: 0,
         transferred: 0,
-        total: 0,
+        total: outcome.asset.size,
         bytesPerSecond: 0,
       },
       message: 'Downloading update...',
     })
 
     try {
-      await this.updater.downloadUpdate()
-      if (this.state.phase !== 'downloaded') {
-        return this.setState({
-          phase: 'downloaded',
-          progress: undefined,
-          message: this.state.update
-            ? `Version ${this.state.update.version} is ready to install.`
-            : 'Update is ready to install.',
+      const result = await this.downloader.download(outcome.asset, (progress) => {
+        this.setState({
+          phase: 'downloading',
+          progress: toAppProgress(progress),
+          message: 'Downloading update...',
         })
-      }
-      return this.state
-    } catch (error) {
-      const codeSigningErrorPatch = createMacosCodeSigningErrorPatch(error, {
-        releaseUrl: RELEASES_URL,
       })
-      if (codeSigningErrorPatch) return this.setState(codeSigningErrorPatch)
 
+      this.pendingDownload = {
+        asset: outcome.asset,
+        filePath: result.filePath,
+        latestVersion: outcome.latestVersion,
+      }
+
+      return this.setState({
+        phase: 'downloaded',
+        progress: undefined,
+        message: `Version ${outcome.latestVersion} is ready to install.`,
+      })
+    } catch (error) {
       return this.setState({
         phase: 'error',
         progress: undefined,
         error: errorMessage(error),
         message: 'Could not download the update.',
+        canManualDownload: true,
+        releaseUrl: outcome.releaseUrl,
       })
     }
-  }
-
-  private registerUpdaterEvents(): void {
-    this.updater.on('checking-for-update', () => {
-      this.setState({
-        phase: 'checking',
-        error: undefined,
-        progress: undefined,
-        message: 'Checking for updates...',
-        lastCheckedAt: Date.now(),
-      })
-    })
-
-    this.updater.on('update-not-available', (info) => {
-      this.setState({
-        phase: 'not-available',
-        update: toRelease(info),
-        progress: undefined,
-        message: 'Lobrecs Agent is up to date.',
-      })
-    })
-
-    this.updater.on('update-available', (info) => {
-      this.setState({
-        phase: 'available',
-        update: toRelease(info),
-        progress: undefined,
-        error: undefined,
-        message: `Version ${info.version} is available.`,
-      })
-    })
-
-    this.updater.on('download-progress', (progress) => {
-      this.setState({
-        phase: 'downloading',
-        progress: toProgress(progress),
-        message: 'Downloading update...',
-      })
-    })
-
-    this.updater.on('update-downloaded', (event) => {
-      this.setState({
-        phase: 'downloaded',
-        update: toRelease(event),
-        progress: undefined,
-        error: undefined,
-        message: `Version ${event.version} is ready to install.`,
-      })
-    })
-
-    this.updater.on('update-cancelled', (info) => {
-      this.setState({
-        phase: 'available',
-        update: toRelease(info),
-        progress: undefined,
-        message: 'Update download was cancelled.',
-      })
-    })
-
-    this.updater.on('error', (error) => {
-      const codeSigningErrorPatch = createMacosCodeSigningErrorPatch(error, {
-        releaseUrl: RELEASES_URL,
-      })
-      if (codeSigningErrorPatch) {
-        this.setState(codeSigningErrorPatch)
-        return
-      }
-
-      this.setState({
-        phase: 'error',
-        progress: undefined,
-        error: errorMessage(error),
-        message: 'The update flow failed.',
-      })
-    })
   }
 
   private setState(patch: Partial<AppUpdateState>): AppUpdateState {
@@ -288,7 +249,7 @@ export class AppUpdateService {
       ...this.state,
       ...patch,
       currentVersion: app.getVersion(),
-      feedUrl: this.getFeedUrl(),
+      feedUrl: RELEASES_URL,
     })
     this.broadcast()
     return this.state
@@ -311,15 +272,7 @@ export class AppUpdateService {
   }
 
   private canUseUpdater(): boolean {
-    return this.isPackaged || this.updater.forceDevUpdateConfig
-  }
-
-  private getFeedUrl(): string | undefined {
-    try {
-      return this.updater.getFeedURL() ?? undefined
-    } catch {
-      return undefined
-    }
+    return this.isPackaged || process.env.LOBRECS_AGENT_FORCE_DEV_UPDATE === '1'
   }
 
   private broadcast(): void {
@@ -335,34 +288,13 @@ export class AppUpdateService {
   }
 }
 
-function toRelease(info: UpdateInfo | UpdateDownloadedEvent): AppUpdateRelease {
-  return {
-    version: info.version,
-    releaseName: info.releaseName ?? undefined,
-    releaseDate: info.releaseDate,
-    releaseNotes: releaseNotesText(info.releaseNotes),
-  }
-}
-
-function toProgress(progress: ProgressInfo): AppUpdateProgress {
+function toAppProgress(progress: DownloadProgress): AppUpdateProgress {
   return {
     percent: finiteNumber(progress.percent),
     transferred: finiteNumber(progress.transferred),
     total: finiteNumber(progress.total),
     bytesPerSecond: finiteNumber(progress.bytesPerSecond),
   }
-}
-
-function releaseNotesText(notes: UpdateInfo['releaseNotes']): string | undefined {
-  if (typeof notes === 'string') return notes
-  if (!Array.isArray(notes)) return undefined
-
-  const text = notes
-    .map((note) => [note.version, note.note].filter(Boolean).join('\n'))
-    .join('\n\n')
-    .trim()
-
-  return text || undefined
 }
 
 function finiteNumber(value: number): number {

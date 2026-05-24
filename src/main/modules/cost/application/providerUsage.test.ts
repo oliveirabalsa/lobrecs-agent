@@ -2,7 +2,13 @@ import Database from 'better-sqlite3'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter } from '../../../agents'
 import type { SupportedAgentId } from '../../../../shared/types'
-import { listProviderUsage, parseClaudeUsage, parseCodexRateLimits } from './providerUsage'
+import {
+  listProviderUsage,
+  parseAnthropicOauthUsage,
+  parseAntigravityQuota,
+  parseClaudeUsage,
+  parseCodexRateLimits,
+} from './providerUsage'
 
 describe('listProviderUsage', () => {
   it('aggregates current-month usage by supported provider', async () => {
@@ -180,6 +186,83 @@ describe('provider usage CLI parsers', () => {
       source: 'claude /usage',
     })
     expect(limit.detail).toContain('Context window, not subscription quota: 38.7k / 1m (4%)')
+  })
+
+  it('maps the Anthropic OAuth usage payload into session + weekly buckets', () => {
+    const limit = parseAnthropicOauthUsage({
+      five_hour: { utilization: 24, resets_at: '2026-05-24T13:10:00.915990+00:00' },
+      seven_day: { utilization: 20, resets_at: '2026-05-28T20:00:00.916012+00:00' },
+      seven_day_opus: null,
+      seven_day_sonnet: { utilization: 20, resets_at: '2026-05-28T20:00:00.916019+00:00' },
+      seven_day_omelette: { utilization: 0, resets_at: null },
+      extra_usage: {
+        is_enabled: false,
+        monthly_limit: null,
+        used_credits: null,
+        utilization: null,
+        currency: null,
+      },
+    })
+
+    expect(limit).toMatchObject({
+      status: 'available',
+      label: '24% used in 5h window',
+      usedPercent: 24,
+      source: 'claude.ai api',
+      resetsAt: Date.parse('2026-05-24T13:10:00.915990+00:00'),
+    })
+    expect(limit.detail).toContain('Session 5h 24% used')
+    expect(limit.detail).toContain('Weekly 7d 20% used')
+    expect(limit.detail).toContain('Weekly Sonnet 20% used')
+    expect(limit.detail).not.toContain('Opus')
+    expect(limit.detail).not.toContain('Extra credits')
+  })
+
+  it('falls back gracefully when the Anthropic payload has no buckets', () => {
+    const limit = parseAnthropicOauthUsage({
+      five_hour: null,
+      seven_day: null,
+      extra_usage: { is_enabled: false },
+    })
+
+    expect(limit.status).toBe('unavailable')
+    expect(limit.label).toBe('Subscription usage empty')
+  })
+
+  it('maps Antigravity quota buckets into the worst-case headline percent', () => {
+    const limit = parseAntigravityQuota({
+      buckets: [
+        {
+          resetTime: '2026-05-25T08:21:00Z',
+          tokenType: 'REQUESTS',
+          modelId: 'gemini-2.5-pro',
+          remainingFraction: 0.75,
+        },
+        {
+          resetTime: '2026-05-25T08:21:00Z',
+          tokenType: 'REQUESTS',
+          modelId: 'gemini-2.5-flash',
+          remainingFraction: 1,
+        },
+      ],
+    })
+
+    expect(limit).toMatchObject({
+      status: 'available',
+      label: '25% used (gemini-2.5-pro)',
+      usedPercent: 25,
+      source: 'antigravity api',
+      resetsAt: Date.parse('2026-05-25T08:21:00Z'),
+    })
+    expect(limit.detail).toContain('gemini-2.5-pro 25% used')
+    expect(limit.detail).toContain('gemini-2.5-flash 0% used')
+  })
+
+  it('marks Antigravity as unavailable when the API returns no buckets', () => {
+    const limit = parseAntigravityQuota({ buckets: [] })
+
+    expect(limit.status).toBe('unavailable')
+    expect(limit.label).toBe('Quota telemetry empty')
   })
 
   it('uses Claude usage percentage only when /usage itself exposes one', () => {

@@ -27,7 +27,7 @@ describe('createAppUpdateViewModel', () => {
     })
   })
 
-  it('prompts for restart only after the update is downloaded', () => {
+  it('prompts to open the installer once the update is downloaded', () => {
     const viewModel = createAppUpdateViewModel({
       ...baseState,
       phase: 'downloaded',
@@ -38,7 +38,7 @@ describe('createAppUpdateViewModel', () => {
     expect(viewModel).toMatchObject({
       title: 'Version 0.1.2 is ready',
       primaryAction: 'install',
-      primaryLabel: 'Restart to update',
+      primaryLabel: 'Open installer',
       tone: 'success',
     })
   })
@@ -59,18 +59,18 @@ describe('createAppUpdateViewModel', () => {
     expect(viewModel.primaryAction).toBeUndefined()
   })
 
-  it('shows a manual update action when macOS rejects the update signature', () => {
+  it('shows a manual download action when the auto-download cannot complete', () => {
     const viewModel = createAppUpdateViewModel({
       ...baseState,
       phase: 'error',
       canManualDownload: true,
-      message: 'macOS rejected the downloaded update signature.',
-      error: 'code failed to satisfy specified code requirement(s)',
+      message: 'Could not download the update.',
+      error: 'network timeout',
     })
 
     expect(viewModel).toMatchObject({
       title: 'Manual update required',
-      detail: 'macOS rejected the downloaded update signature.',
+      detail: 'Could not download the update.',
       tone: 'warning',
     })
     expect(viewModel.primaryAction).toBeUndefined()

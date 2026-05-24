@@ -10,9 +10,12 @@ import type {
   CliEditorTerminalWriteInput,
   EditorInfo,
   ImageAttachment,
+  ManagedCliActionResult,
+  ManagedCliStatus,
   MarkdownDocument,
   OpenInEditorInput,
   ReadMarkdownDocumentInput,
+  RunManagedCliActionInput,
   SaveImageAttachmentInput,
   SelectedDirectoryPath,
   VerificationRecipe,
@@ -27,6 +30,8 @@ export interface SystemApi {
   listAgentModels(): Promise<AgentModelCatalog[]>
   listCapabilities(): Promise<AdapterCapability[]>
   listVerificationRecipes(projectId?: string): Promise<VerificationRecipe[]>
+  listManagedCliRuntimes(): Promise<ManagedCliStatus[]>
+  runManagedCliAction(input: RunManagedCliActionInput): Promise<ManagedCliActionResult>
   saveImageAttachment(input: SaveImageAttachmentInput): Promise<ImageAttachment>
   listEditors(): Promise<EditorInfo[]>
   openProjectIn(input: OpenInEditorInput): Promise<void>
@@ -49,6 +54,8 @@ export function createSystemApi(ipcRenderer: IpcInvoker & IpcSubscriber): System
     listCapabilities: () => ipcRenderer.invoke('system:list-capabilities'),
     listVerificationRecipes: (projectId) =>
       ipcRenderer.invoke('system:list-verification-recipes', projectId),
+    listManagedCliRuntimes: () => ipcRenderer.invoke('system:list-managed-cli-runtimes'),
+    runManagedCliAction: (input) => ipcRenderer.invoke('system:run-managed-cli-action', input),
     saveImageAttachment: (input) => ipcRenderer.invoke('system:save-image-attachment', input),
     listEditors: () => ipcRenderer.invoke('system:list-editors'),
     openProjectIn: (input) => ipcRenderer.invoke('system:open-in-editor', input),

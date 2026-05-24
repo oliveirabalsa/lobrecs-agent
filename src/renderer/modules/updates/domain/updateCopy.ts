@@ -63,11 +63,13 @@ export function createAppUpdateViewModel(state: AppUpdateState | null): AppUpdat
   if (state.phase === 'downloaded') {
     return {
       title: version ? `Version ${version} is ready` : 'Update ready',
-      detail: 'Restart Lobrecs Agent to install the downloaded update.',
+      detail:
+        state.message ??
+        'Open the installer and follow the prompts to finish updating.',
       tone: 'success',
       busy: false,
       primaryAction: 'install',
-      primaryLabel: 'Restart to update',
+      primaryLabel: 'Open installer',
     }
   }
 

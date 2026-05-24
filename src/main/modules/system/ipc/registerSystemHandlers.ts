@@ -13,6 +13,7 @@ import {
 import { cliEditorTerminalService } from '../application/cliEditorTerminalService'
 import { detectEditors } from '../application/detectEditors'
 import { launchEditor } from '../application/launchEditor'
+import { listManagedCliRuntimes, runManagedCliAction } from '../application/managedCliRuntimes'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import type {
   AdapterCapability,
@@ -23,9 +24,12 @@ import type {
   CliEditorTerminalWriteInput,
   EditorInfo,
   ImageAttachment,
+  ManagedCliActionResult,
+  ManagedCliStatus,
   MarkdownDocument,
   OpenInEditorInput,
   ReadMarkdownDocumentInput,
+  RunManagedCliActionInput,
   SaveImageAttachmentInput,
   SupportedAgentId,
 } from '../../../../shared/types'
@@ -58,6 +62,15 @@ export function registerSystemHandlers(context: MainIpcContext): void {
   ipcMain.handle('system:list-capabilities', async () => listCapabilities(context))
   ipcMain.handle('system:list-verification-recipes', async (_event, projectId?: string) =>
     context.settingsService.getEffective(projectId).settings.verification.recipes,
+  )
+  ipcMain.handle(
+    'system:list-managed-cli-runtimes',
+    async (): Promise<ManagedCliStatus[]> => listManagedCliRuntimes(context),
+  )
+  ipcMain.handle(
+    'system:run-managed-cli-action',
+    async (_event, input: RunManagedCliActionInput): Promise<ManagedCliActionResult> =>
+      runManagedCliAction(context, input),
   )
   ipcMain.handle('system:save-image-attachment', async (_event, input: SaveImageAttachmentInput) =>
     saveImageAttachment(
