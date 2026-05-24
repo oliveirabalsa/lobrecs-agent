@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-const iconFileName = 'lobrecs-agent-logo.png'
+const iconFileName = 'icon.png'
 
 export function getAppIconPath(): string | undefined {
   const candidates = [
