@@ -121,6 +121,7 @@ export type RunAuditStopReason =
   | 'no-diff'
   | 'manual-review'
   | 'cancelled'
+  | 'repair-in-flight'
 
 export interface RunAuditRecord {
   id: string

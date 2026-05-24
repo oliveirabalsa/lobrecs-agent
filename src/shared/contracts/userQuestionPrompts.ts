@@ -6,7 +6,19 @@ import type {
 
 type UserQuestionActivity = Extract<AgentActivity, { kind: 'user-question' }>
 
-const TOOL_NAMES = new Set(['askuserquestion', 'ask_user_question', 'request_user_input'])
+const TOOL_NAMES = new Set([
+  'askuserquestion',
+  'askquestion',
+  'askuser',
+  'askhuman',
+  'clarify',
+  'clarification',
+  'clarifyingquestion',
+  'requestclarification',
+  'requesthumaninput',
+  'requestinput',
+  'requestuserinput',
+])
 const MAX_QUESTIONS = 8
 const MAX_OPTIONS_PER_QUESTION = 16
 const MAX_QUESTION_CHARS = 2_000
@@ -18,11 +30,12 @@ export function isUserQuestionToolName(name: unknown): boolean {
   const normalized = cleanString(name)?.toLowerCase()
   if (!normalized) return false
 
-  if (TOOL_NAMES.has(normalized)) return true
+  const canonical = canonicalToolName(normalized)
+  if (isUserQuestionCanonicalName(canonical)) return true
 
   const parts = normalized.split(/[.:/]/)
   const tail = parts[parts.length - 1]
-  return tail ? TOOL_NAMES.has(tail) : false
+  return tail ? isUserQuestionCanonicalName(canonicalToolName(tail)) : false
 }
 
 export function shouldSuppressUserQuestionToolResult(
@@ -134,6 +147,7 @@ function normalizeOption(
 
 function inputFromPayload(payload: Record<string, unknown>): Record<string, unknown> {
   const nestedFunction = isRecord(payload.function) ? payload.function : undefined
+  const nestedState = isRecord(payload.state) ? payload.state : undefined
   const candidates = [
     payload.arguments,
     payload.args,
@@ -143,6 +157,7 @@ function inputFromPayload(payload: Record<string, unknown>): Record<string, unkn
     nestedFunction?.arguments,
     nestedFunction?.input,
     nestedFunction?.parameters,
+    nestedState?.input,
   ]
 
   for (const candidate of candidates) {
@@ -169,11 +184,22 @@ function toolNameFromPayload(payload: Record<string, unknown>): unknown {
   if (payload.name) return payload.name
   if (payload.tool) return payload.tool
   if (payload.tool_name) return payload.tool_name
+  if (payload.toolName) return payload.toolName
   if (payload.functionName) return payload.functionName
   if (payload.function_name) return payload.function_name
+  if (isUserQuestionToolName(payload.type)) return payload.type
 
   const nestedFunction = isRecord(payload.function) ? payload.function : undefined
   return nestedFunction?.name
+}
+
+function isUserQuestionCanonicalName(name: string): boolean {
+  if (TOOL_NAMES.has(name)) return true
+  return [...TOOL_NAMES].some((toolName) => name.endsWith(toolName))
+}
+
+function canonicalToolName(name: string): string {
+  return name.replace(/[^a-z0-9]/g, '')
 }
 
 function promptIdFromPayload(

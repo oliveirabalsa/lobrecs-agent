@@ -226,6 +226,7 @@ function isCodexInfrastructureNoise(line: string): boolean {
     line === 'Reading additional input from stdin...' ||
     line.includes('rmcp::transport::worker') ||
     line.includes('Auth(TokenRefreshFailed') ||
+    (line.includes('codex_core::session') && line.includes('failed to load skill')) ||
     line.includes('codex_core_plugins::') ||
     line.includes('codex_core_skills::') ||
     line.includes('codex_memories_write::phase2') ||

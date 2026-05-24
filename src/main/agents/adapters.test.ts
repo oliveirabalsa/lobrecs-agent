@@ -21,6 +21,7 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_MOCK_DUPLICATE_TEXT
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
+    delete process.env.CLAUDE_MOCK_USER_QUESTION
     delete process.env.CODEX_COMMAND
     delete process.env.CODEX_MOCK_CAPACITY_MODEL
     delete process.env.ANTIGRAVITY_COMMAND
@@ -115,6 +116,34 @@ describe('agent adapters', () => {
 
     expect(visibleTexts).toEqual(['Duplicated Claude response'])
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+  })
+
+  it('maps Claude user-question tool use into a structured prompt activity', async () => {
+    process.env.CLAUDE_COMMAND = claudeMock
+    process.env.CLAUDE_MOCK_USER_QUESTION = '1'
+    const adapter = new ClaudeCodeAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: 'claude-question-session',
+      prompt: 'Ask before continuing',
+      repoPath: process.cwd(),
+      model: 'sonnet',
+    })
+    const events = await collectEvents(session)
+    const userQuestion = events.find((event) => payloadField(event, 'kind') === 'user-question')
+
+    expect(userQuestion).toMatchObject({
+      type: 'activity',
+      payload: {
+        kind: 'user-question',
+        questions: [
+          expect.objectContaining({
+            question: 'Which files should I focus?',
+          }),
+        ],
+      },
+    })
+    expect(events.some((event) => payloadField(event, 'output') === 'Answer questions?')).toBe(false)
   })
 
   it('surfaces Claude result errors as visible stderr and failed completion', async () => {
@@ -226,6 +255,7 @@ describe('agent adapters', () => {
     expect(stderrText).not.toContain('TokenRefreshFailed')
     expect(stderrText).not.toContain('Reading additional input')
     expect(stderrText).not.toContain('codex_memories_write')
+    expect(stderrText).not.toContain('failed to load skill')
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
   })
 

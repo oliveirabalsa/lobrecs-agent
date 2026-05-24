@@ -8,6 +8,10 @@ import {
   readClaudeHistoryModels,
 } from './modelDiscovery'
 import { isClaudeSessionEndHookWarning } from '../../shared/contracts/agentOutput'
+import {
+  shouldSuppressUserQuestionToolResult,
+  userQuestionActivityFromToolPayload,
+} from '../../shared/contracts/userQuestionPrompts'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
 import type { AgentActivity, AgentEvent, AgentModel } from '../../shared/types'
 
@@ -322,8 +326,14 @@ function mapClaudeAssistantMessage(
     if (item.type === 'tool_use') {
       const id = typeof item.id === 'string' ? item.id : undefined
       const name = typeof item.name === 'string' ? item.name : 'tool'
+      const userQuestion = userQuestionActivityFromToolPayload(item)
 
       if (id) state.toolNamesById.set(id, name)
+      if (userQuestion) {
+        events.push(activityEvent(sessionId, userQuestion))
+        continue
+      }
+
       events.push(activityEvent(sessionId, {
         kind: 'tool-call',
         name,
@@ -352,11 +362,14 @@ function mapClaudeUserMessage(
     if (item.type !== 'tool_result') return []
 
     const toolUseId = typeof item.tool_use_id === 'string' ? item.tool_use_id : undefined
+    const toolName = (toolUseId && state.toolNamesById.get(toolUseId)) || 'tool'
     const output = textFromClaudeMessage(item.content)
+    if (shouldSuppressUserQuestionToolResult(toolName, output)) return []
+
     return [
       activityEvent(sessionId, {
         kind: 'tool-result',
-        name: (toolUseId && state.toolNamesById.get(toolUseId)) || 'tool',
+        name: toolName,
         output: output.trim() ? output : undefined,
         status: item.is_error === true ? 'error' : 'done',
       }),

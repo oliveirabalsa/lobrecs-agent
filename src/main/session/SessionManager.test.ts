@@ -282,6 +282,45 @@ describe('SessionManager', () => {
     expect(broadcasts.map((event) => event.type)).toEqual(['stdout', 'activity'])
   })
 
+  it('pauses when an adapter emits a normalized user-question activity directly', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'ask before editing',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    adapter.emit({
+      type: 'activity',
+      sessionId,
+      payload: {
+        kind: 'user-question',
+        promptId: 'user-question:claude-toolu-1',
+        title: 'Agent question',
+        questions: [
+          {
+            id: 'question-1',
+            question: 'Which files should I focus?',
+            multiSelect: false,
+            options: [{ id: 'option-1', label: 'Renderer only' }],
+          },
+        ],
+      },
+      timestamp: 10,
+    })
+
+    expect(sessionsStore.get(sessionId)?.status).toBe('awaiting-input')
+    expect(manager.isActive(sessionId)).toBe(false)
+    expect(adapter.cancel).toHaveBeenCalledTimes(1)
+  })
+
   it('pauses on provider limits and continues with a user-selected model', async () => {
     const project = createProject()
     const claudeAdapter = new FakeAdapter('claude-code')
@@ -871,6 +910,11 @@ describe('SessionManager', () => {
           event.payload !== null &&
           (event.payload as { kind?: string }).kind === 'diff-summary',
       ),
+    ).toBe(false)
+    expect(
+      sessionsStore
+        .listEvents(sessionId)
+        .some((event) => event.type === 'diff' && isLiveDiffPayload(event.payload)),
     ).toBe(false)
   })
 

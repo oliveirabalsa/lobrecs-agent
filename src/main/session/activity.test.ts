@@ -398,6 +398,35 @@ describe('agent activity normalization', () => {
     ])
   })
 
+  it('recognizes namespaced user-question tool aliases', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'tool_call',
+        tool: 'functions.request-human-input',
+        id: 'call-alias',
+        input: {
+          question: 'Which branch should I use?',
+          options: [{ label: 'develop' }],
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        promptId: 'user-question:call-alias',
+        questions: [
+          expect.objectContaining({
+            question: 'Which branch should I use?',
+          }),
+        ],
+      }),
+    ])
+  })
+
   it('normalizes nested AskUserQuestion function payloads and validates options', () => {
     const activities = deriveActivityEvents({
       type: 'stdout',
@@ -477,6 +506,69 @@ describe('agent activity normalization', () => {
     })
 
     expect(activities).toEqual([])
+  })
+
+  it('turns OpenCode user-question tool events into structured prompts', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'tool_use',
+        part: {
+          type: 'tool',
+          tool: 'ask-user-question',
+          state: {
+            input: {
+              question: 'Which UI path should I update?',
+              options: [{ label: 'Composer' }],
+            },
+          },
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        questions: [
+          expect.objectContaining({
+            question: 'Which UI path should I update?',
+          }),
+        ],
+      }),
+    ])
+  })
+
+  it('turns Antigravity user-question tool events into structured prompts', () => {
+    const activities = deriveActivityEvents({
+      type: 'stdout',
+      sessionId: 'session-1',
+      payload: {
+        type: 'tool_use',
+        tool_name: 'request_user_input',
+        parameters: {
+          questions: [
+            {
+              question: 'Should I run the full build?',
+              options: [{ label: 'Yes' }],
+            },
+          ],
+        },
+      },
+      timestamp: 1,
+    }).map((event) => event.payload)
+
+    expect(activities).toEqual([
+      expect.objectContaining({
+        kind: 'user-question',
+        questions: [
+          expect.objectContaining({
+            question: 'Should I run the full build?',
+          }),
+        ],
+      }),
+    ])
   })
 
   it('turns OpenCode JSON events into visible messages, tools, and usage', () => {

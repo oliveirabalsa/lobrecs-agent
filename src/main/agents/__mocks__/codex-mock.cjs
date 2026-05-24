@@ -18,6 +18,9 @@ const emitOutput = () => {
   console.error(
     '2026-05-17T21:43:46.783471Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Auth(TokenRefreshFailed("Failed to parse server response"))',
   )
+  console.error(
+    '2026-05-24T08:10:25.803770Z ERROR codex_core::session: failed to load skill /Users/example/.codex/skills/privilege-escalation-methods/SKILL.md: failed to read file: Operation not permitted (os error 1)',
+  )
   console.error('2026-05-21T19:22:39.656346Z ERROR codex_memories_write::phase2: Phase 2 no changes')
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }))
   console.log(JSON.stringify({ type: 'turn.started' }))

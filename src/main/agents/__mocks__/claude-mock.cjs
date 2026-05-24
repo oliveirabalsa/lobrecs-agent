@@ -27,6 +27,43 @@ setTimeout(() => {
     return
   }
 
+  if (process.env.CLAUDE_MOCK_USER_QUESTION === '1') {
+    console.log(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_question',
+              name: 'request_user_input',
+              input: {
+                question: 'Which files should I focus?',
+                options: [{ label: 'Renderer only' }],
+              },
+            },
+          ],
+        },
+      }),
+    )
+    console.log(
+      JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_question',
+              content: 'Answer questions?',
+            },
+          ],
+        },
+      }),
+    )
+    console.log(JSON.stringify({ type: 'result', subtype: 'success' }))
+    return
+  }
+
   console.log(JSON.stringify({ type: 'system', output: 'hook noise' }))
   console.log(
     JSON.stringify({

@@ -12,6 +12,7 @@ import type {
   QueuedMessage,
   QueueStatusEvent,
   Session,
+  SpawnedAgentSession,
   ThreadTranscriptTurn,
   SessionStatus,
   SupportedAgentId,
@@ -76,6 +77,7 @@ export type DispatchSessionParams = {
   runtimeSettings?: AgentRuntimeSettings
   isolate?: boolean
   qualityAttempt?: number
+  spawnedAgent?: SpawnedAgentSession
   /** When provided, links the new session to an existing thread. */
   threadId?: string
   /**
@@ -288,6 +290,7 @@ export class SessionManager {
         prompt: params.prompt,
         imageAttachments: params.imageAttachments,
         planMode: params.planMode ?? false,
+        spawnedAgent: params.spawnedAgent,
         status: 'running',
         threadId,
       })
@@ -456,6 +459,13 @@ export class SessionManager {
 
   isActive(sessionId: string): boolean {
     return this.activeSessions.has(sessionId)
+  }
+
+  hasActiveRepairSession(): boolean {
+    for (const active of this.activeSessions.values()) {
+      if (active.qualityAttempt > 0) return true
+    }
+    return false
   }
 
   enqueueMessage(
@@ -808,6 +818,14 @@ export class SessionManager {
       if (active) active.providerLimitReason = observedProviderLimit
     }
 
+    if (event.type === 'activity' && isUserQuestionActivity(event.payload)) {
+      if (this.isTerminalSession(event.sessionId)) return
+
+      this.recordEvent(event)
+      this.pauseForUserInput(event.sessionId)
+      return
+    }
+
     if (event.type === 'approval-request') {
       if (this.isTerminalSession(event.sessionId)) return
 
@@ -888,6 +906,11 @@ export class SessionManager {
       this.stopLiveDiff(event.sessionId)
       this.activeSessions.delete(event.sessionId)
       this.processWarningsBySession.delete(event.sessionId)
+      return
+    }
+
+    if (event.type === 'diff' && isLiveDiffPayload(event.payload)) {
+      this.broadcastEvent(event)
       return
     }
 
@@ -1554,6 +1577,15 @@ function broadcastToRenderer(event: AgentEvent): void {
   } catch {
     // Unit tests and non-Electron contexts can provide an explicit broadcaster.
   }
+}
+
+function isLiveDiffPayload(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'live' in payload &&
+    (payload as { live?: unknown }).live === true
+  )
 }
 
 function broadcastQueueUpdated(threadId: string, pending: QueuedMessage[]): void {

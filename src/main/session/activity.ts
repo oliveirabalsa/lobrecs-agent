@@ -192,6 +192,12 @@ function activityFromAntigravityPayload(
     const toolCall = antigravityToolCallFromPayload(payload)
     if (!toolCall) return undefined
 
+    const userQuestion = userQuestionActivityFromToolCall(payload, {
+      name: toolCall.name,
+      input: toolCall.input,
+    })
+    if (userQuestion) return userQuestion
+
     return {
       kind: 'tool-call',
       name: toolCall.name,
@@ -336,6 +342,14 @@ function openCodeToolActivity(
   const state = isRecord(source.state) ? source.state : undefined
   const metadata = isRecord(state?.metadata) ? state.metadata : undefined
   const toolName = stringField(source, 'tool') ?? stringField(payload, 'tool') ?? 'tool'
+  const input = state?.input ?? source.input
+  const userQuestion = userQuestionActivityFromToolCall(payload, {
+    ...source,
+    name: toolName,
+    input,
+  })
+  if (userQuestion) return userQuestion
+
   const status = stringField(state ?? source, 'status')
   const exitCode = metadata ? numberField(metadata, 'exit') : undefined
   const isError =
@@ -350,7 +364,7 @@ function openCodeToolActivity(
   const call: AgentActivity = {
     kind: 'tool-call',
     name: toolName,
-    input: state?.input ?? source.input,
+    input,
     status: callStatus,
   }
   const output =
@@ -566,6 +580,16 @@ function codexFileChangeStepStatus(
   if (status === 'conflict') return 'error'
   if (status === 'applied') return 'done'
   return 'running'
+}
+
+function userQuestionActivityFromToolCall(
+  payload: Record<string, unknown>,
+  toolCall: Record<string, unknown> & { name: string; input: unknown },
+): Extract<AgentActivity, { kind: 'user-question' }> | null {
+  return userQuestionActivityFromToolPayload({
+    ...payload,
+    ...toolCall,
+  })
 }
 
 function normalizeApproval(payload: unknown): ApprovalRequest {
