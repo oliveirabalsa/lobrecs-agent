@@ -114,8 +114,8 @@ const CLI_DEFINITIONS: readonly ManagedCliDefinition[] = [
       upgrade: {
         id: 'upgrade',
         label: 'Upgrade',
-        description: 'Runs the Codex CLI self-upgrade path.',
-        commandPreview: 'codex --upgrade',
+        description: 'Runs the Codex CLI self-update path.',
+        commandPreview: 'codex update',
         requiresInstalled: true,
       },
       doctor: {
@@ -135,7 +135,7 @@ const CLI_DEFINITIONS: readonly ManagedCliDefinition[] = [
     },
     commandFor(actionId, command) {
       if (actionId === 'install') return directCommand('npm', ['install', '-g', '@openai/codex'])
-      if (actionId === 'upgrade') return directCommand(command, ['--upgrade'])
+      if (actionId === 'upgrade') return directCommand(command, ['update'])
       if (actionId === 'doctor') return directCommand(command, ['doctor'])
       if (actionId === 'models') return directCommand(command, ['debug', 'models'])
       return null

@@ -122,6 +122,7 @@ describe('managed CLI runtimes', () => {
     })
     expect(codex?.actions.find((action) => action.id === 'upgrade')).toMatchObject({
       available: false,
+      commandPreview: 'codex update',
       unavailableReason: 'Already on the latest version (0.130.0).',
     })
   })
@@ -167,6 +168,48 @@ describe('managed CLI runtimes', () => {
         actionId: 'upgrade',
       }),
     ).rejects.toThrow('OpenAI Codex is already on the latest version.')
+  })
+
+  it('runs Codex upgrades through the update subcommand', async () => {
+    execFileMock.mockImplementation((command, args, _options, callback) => {
+      if (command === 'which') {
+        callback?.(null, '/bin/codex-test\n', '')
+        return undefined as never
+      }
+      if (command === 'codex-test' && args?.[0] === '--version') {
+        callback?.(null, 'codex-cli 0.130.0\n', '')
+        return undefined as never
+      }
+      if (command === 'codex-test' && args?.[0] === 'update') {
+        callback?.(null, 'updated\n', '')
+        return undefined as never
+      }
+      if (command === 'npm' && args?.[0] === 'view') {
+        callback?.(null, '0.131.0\n', '')
+        return undefined as never
+      }
+
+      throw new Error(`Unexpected command: ${command} ${args?.join(' ')}`)
+    })
+
+    const result = await runManagedCliAction(createContext(), {
+      agentId: 'codex',
+      actionId: 'upgrade',
+    })
+
+    expect(result).toMatchObject({
+      agentId: 'codex',
+      actionId: 'upgrade',
+      command: 'codex-test update',
+      exitCode: 0,
+      stdout: 'updated',
+    })
+    expect(execFileMock).not.toHaveBeenCalledWith(
+      'codex-test',
+      ['--upgrade'],
+      expect.anything(),
+      expect.anything(),
+    )
   })
 
   it('rejects unsupported agent action pairs before spawning', async () => {
