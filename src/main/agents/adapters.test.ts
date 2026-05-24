@@ -271,14 +271,14 @@ describe('agent adapters', () => {
         enabled: true,
         command: codexMock,
         permissionMode: 'ask-for-approval',
-        extraArgs: ['--reasoning-effort', 'low'],
+        extraArgs: ['-c', 'model_reasoning_effort="xhigh"'],
       },
     })
     const events = await collectEvents(session)
     const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
     const argv = payloadField(argvEvent, 'argv')
 
-    expect(argv).toEqual(expect.arrayContaining(['--reasoning-effort', 'low']))
+    expect(argv).toEqual(expect.arrayContaining(['-c', 'model_reasoning_effort="xhigh"']))
     expect(argv).not.toEqual(
       expect.arrayContaining(['--dangerously-bypass-approvals-and-sandbox']),
     )

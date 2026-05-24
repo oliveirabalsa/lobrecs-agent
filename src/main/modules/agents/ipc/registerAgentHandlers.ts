@@ -8,7 +8,10 @@ import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { submitStepApprovalDecision } from '../../../swarm/stepApprovalPrompt'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
-import { runtimeSettingsWithApprovalMode } from '../domain/approvalMode'
+import {
+  runtimeSettingsWithApprovalMode,
+  runtimeSettingsWithThinkingLevel,
+} from '../domain/approvalMode'
 import { isSupportedAgentId } from '../domain/isSupportedAgentId'
 import type {
   AgentDispatchParams,
@@ -98,7 +101,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       }
 
       const runtimeSettings = runtimeSettingsWithApprovalMode(
-        settings.agents.runtimes[decision.agentId],
+        runtimeSettingsWithThinkingLevel(
+          settings.agents.runtimes[decision.agentId],
+          decision.agentId,
+          params.thinking,
+        ),
         params.approvalMode,
         settings.execution.defaultApprovalMode,
       )
@@ -260,7 +267,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       }
 
       const runtimeSettings = runtimeSettingsWithApprovalMode(
-        settings.agents.runtimes[decision.agentId],
+        runtimeSettingsWithThinkingLevel(
+          settings.agents.runtimes[decision.agentId],
+          decision.agentId,
+          params.thinking,
+        ),
         params.approvalMode,
         settings.execution.defaultApprovalMode,
       )
@@ -271,6 +282,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
           agentId: decision.agentId,
           model: decision.model,
           approvalMode: params.approvalMode,
+          thinking: params.thinking,
           runtimeSettings,
         },
         params.threadId,
@@ -322,7 +334,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
     })
 
     const runtimeSettings = runtimeSettingsWithApprovalMode(
-      settings.agents.runtimes[decision.agentId],
+      runtimeSettingsWithThinkingLevel(
+        settings.agents.runtimes[decision.agentId],
+        decision.agentId,
+        params.thinking,
+      ),
       params.approvalMode,
       settings.execution.defaultApprovalMode,
     )

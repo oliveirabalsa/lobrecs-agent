@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   permissionModeForApprovalMode,
   runtimeSettingsWithApprovalMode,
+  runtimeSettingsWithThinkingLevel,
 } from './approvalMode'
 import type { AgentRuntimeSettings } from '../../../../shared/types'
 
@@ -15,12 +16,45 @@ describe('permissionModeForApprovalMode', () => {
   })
 })
 
+describe('runtimeSettingsWithThinkingLevel', () => {
+  const runtimeSettings: AgentRuntimeSettings = {
+    enabled: true,
+    command: 'codex',
+    permissionMode: 'dangerous',
+    extraArgs: ['--foo', '--effort', 'low', '-c', 'model_reasoning_effort="low"'],
+  }
+
+  it('maps Codex thinking levels to the current config override flag', () => {
+    expect(runtimeSettingsWithThinkingLevel(runtimeSettings, 'codex', 'xhigh')).toEqual({
+      enabled: true,
+      command: 'codex',
+      permissionMode: 'dangerous',
+      extraArgs: ['--foo', '--effort', 'low', '-c', 'model_reasoning_effort="xhigh"'],
+    })
+  })
+
+  it('maps Claude thinking levels to --effort and supports max', () => {
+    expect(runtimeSettingsWithThinkingLevel(runtimeSettings, 'claude-code', 'max')).toEqual({
+      enabled: true,
+      command: 'codex',
+      permissionMode: 'dangerous',
+      extraArgs: ['--foo', '-c', 'model_reasoning_effort="low"', '--effort', 'max'],
+    })
+  })
+
+  it('leaves unsupported agents unchanged', () => {
+    expect(runtimeSettingsWithThinkingLevel(runtimeSettings, 'antigravity', 'high')).toBe(
+      runtimeSettings,
+    )
+  })
+})
+
 describe('runtimeSettingsWithApprovalMode', () => {
   const runtimeSettings: AgentRuntimeSettings = {
     enabled: true,
     command: 'codex',
     permissionMode: 'read-only',
-    extraArgs: ['--reasoning-effort', 'low'],
+    extraArgs: ['-c', 'model_reasoning_effort="low"'],
   }
 
   it('overrides only permission mode when a composer mode is provided', () => {
@@ -28,7 +62,7 @@ describe('runtimeSettingsWithApprovalMode', () => {
       enabled: true,
       command: 'codex',
       permissionMode: 'dangerous',
-      extraArgs: ['--reasoning-effort', 'low'],
+      extraArgs: ['-c', 'model_reasoning_effort="low"'],
     })
   })
 
@@ -39,7 +73,7 @@ describe('runtimeSettingsWithApprovalMode', () => {
       enabled: true,
       command: 'codex',
       permissionMode: 'ask-for-approval',
-      extraArgs: ['--reasoning-effort', 'low'],
+      extraArgs: ['-c', 'model_reasoning_effort="low"'],
     })
   })
 })

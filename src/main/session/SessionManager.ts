@@ -474,6 +474,7 @@ export class SessionManager {
       agentId: AgentId
       model: string
       approvalMode?: AgentApprovalMode
+      thinking?: QueuedMessage['thinking']
       runtimeSettings?: AgentRuntimeSettings
     },
     threadId: string,
@@ -484,6 +485,7 @@ export class SessionManager {
       agentId: params.agentId,
       model: params.model,
       approvalMode: params.approvalMode,
+      thinking: params.thinking,
       runtimeSettings: params.runtimeSettings,
       createdAt: Date.now(),
     }
