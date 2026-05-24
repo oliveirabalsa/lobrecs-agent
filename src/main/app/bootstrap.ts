@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { adapterRegistry } from '../agents'
 import { registerIpcHandlers } from '../ipc'
 import { cliEditorTerminalService } from '../modules/system/application/cliEditorTerminalService'
+import { appUpdateService } from '../modules/updates'
 import { processPool } from '../process/ProcessPool'
 import { sessionsStore, threadsStore } from '../store'
 import { getAppIconPath } from './appIcon'
@@ -11,13 +12,20 @@ import { registerAppShortcuts, unregisterAppShortcuts } from './shortcuts'
 
 let mainWindow: BrowserWindow | null = null
 
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
+
 export function bootstrapMainProcess(): void {
+  app.setAppUserModelId(app.name)
+
   app.whenReady().then(async () => {
     setDockIcon()
     setApplicationMenu()
     registerIpcHandlers()
     cancelInterruptedSessions()
     backfillThreadsFromSessions()
+    await clearStaleDownloadedUpdates()
     await logAdapterAvailability()
     mainWindow = createMainWindow()
     registerAppShortcuts(() => mainWindow)
@@ -62,6 +70,14 @@ function backfillThreadsFromSessions(): void {
     }
   } catch (error) {
     console.error('[threads] backfill failed:', error)
+  }
+}
+
+async function clearStaleDownloadedUpdates(): Promise<void> {
+  try {
+    await appUpdateService.clearStaleDownloadedUpdates()
+  } catch (error) {
+    console.error('[updates] failed to clear stale downloaded updates:', error)
   }
 }
 

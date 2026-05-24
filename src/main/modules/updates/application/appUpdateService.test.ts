@@ -62,9 +62,27 @@ describe('AppUpdateService', () => {
     await service.installDownloadedUpdate()
 
     expect(downloader.openInstaller).toHaveBeenCalledWith('/tmp/lobrecs-agent.dmg')
+    expect(downloader.clear).not.toHaveBeenCalled()
     expect(quit).toHaveBeenCalledTimes(1)
     expect(downloader.openInstaller.mock.invocationCallOrder[0]).toBeLessThan(
       quit.mock.invocationCallOrder[0],
     )
+  })
+
+  it('clears stale downloaded installers on startup cleanup', async () => {
+    const downloader = {
+      download: vi.fn(),
+      openInstaller: vi.fn(),
+      clear: vi.fn(),
+    }
+    const checker = {
+      checkLatest: vi.fn(),
+    }
+
+    const service = new AppUpdateService(checker as never, downloader as never, true)
+
+    await service.clearStaleDownloadedUpdates()
+
+    expect(downloader.clear).toHaveBeenCalledTimes(1)
   })
 })

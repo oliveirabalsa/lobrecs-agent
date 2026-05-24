@@ -11,8 +11,13 @@ Lobrecs Agent uses `electron-updater` with the publish target configured in
    downloading, or ready to install.
 3. The app never installs immediately. The user must click `Download`, then
    `Restart to update`.
-4. `Restart to update` calls `quitAndInstall`, so active agent sessions should
-   be stopped or allowed to finish before restarting.
+4. `Restart to update` opens the downloaded installer and quits the app, so
+   active agent sessions should be stopped or allowed to finish before
+   restarting.
+5. Downloaded installers are stored under the app `userData` directory in
+   `pending-updates`. The app clears that folder once during the next startup,
+   which preserves the installer for the current install attempt and removes it
+   after the user reopens Lobrecs Agent.
 
 Development builds show updates as unavailable unless
 `LOBRECS_AGENT_FORCE_DEV_UPDATE=1` and a matching `dev-app-update.yml` are

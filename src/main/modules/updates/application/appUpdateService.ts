@@ -121,6 +121,10 @@ export class AppUpdateService {
     app.quit()
   }
 
+  async clearStaleDownloadedUpdates(): Promise<void> {
+    await this.downloader.clear()
+  }
+
   async openReleaseUrl(): Promise<void> {
     await shell.openExternal(this.latestOutcome?.releaseUrl ?? RELEASES_URL)
   }
