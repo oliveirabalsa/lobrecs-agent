@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
+  AgentActivity,
   ApprovalRequest,
   DiffProposal,
   GitDiffReviewResult,
@@ -34,10 +35,7 @@ import {
 import { UserMessage } from '../components/UserMessage'
 import { useAttentionSound } from '../hooks/useAttentionSound'
 import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
-import {
-  mergeDiffProposals,
-  type DiffProposalScope,
-} from '../hooks/useWorkspaceController'
+import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import { buildUserQuestionFollowUpDispatchParams } from '../lib/userQuestionFollowUp'
 import type { StartedSessionSummary } from '../../sessions/types'
 import { Button, Modal } from '../../../components/ui'
@@ -73,6 +71,73 @@ interface RunWorkspaceProps {
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
   /** Called with the context window percentage (0–100) after a session completes. */
   onContextPercent?: (percent: number | null) => void
+}
+
+interface SessionDiffReviewState {
+  result: GitDiffReviewResult | null
+  loading: boolean
+  error: string | null
+}
+
+type DiffReviewStateBySession = Record<string, SessionDiffReviewState>
+
+const EMPTY_DIFF_REVIEW_STATE: SessionDiffReviewState = {
+  result: null,
+  loading: false,
+  error: null,
+}
+
+export function getSessionDiffReviewState(
+  state: Readonly<DiffReviewStateBySession>,
+  sessionId: string | null,
+): SessionDiffReviewState {
+  if (!sessionId) return EMPTY_DIFF_REVIEW_STATE
+  return state[sessionId] ?? EMPTY_DIFF_REVIEW_STATE
+}
+
+function setSessionDiffReviewLoading(
+  state: Readonly<DiffReviewStateBySession>,
+  sessionId: string,
+): DiffReviewStateBySession {
+  const current = state[sessionId] ?? EMPTY_DIFF_REVIEW_STATE
+  return {
+    ...state,
+    [sessionId]: {
+      ...current,
+      loading: true,
+      error: null,
+    },
+  }
+}
+
+function setSessionDiffReviewResult(
+  state: Readonly<DiffReviewStateBySession>,
+  sessionId: string,
+  result: GitDiffReviewResult,
+): DiffReviewStateBySession {
+  return {
+    ...state,
+    [sessionId]: {
+      result,
+      loading: false,
+      error: null,
+    },
+  }
+}
+
+function setSessionDiffReviewError(
+  state: Readonly<DiffReviewStateBySession>,
+  sessionId: string,
+  error: string,
+): DiffReviewStateBySession {
+  return {
+    ...state,
+    [sessionId]: {
+      result: null,
+      loading: false,
+      error,
+    },
+  }
 }
 
 /**
@@ -112,19 +177,26 @@ export function RunWorkspace({
 }: RunWorkspaceProps) {
   const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
   const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
-  const [diffReview, setDiffReview] = useState<GitDiffReviewResult | null>(null)
-  const [diffReviewLoading, setDiffReviewLoading] = useState(false)
-  const [diffReviewError, setDiffReviewError] = useState<string | null>(null)
-  const [sessionDiffProposals, setSessionDiffProposals] = useState<DiffProposal[]>([])
+  const [diffReviewBySession, setDiffReviewBySession] = useState<DiffReviewStateBySession>({})
   const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
   const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
   const lastPlanReviewResetKeyRef = useRef<string | null>(null)
+  const diffReviewState = useMemo(
+    () => getSessionDiffReviewState(diffReviewBySession, sessionId),
+    [diffReviewBySession, sessionId],
+  )
+  const diffReview = diffReviewState.result
+  const diffReviewLoading = diffReviewState.loading
+  const diffReviewError = diffReviewState.error
 
+  // Forwards session diff events to the upstream scoped store. The store
+  // (useWorkspaceController) rejects events whose source doesn't match the
+  // active session/thread, so a stale callback fired after a thread switch
+  // can't leak files into the new thread's "Edited N files" card.
   const handleSessionDiffProposals = useCallback(
     (proposals: DiffProposal[]) => {
-      setSessionDiffProposals((current) => mergeDiffProposals(current, proposals))
       onDiffProposals(proposals, {
         sessionId,
         threadId: threadId ?? null,
@@ -188,9 +260,6 @@ export function RunWorkspace({
 
   useEffect(() => {
     setAuditRecords([])
-    setDiffReview(null)
-    setDiffReviewError(null)
-    setSessionDiffProposals([])
   }, [sessionId])
 
   useEffect(() => {
@@ -249,8 +318,11 @@ export function RunWorkspace({
   const pendingApprovals = approvalRequest ? 1 : 0
   const pendingQuestions = pendingUserQuestion ? 1 : 0
   const effectiveStatus = status ?? (sessionId ? 'running' : null)
+  const hasCodeChanges = sessionHasCodeChanges(activities, diffProposals)
+  const canReviewCurrentDiff =
+    isFinishedSessionStatus(effectiveStatus) && hasCodeChanges
   const showDiffReview =
-    isFinishedSessionStatus(effectiveStatus) ||
+    canReviewCurrentDiff ||
     diffReview !== null ||
     diffReviewLoading ||
     diffReviewError !== null
@@ -277,21 +349,23 @@ export function RunWorkspace({
   )
 
   const handleReviewCurrentDiff = useCallback(async () => {
-    setDiffReviewLoading(true)
-    setDiffReviewError(null)
+    if (!sessionId) return
+
+    setDiffReviewBySession((current) => setSessionDiffReviewLoading(current, sessionId))
     try {
       const result = await window.agentforge.git.reviewCurrentDiff(
         project.id,
         threadId ?? undefined,
       )
-      setDiffReview(result)
+      setDiffReviewBySession((current) =>
+        setSessionDiffReviewResult(current, sessionId, result),
+      )
     } catch (error) {
-      setDiffReview(null)
-      setDiffReviewError(formatDiffReviewError(error))
-    } finally {
-      setDiffReviewLoading(false)
+      setDiffReviewBySession((current) =>
+        setSessionDiffReviewError(current, sessionId, formatDiffReviewError(error)),
+      )
     }
-  }, [project.id, threadId])
+  }, [project.id, sessionId, threadId])
 
   const handleFixDiffReview = useCallback(
     async (review: GitDiffReviewResult, selection: DiffReviewFixSelection) => {
@@ -319,7 +393,11 @@ export function RunWorkspace({
 
   const streamHandlers = useMemo(
     () => ({
-      diffProposals: sessionDiffProposals,
+      // Source the proposals from the scoped prop (filtered per active
+      // session+thread upstream) — never from local state. The previous
+      // local merge surfaced edits from the prior thread in the new
+      // thread's trailing "Edited N files" card.
+      diffProposals,
       approvalRequest,
       pendingUserQuestionPromptId: pendingUserQuestion?.promptId ?? null,
       onReviewFile: handleReviewFile,
@@ -335,7 +413,7 @@ export function RunWorkspace({
       onPreviewMarkdown,
     }),
     [
-      sessionDiffProposals,
+      diffProposals,
       approvalRequest,
       pendingUserQuestion?.promptId,
       handleReviewFile,
@@ -595,6 +673,17 @@ function defaultDiffReviewFixModel(
 
 function isFinishedSessionStatus(status: SessionStatus | null): boolean {
   return status === 'done' || status === 'error' || status === 'cancelled'
+}
+
+export function sessionHasCodeChanges(
+  activities: readonly AgentActivity[],
+  diffProposals: readonly DiffProposal[],
+): boolean {
+  if (diffProposals.length > 0) return true
+
+  return activities.some(
+    (activity) => activity.kind === 'file-change' || activity.kind === 'diff-summary',
+  )
 }
 
 function formatDiffReviewError(error: unknown): string {

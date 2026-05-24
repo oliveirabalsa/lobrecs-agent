@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../../../shared/types'
-import { deriveSessionActivities } from './useSessionEvents'
+import {
+  deriveSessionActivities,
+  shouldReplayHistoricalSessionEvent,
+} from './useSessionEvents'
 
 describe('deriveSessionActivities', () => {
   it('uses explicit process warning activities instead of duplicating raw stderr', () => {
@@ -139,6 +142,40 @@ describe('deriveSessionActivities', () => {
         ],
       }),
     ])
+  })
+
+  it('does not replay persisted live diff snapshots as session history', () => {
+    const historicalLiveDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: {
+        live: true,
+        proposals: [
+          {
+            filePath: '/repo/other-session.ts',
+            originalContent: 'old\n',
+            proposedContent: 'new\n',
+          },
+        ],
+      },
+      timestamp: 1,
+    }
+    const completionDiff: AgentEvent = {
+      type: 'diff',
+      sessionId: 'session-1',
+      payload: [
+        {
+          filePath: '/repo/current-session.ts',
+          originalContent: 'old\n',
+          proposedContent: 'new\n',
+        },
+      ],
+      timestamp: 2,
+    }
+
+    expect(shouldReplayHistoricalSessionEvent(historicalLiveDiff)).toBe(false)
+    expect(shouldReplayHistoricalSessionEvent(completionDiff)).toBe(true)
+    expect(deriveSessionActivities([historicalLiveDiff])).toEqual([])
   })
 })
 

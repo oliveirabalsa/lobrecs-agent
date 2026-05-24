@@ -15,3 +15,6 @@ export type { DividerProps } from './Divider'
 
 export { Modal } from './Modal'
 export type { ModalProps } from './Modal'
+
+export { ImagePreview } from './ImagePreview'
+export type { ImagePreviewProps } from './ImagePreview'

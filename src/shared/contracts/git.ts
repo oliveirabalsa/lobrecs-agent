@@ -92,6 +92,7 @@ export interface GitDiffReviewResult {
   changedFiles: GitChangedFile[]
   summary: string
   findings: GitDiffReviewFinding[]
+  rawOutput?: string
   analysis: GitDiffReviewAnalysis
 }
 

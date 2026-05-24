@@ -1,6 +1,11 @@
 import type { ImageAttachment } from '../../../../shared/types'
 import { parseSwarmRolePrompt } from '../lib/swarmMessage'
 import { parsePlanModeQuestionAnswer } from '../lib/planModeQuestionAnswer'
+import {
+  AttachmentThumb,
+  resolveAttachmentName,
+  resolveAttachmentSrc,
+} from './AttachmentThumb'
 import { MarkdownContent, type MarkdownLinkRequest } from './MarkdownContent'
 import {
   isPlanModeExecutionPrompt,
@@ -52,26 +57,15 @@ export function UserMessage({ text, attachments, onOpenMarkdown }: UserMessagePr
       {attachments && attachments.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2">
           {attachments.map((attachment) => (
-            <AttachmentThumb key={attachment.filePath} attachment={attachment} />
+            <AttachmentThumb
+              key={attachment.filePath}
+              src={resolveAttachmentSrc(attachment)}
+              name={resolveAttachmentName(attachment)}
+            />
           ))}
         </div>
       ) : null}
       <MarkdownContent text={text} variant="compact" onOpenMarkdown={onOpenMarkdown} />
     </div>
-  )
-}
-
-function AttachmentThumb({ attachment }: { attachment: ImageAttachment }) {
-  const src = attachment.filePath.startsWith('file://')
-    ? attachment.filePath
-    : `file://${attachment.filePath}`
-  const alt = attachment.name ?? attachment.filePath.split('/').pop() ?? 'attachment'
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className="h-12 w-12 rounded object-cover"
-      draggable={false}
-    />
   )
 }

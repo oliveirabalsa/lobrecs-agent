@@ -150,9 +150,12 @@ export function DiffReviewCard({
               ))}
             </ol>
           ) : (
-            <div className="mt-3 rounded-card border border-accent-add/30 bg-accent-add/10 px-3 py-2 text-xs text-accent-add">
-              No concrete findings returned.
-            </div>
+            <>
+              <div className="mt-3 rounded-card border border-accent-add/30 bg-accent-add/10 px-3 py-2 text-xs text-accent-add">
+                No concrete findings returned.
+              </div>
+              {result.rawOutput ? <RawReviewerOutput output={result.rawOutput} /> : null}
+            </>
           )}
           {hasFindings && fixPanelOpen ? (
             <div className="mt-3 rounded-card border border-hairline bg-card-raised px-3 py-3">
@@ -204,6 +207,19 @@ export function DiffReviewCard({
         </div>
       ) : null}
     </article>
+  )
+}
+
+function RawReviewerOutput({ output }: { output: string }) {
+  return (
+    <div className="mt-3 rounded-card border border-hairline bg-card-raised">
+      <div className="border-b border-hairline px-3 py-2 text-xs font-medium text-secondary">
+        Reviewer output
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-5 text-muted">
+        {output}
+      </pre>
+    </div>
   )
 }
 

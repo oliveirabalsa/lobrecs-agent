@@ -11,6 +11,7 @@ import { ApprovalBanner } from '../ApprovalBanner'
 import { DiffViewer } from '../DiffViewer'
 import {
   createTerminalEventHandler,
+  isLiveDiffPayload,
   type TerminalEventCallbacks,
 } from './events'
 
@@ -129,7 +130,9 @@ export function TerminalPanel({
     void window.agentforge.sessions
       .listEvents(sessionId)
       .then((events) => {
-        events.forEach(handleEvent)
+        events
+          .filter((event) => !(event.type === 'diff' && isLiveDiffPayload(event.payload)))
+          .forEach(handleEvent)
       })
       .catch(() => undefined)
 

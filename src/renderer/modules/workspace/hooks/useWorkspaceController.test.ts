@@ -162,4 +162,118 @@ describe('visibleDiffProposalsForActiveSession', () => {
       },
     ])
   })
+
+  // Regression: switching threads must not leak edited files from the
+  // previous thread into the new one. The local proposals shadow in
+  // RunWorkspace used to surface the prior thread's files in the new
+  // thread's "Edited N files" trailing card while the agent was still
+  // working ("Drafting"); the scoped store is what makes the leak
+  // structurally impossible, so freeze the contract here.
+  it('starts a new thread with no visible proposals even if the store still holds the previous thread', () => {
+    const previousThreadState: ScopedDiffProposalState = {
+      sessionId: 'session-prev',
+      threadId: 'thread-prev',
+      proposals: [
+        {
+          filePath: '/repo/cli-tools/CliToolsView.tsx',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+        {
+          filePath: '/repo/agents/registerAgentHandlers.ts',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+    }
+
+    expect(
+      visibleDiffProposalsForActiveSession(
+        previousThreadState,
+        'session-new',
+        'thread-new',
+      ),
+    ).toEqual([])
+  })
+
+  // Regression: a stale diff event firing after the user switches threads
+  // (closure still tagged with the previous source) must not be merged
+  // into the new thread's visible state. Without this guard the renderer
+  // would render an "Edited N files" card for the previous thread inside
+  // the new one — exactly the bug reported in the screenshot.
+  it('rejects stale diff events tagged with the previous thread after a switch', () => {
+    const previousThreadState: ScopedDiffProposalState = {
+      sessionId: 'session-prev',
+      threadId: 'thread-prev',
+      proposals: [
+        {
+          filePath: '/repo/cli-tools/CliToolsView.tsx',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+    }
+
+    const afterStaleEvent = nextScopedDiffProposalState(
+      previousThreadState,
+      [
+        {
+          filePath: '/repo/cli-tools/CliToolsView.tsx',
+          originalContent: 'old',
+          proposedContent: 'newer',
+        },
+      ],
+      // Source tag reflects the previous thread (callback closure was
+      // captured before the user switched).
+      { sessionId: 'session-prev', threadId: 'thread-prev' },
+      // Active session/thread are the new ones.
+      'session-new',
+      'thread-new',
+    )
+
+    expect(
+      visibleDiffProposalsForActiveSession(afterStaleEvent, 'session-new', 'thread-new'),
+    ).toEqual([])
+  })
+
+  // Regression: when the user starts a new thread and the agent emits a
+  // diff event for that new session, the visible proposals must contain
+  // ONLY the new thread's files — never the previous thread's.
+  it('only exposes the active thread\'s proposals once it has emitted its own diff', () => {
+    const previousThreadState: ScopedDiffProposalState = {
+      sessionId: 'session-prev',
+      threadId: 'thread-prev',
+      proposals: [
+        {
+          filePath: '/repo/cli-tools/CliToolsView.tsx',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+    }
+
+    const afterNewThreadDiff = nextScopedDiffProposalState(
+      previousThreadState,
+      [
+        {
+          filePath: '/repo/new-thread-edit.ts',
+          originalContent: 'before',
+          proposedContent: 'after',
+        },
+      ],
+      { sessionId: 'session-new', threadId: 'thread-new' },
+      'session-new',
+      'thread-new',
+    )
+
+    expect(
+      visibleDiffProposalsForActiveSession(afterNewThreadDiff, 'session-new', 'thread-new'),
+    ).toEqual([
+      {
+        filePath: '/repo/new-thread-edit.ts',
+        originalContent: 'before',
+        proposedContent: 'after',
+      },
+    ])
+  })
 })

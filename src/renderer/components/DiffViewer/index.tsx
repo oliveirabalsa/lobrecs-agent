@@ -1,43 +1,20 @@
 import { DiffEditor } from '@monaco-editor/react'
 import { useEffect, useState } from 'react'
 import type { DiffProposal } from '../../../shared/types'
+import {
+  DRACULA_THEME_NAME,
+  languageFromPath,
+  registerDraculaTheme,
+} from '../../lib/monaco'
 
 interface Props {
   proposals: DiffProposal[]
-  /**
-   * When provided, focuses the matching proposal in the tab strip whenever it
-   * changes. Used by the "Review" button in `<EditedFilesCard>` so clicking a
-   * specific file row jumps straight to that diff.
-   */
   focusFilePath?: string | null
 }
 
 function fileName(filePath: string) {
   const normalized = filePath.replace(/\\/g, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? filePath
-}
-
-function languageFromPath(filePath: string) {
-  const extension = filePath.split('.').at(-1)?.toLowerCase()
-
-  switch (extension) {
-    case 'ts':
-    case 'tsx':
-      return 'typescript'
-    case 'js':
-    case 'jsx':
-      return 'javascript'
-    case 'json':
-      return 'json'
-    case 'css':
-      return 'css'
-    case 'html':
-      return 'html'
-    case 'md':
-      return 'markdown'
-    default:
-      return 'plaintext'
-  }
 }
 
 export function DiffViewer({ proposals, focusFilePath }: Props) {
@@ -50,8 +27,6 @@ export function DiffViewer({ proposals, focusFilePath }: Props) {
     }
   }, [proposals.length, selected])
 
-  // External focus request — e.g. clicking "Review" on a file row in the
-  // <EditedFilesCard> jumps to that tab in the diff strip.
   useEffect(() => {
     if (!focusFilePath) return
     const idx = proposals.findIndex((p) => p.filePath === focusFilePath)
@@ -112,7 +87,8 @@ export function DiffViewer({ proposals, focusFilePath }: Props) {
         <DiffEditor
           key={current.filePath}
           height="100%"
-          theme="vs-dark"
+          theme={DRACULA_THEME_NAME}
+          beforeMount={registerDraculaTheme}
           original={current.originalContent}
           modified={current.proposedContent}
           language={languageFromPath(current.filePath)}

@@ -165,6 +165,7 @@ export class GitCommitWorkflowService {
       changedFiles: snapshot.changedFiles,
       summary: review.summary,
       findings: review.findings,
+      rawOutput: review.rawOutput,
       analysis: {
         agentId: selection.agentId,
         model: selection.model,

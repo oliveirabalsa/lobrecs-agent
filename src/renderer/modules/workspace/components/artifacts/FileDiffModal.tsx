@@ -51,7 +51,7 @@ export function FileDiffModal({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
         <Dialog.Content
           aria-describedby={undefined}
-          className="fixed inset-3 z-50 flex flex-col overflow-hidden rounded-card border border-hairline shadow-2xl shadow-black/60 outline-none sm:inset-6"
+          className="fixed inset-0 z-50 flex flex-col overflow-hidden rounded-card border border-hairline shadow-2xl shadow-black/60 outline-none"
           style={{ background: '#282a36' }}
         >
           {proposal ? (
@@ -95,7 +95,7 @@ export function FileDiffModal({
                 </Dialog.Close>
               </header>
 
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 flex-1 overflow-hidden">
                 <DiffEditor
                   key={proposal.filePath}
                   height="100%"

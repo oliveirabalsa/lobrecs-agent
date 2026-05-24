@@ -47,7 +47,7 @@ describe('normalizeDiffReview', () => {
     expect(normalizeDiffReview('No issues.', changedFiles)).toEqual({
       summary: 'No concrete issues found in the current diff.',
       findings: [],
+      rawOutput: 'No issues.',
     })
   })
 })
-

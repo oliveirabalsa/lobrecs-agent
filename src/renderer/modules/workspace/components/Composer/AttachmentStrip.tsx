@@ -1,3 +1,4 @@
+import { AttachmentThumb } from '../AttachmentThumb'
 import type { AttachedImage } from './types'
 
 interface AttachmentStripProps {
@@ -8,7 +9,7 @@ interface AttachmentStripProps {
 
 /**
  * Horizontal strip of 48px image thumbnails rendered above the textarea.
- * Each thumbnail has a hover-to-reveal remove button.
+ * Click a tile to preview at full size; hover to reveal the remove button.
  */
 export function AttachmentStrip({ attachments, attaching, onRemove }: AttachmentStripProps) {
   if (attachments.length === 0 && !attaching) return null
@@ -17,25 +18,13 @@ export function AttachmentStrip({ attachments, attaching, onRemove }: Attachment
     <div className="flex items-center gap-2 px-3 pt-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {attachments.map((image) => (
-          <div
+          <AttachmentThumb
             key={image.id}
-            className="group relative h-12 w-12 shrink-0 overflow-hidden rounded border border-hairline bg-canvas"
-            title={image.attachment.name}
-          >
-            <img
-              src={image.previewUrl}
-              alt={image.attachment.name ?? 'Attached image'}
-              className="h-full w-full object-cover"
-            />
-            <button
-              type="button"
-              onClick={() => onRemove(image.id)}
-              className="absolute right-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-pill bg-black/80 text-[10px] leading-none text-white group-hover:flex"
-              aria-label={`Remove ${image.attachment.name ?? 'image'}`}
-            >
-              ×
-            </button>
-          </div>
+            src={image.previewUrl}
+            name={image.attachment.name}
+            variant="framed"
+            onRemove={() => onRemove(image.id)}
+          />
         ))}
         {attaching ? (
           <span className="text-xs text-muted">Attaching image…</span>

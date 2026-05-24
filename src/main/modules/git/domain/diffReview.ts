@@ -10,7 +10,7 @@ const SEVERITIES = new Set(['critical', 'high', 'medium', 'low'])
 export function normalizeDiffReview(
   responseText: string,
   changedFiles: readonly GitChangedFile[],
-): Pick<GitDiffReviewResult, 'summary' | 'findings'> {
+): Pick<GitDiffReviewResult, 'summary' | 'findings' | 'rawOutput'> {
   const parsed = parseReview(responseText)
   const knownPaths = new Set(changedFiles.map((file) => file.path))
   const findings = (parsed?.findings ?? [])
@@ -18,7 +18,7 @@ export function normalizeDiffReview(
     .filter((finding): finding is GitDiffReviewFinding => Boolean(finding))
     .slice(0, 20)
 
-  return {
+  const normalized: Pick<GitDiffReviewResult, 'summary' | 'findings' | 'rawOutput'> = {
     summary:
       coerceText(parsed?.summary) ??
       (findings.length > 0
@@ -26,6 +26,8 @@ export function normalizeDiffReview(
         : 'No concrete issues found in the current diff.'),
     findings,
   }
+  const rawOutput = parsed ? undefined : trimRawOutput(responseText)
+  return rawOutput ? { ...normalized, rawOutput } : normalized
 }
 
 function normalizeFinding(
@@ -126,7 +128,12 @@ function coerceText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+function trimRawOutput(responseText: string): string | undefined {
+  const trimmed = responseText.trim()
+  if (!trimmed) return undefined
+  return trimmed.length > 20_000 ? `${trimmed.slice(0, 20_000).trimEnd()}\n[truncated]` : trimmed
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
-

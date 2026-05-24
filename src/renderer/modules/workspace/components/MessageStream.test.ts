@@ -414,6 +414,35 @@ describe('editedFileCards', () => {
     ])
   })
 
+  // Regression: when a thread switch zeroes out the upstream-scoped
+  // diff proposals (because the stored state belongs to the previous
+  // thread), the trailing "Edited N files" card must not render —
+  // otherwise the new thread would inherit the previous thread's edits
+  // in its "Drafting" state. See useWorkspaceController.test.ts for the
+  // upstream contract that produces this empty input.
+  it('renders no card when the new thread has no fallback files and no live proposals', () => {
+    expect(
+      editedFileCards([], [], { includeUnmatchedProposals: true }),
+    ).toEqual([])
+  })
+
+  // Regression: if the active thread genuinely has nothing to show but
+  // the suppression switch is off (turn is not the last one), no card
+  // either — defense in depth against the same leak surface.
+  it('renders no card when proposals exist but the turn is not the trailing one', () => {
+    const proposal = {
+      filePath: '/Users/leo/project/src/leaked.ts',
+      originalContent: 'old\n',
+      proposedContent: 'new\n',
+      additions: 1,
+      deletions: 0,
+    }
+
+    expect(
+      editedFileCards([proposal], [], { includeUnmatchedProposals: false }),
+    ).toEqual([])
+  })
+
   it('keeps the card identity stable while files are added to the live edit set', () => {
     const firstProposal = {
       filePath: '/Users/leo/project/src/a.ts',

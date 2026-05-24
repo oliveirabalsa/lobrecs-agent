@@ -559,6 +559,7 @@ export function WorkspaceView({
   const openDiffPanel = useCallback((filePath?: string) => {
     setRightPanelOpenState(true)
     setRightPanelModeState('diff')
+    setRightPanelFullscreen(true)
     setFocusFilePath(filePath ?? null)
   }, [])
 
@@ -709,6 +710,7 @@ export function WorkspaceView({
         prompt,
         agentId: node.agentLabel,
         modelOverride: node.model,
+        spawnedAgent: { kind: 'swarm', role: node.role },
       })
 
       onSessionStarted({
