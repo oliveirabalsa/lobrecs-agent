@@ -37,11 +37,21 @@ export type AgentPermissionMode =
   | 'ask-for-approval'
   | 'read-only'
 
+export interface NotificationEventSettings {
+  swarmCompleted: boolean
+  diffReady: boolean
+  automationSuccess: boolean
+  automationFailure: boolean
+  sessionError: boolean
+}
+
 export interface GeneralSettings {
   appName: string
   startOnLaunch: boolean
   openLastProjectOnLaunch: boolean
   enableDesktopNotifications: boolean
+  onlyWhenUnfocused: boolean
+  notificationEvents: NotificationEventSettings
 }
 
 export interface AgentRuntimeSettings {

@@ -55,12 +55,12 @@ export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
     agents: [
       {
         role: 'security analyzer',
-        agentId: 'claude-code',
+        agentId: 'codex',
         promptSuffix: 'Focus on security vulnerabilities, secret handling, and unsafe IO.',
       },
       {
         role: 'code quality',
-        agentId: 'codex',
+        agentId: 'opencode',
         promptSuffix: 'Focus on correctness, maintainability, and missing tests.',
       },
     ],
@@ -72,7 +72,7 @@ export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
     agents: [
       {
         role: 'planner',
-        agentId: 'claude-code',
+        agentId: 'codex',
         promptSuffix: DEFAULT_SWARM_ROLE_PROMPTS.planner,
       },
       {
@@ -82,7 +82,7 @@ export const DEFAULT_SWARM_TEMPLATES: SwarmTemplate[] = [
       },
       {
         role: 'reviewer',
-        agentId: 'claude-code',
+        agentId: 'opencode',
         promptSuffix: DEFAULT_SWARM_ROLE_PROMPTS.reviewer,
       },
     ],
@@ -107,10 +107,18 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     startOnLaunch: false,
     openLastProjectOnLaunch: true,
     enableDesktopNotifications: true,
+    onlyWhenUnfocused: true,
+    notificationEvents: {
+      swarmCompleted: true,
+      diffReady: true,
+      automationSuccess: true,
+      automationFailure: true,
+      sessionError: true,
+    },
   },
   agents: {
-    defaultAgentId: 'claude-code',
-    fallbackAgentId: 'claude-code',
+    defaultAgentId: 'opencode',
+    fallbackAgentId: 'codex',
     enabledAgentIds: [...SUPPORTED_AGENT_IDS],
     runtimes: {
       'claude-code': {
@@ -173,8 +181,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     maxAgents: 8,
     maxReviewerIterations: 3,
     defaultAgents: [
-      { role: 'implementer', agentId: 'claude-code' },
-      { role: 'reviewer', agentId: 'codex' },
+      { role: 'implementer', agentId: 'codex' },
+      { role: 'reviewer', agentId: 'opencode' },
     ],
     rolePrompts: { ...DEFAULT_SWARM_ROLE_PROMPTS },
     templates: DEFAULT_SWARM_TEMPLATES.map((template) => ({

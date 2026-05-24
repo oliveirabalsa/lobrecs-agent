@@ -35,12 +35,13 @@ describe('ModelRouter', () => {
     const decision = await router.route({ prompt: 'fix typo in README' })
 
     expect(decision.tier).toBe('lightweight')
-    expect(decision.model).toBe('claude-haiku-4-5-20251001')
+    expect(decision.agentId).toBe('opencode')
+    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
   })
 
   it('uses an installed preferred agent with MODEL_MAP', async () => {
     const router = new ModelRouter({
-      adapterRegistry: createRegistry({ codex: true, 'claude-code': true }),
+      adapterRegistry: createRegistry({ opencode: true, codex: true, 'claude-code': true }),
     })
     const decision = await router.route({
       prompt: 'fix typo in README',
@@ -53,7 +54,7 @@ describe('ModelRouter', () => {
 
   it('ignores preferredAgentId when autoAgentSelection is true', async () => {
     const router = new ModelRouter({
-      adapterRegistry: createRegistry({ codex: true, 'claude-code': true }),
+      adapterRegistry: createRegistry({ codex: true, opencode: true, 'claude-code': true }),
     })
     const decision = await router.route({
       prompt: 'fix typo in README',
@@ -61,13 +62,11 @@ describe('ModelRouter', () => {
       autoAgentSelection: true,
     })
 
-    // Lightweight tier policy prefers claude-code (Haiku) over Codex Spark
-    // even when the project's preferredAgent is codex.
-    expect(decision.agentId).toBe('claude-code')
-    expect(decision.model).toBe('claude-haiku-4-5-20251001')
+    expect(decision.agentId).toBe('opencode')
+    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
   })
 
-  it('routes complex prompts via AUTO mode to claude-code at advanced tier', async () => {
+  it('routes complex prompts via AUTO mode to Codex before Claude', async () => {
     const router = new ModelRouter({
       adapterRegistry: createRegistry({ codex: true, 'claude-code': true }),
     })
@@ -79,7 +78,7 @@ describe('ModelRouter', () => {
     })
 
     expect(['advanced', 'frontier']).toContain(decision.tier)
-    expect(decision.agentId).toBe('claude-code')
+    expect(decision.agentId).toBe('codex')
   })
 
   it('routes installed Antigravity preferences through the Antigravity model map', async () => {
@@ -261,6 +260,7 @@ describe('ModelRouter', () => {
     it('routes to an image-capable agent if the preferred agent resolved model does not support images', async () => {
       const router = new ModelRouter({
         adapterRegistry: createRegistry({
+          codex: true,
           opencode: true,
           'claude-code': true,
         }),
@@ -272,9 +272,8 @@ describe('ModelRouter', () => {
         requiresImageSupport: true,
       })
 
-      // Should switch from opencode to claude-code because claude-code supports images
-      expect(decision.agentId).toBe('claude-code')
-      expect(decision.model).toBe('claude-haiku-4-5-20251001')
+      expect(decision.agentId).toBe('codex')
+      expect(decision.model).toBe('gpt-5.3-codex-spark')
     })
 
     it('stays on opencode if model override supports images', async () => {
@@ -332,4 +331,3 @@ describe('ModelRouter', () => {
     })
   })
 })
-

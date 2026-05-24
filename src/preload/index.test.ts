@@ -57,6 +57,7 @@ describe('preload api shape', () => {
       'runs',
       'git',
       'memory',
+      'notifications',
       'settings',
       'updates',
       'on',

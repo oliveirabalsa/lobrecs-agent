@@ -53,6 +53,45 @@ describe('SwarmOrchestrator', () => {
     expect(dispatched[1].prompt).toContain('Check implementation quality')
   })
 
+  it('notifies parallel swarm completion only after every spawned session finishes', async () => {
+    const dispatched: SwarmDispatchInput[] = []
+    const completions = new Map<string, Deferred<{ status: 'done'; output: string }>>()
+    const onSwarmComplete = vi.fn()
+    const orchestrator = new SwarmOrchestrator({
+      getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'claude-sonnet-4-6' }),
+      dispatchSession: (input) => {
+        dispatched.push(input)
+        completions.set(input.sessionId, deferred<{ status: 'done'; output: string }>())
+        return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
+      },
+      waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+      worktrees: createFakeWorktrees(),
+    })
+    orchestrator.setOnSwarmComplete(onSwarmComplete)
+
+    const result = await orchestrator.spawn(baseConfig())
+
+    expect(dispatched).toHaveLength(2)
+    expect(onSwarmComplete).not.toHaveBeenCalled()
+
+    completions.get(dispatched[0].sessionId)?.resolve({ status: 'done', output: 'analysis done' })
+    await Promise.resolve()
+    expect(onSwarmComplete).not.toHaveBeenCalled()
+
+    completions.get(dispatched[1].sessionId)?.resolve({ status: 'done', output: 'review done' })
+    await waitFor(() => onSwarmComplete.mock.calls.length === 1)
+
+    expect(onSwarmComplete).toHaveBeenCalledWith({
+      swarmId: result.swarmId,
+      threadId: 'thread-1',
+      projectId: 'project-1',
+      strategy: 'parallel',
+      sessionCount: 2,
+    })
+  })
+
   it('routes each swarm role with its configured adapter and model hint', async () => {
     const worktrees = createFakeWorktrees()
     const dispatched: SwarmDispatchInput[] = []
@@ -144,7 +183,8 @@ describe('SwarmOrchestrator', () => {
   })
 
   it('keeps the manager active between planner and implementation phases', async () => {
-    const { orchestrator, dispatched, completions, waitedSessionIds } = createManagedHarness()
+    const { orchestrator, dispatched, completions, routeInputs, waitedSessionIds } =
+      createManagedHarness()
 
     const spawnPromise = orchestrator.spawn(managedConfig())
 
@@ -152,8 +192,12 @@ describe('SwarmOrchestrator', () => {
 
     expect(dispatched[0].role).toBe('manager')
     expect(dispatched[0].threadId).toBe('thread-1')
-    expect(dispatched[0].agentId).toBe('claude-code')
-    expect(dispatched[0].model).toBe('claude-opus-4-7')
+    expect(dispatched[0].agentId).toBe('codex')
+    expect(dispatched[0].model).toBe('gpt-5.5')
+    expect(routeInputs[0]).toMatchObject({
+      preferredAgentId: 'codex',
+      modelOverride: 'gpt-5.5',
+    })
     expect(dispatched[0].prompt).toContain('Return only a JSON object')
     expect(dispatched[0].prompt).toContain('agentId must be one of')
 
@@ -188,6 +232,10 @@ describe('SwarmOrchestrator', () => {
     expect(result.sessions.map((session) => session.threadId)).toEqual(['thread-1', 'thread-1'])
     expect(result.sessions[0].status).toBe('done')
     expect(dispatched.map((call) => call.role)).toEqual(['manager', 'planner'])
+    expect(routeInputs[1]).toMatchObject({
+      preferredAgentId: 'claude-code',
+      autoAgentSelection: true,
+    })
     expect(waitedSessionIds).toEqual([dispatched[0].sessionId, dispatched[1].sessionId])
     expect(dispatched[1].prompt).toContain('[Role: planner]')
     expect(dispatched[1].prompt).toContain('Identify the files')
@@ -459,6 +507,59 @@ describe('SwarmOrchestrator', () => {
     expect(dispatched.map((call) => call.threadId)).toEqual(['thread-1', 'thread-1'])
     expect(dispatched[1].prompt).toContain('Context from previous step')
     expect(dispatched[1].prompt).toContain('output from analyzer')
+  })
+
+  it('notifies sequential swarm completion only after the final spawned session finishes', async () => {
+    const dispatched: SwarmDispatchInput[] = []
+    const completions = new Map<string, Deferred<{ status: 'done'; output: string }>>()
+    const onSwarmComplete = vi.fn()
+    const orchestrator = new SwarmOrchestrator({
+      getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
+      createThread: () => ({ id: 'thread-1' }),
+      routeModel: (input) => ({ agentId: input.preferredAgentId, model: 'gpt-5.3-codex' }),
+      dispatchSession: (input) => {
+        dispatched.push(input)
+        completions.set(input.sessionId, deferred<{ status: 'done'; output: string }>())
+        return { sessionId: input.sessionId, threadId: input.threadId, status: 'running' }
+      },
+      waitForSessionCompletion: (sessionId) => completions.get(sessionId)!.promise,
+      worktrees: createFakeWorktrees(),
+    })
+    orchestrator.setOnSwarmComplete(onSwarmComplete)
+
+    const result = await orchestrator.spawn({
+      projectId: 'project-1',
+      prompt: 'Review the current codebase',
+      strategy: 'sequential',
+      agents: [
+        { role: 'analyzer', agentId: 'claude-code' },
+        { role: 'implementer', agentId: 'codex', modelOverride: 'gpt-5.3-codex' },
+      ],
+    })
+
+    expect(dispatched).toHaveLength(1)
+    expect(onSwarmComplete).not.toHaveBeenCalled()
+
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: 'analysis output',
+    })
+    await waitFor(() => dispatched.length === 2)
+    expect(onSwarmComplete).not.toHaveBeenCalled()
+
+    completions.get(dispatched[1].sessionId)?.resolve({
+      status: 'done',
+      output: 'implementation output',
+    })
+    await waitFor(() => onSwarmComplete.mock.calls.length === 1)
+
+    expect(onSwarmComplete).toHaveBeenCalledWith({
+      swarmId: result.swarmId,
+      threadId: 'thread-1',
+      projectId: 'project-1',
+      strategy: 'sequential',
+      sessionCount: 2,
+    })
   })
 
   it('re-runs the implementer when the reviewer rejects, until approved', async () => {
@@ -845,6 +946,11 @@ function managedConfig(): SwarmConfig {
 function createManagedHarness() {
   const worktrees = createFakeWorktrees()
   const dispatched: SwarmDispatchInput[] = []
+  const routeInputs: Array<{
+    preferredAgentId: string
+    modelOverride?: string
+    autoAgentSelection?: boolean
+  }> = []
   const waitedSessionIds: string[] = []
   const completions = new Map<
     string,
@@ -853,10 +959,18 @@ function createManagedHarness() {
   const orchestrator = new SwarmOrchestrator({
     getProject: () => ({ id: 'project-1', repoPath: '/repo' }),
     createThread: () => ({ id: 'thread-1' }),
-    routeModel: (input) => ({
-      agentId: input.preferredAgentId,
-      model: input.modelOverride ?? `auto-${input.preferredAgentId}`,
-    }),
+    routeModel: (input) => {
+      routeInputs.push({
+        preferredAgentId: input.preferredAgentId,
+        modelOverride: input.modelOverride,
+        autoAgentSelection: input.autoAgentSelection,
+      })
+
+      return {
+        agentId: input.preferredAgentId,
+        model: input.modelOverride ?? `auto-${input.preferredAgentId}`,
+      }
+    },
     dispatchSession: (input) => {
       dispatched.push(input)
       completions.set(input.sessionId, deferred<{ status: 'done' | 'error'; output: string }>())
@@ -869,7 +983,7 @@ function createManagedHarness() {
     worktrees,
   })
 
-  return { orchestrator, dispatched, completions, waitedSessionIds, worktrees }
+  return { orchestrator, dispatched, completions, routeInputs, waitedSessionIds, worktrees }
 }
 
 function createFakeWorktrees() {

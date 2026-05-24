@@ -8,6 +8,7 @@ import { createExtensionsApi, type ExtensionsApi } from './extensions'
 import { createFeedbackApi, type FeedbackApi } from './feedback'
 import { createGitApi, type GitApi } from './git'
 import { createMemoryApi, type MemoryApi } from './memory'
+import { createNotificationsApi, type NotificationsApi } from './notifications'
 import { createProjectsApi, type ProjectsApi } from './projects'
 import { createRouterApi, type RouterApi } from './routing'
 import { createRunsApi, type RunsApi } from './runs'
@@ -35,6 +36,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   runs: RunsApi
   git: GitApi
   memory: MemoryApi
+  notifications: NotificationsApi
   settings: SettingsApi
   system: SystemApi
   updates: UpdatesApi
@@ -59,6 +61,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     runs: createRunsApi(ipcRenderer),
     git: createGitApi(ipcRenderer),
     memory: createMemoryApi(ipcRenderer),
+    notifications: createNotificationsApi(ipcRenderer),
     settings: createSettingsApi(ipcRenderer),
     updates: createUpdatesApi(ipcRenderer),
     on: events.on,

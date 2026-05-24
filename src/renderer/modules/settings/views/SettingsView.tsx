@@ -62,6 +62,7 @@ export function SettingsView({
   onClose,
 }: SettingsViewProps) {
   const settingsDraft = useSettingsDraft({ project: selectedProject })
+  const [notificationEventsExpanded, setNotificationEventsExpanded] = useState(false)
   const draft = settingsDraft.draft
 
   const leftInsetClass = isMac
@@ -212,6 +213,89 @@ export function SettingsView({
                   }
                 />
               </FieldRow>
+              {draft.general.enableDesktopNotifications && (
+                <>
+                  <FieldRow label="Only when window is not focused">
+                    <Toggle
+                      checked={draft.general.onlyWhenUnfocused}
+                      onChange={(onlyWhenUnfocused) =>
+                        update('general', { ...draft.general, onlyWhenUnfocused })
+                      }
+                    />
+                  </FieldRow>
+                  <div className="pl-6">
+                    <button
+                      type="button"
+                      onClick={() => setNotificationEventsExpanded((v) => !v)}
+                      className="mb-2 flex items-center gap-1 text-[13px] text-secondary hover:text-primary"
+                    >
+                      <span className="text-[10px]">
+                        {notificationEventsExpanded ? '▼' : '▶'}
+                      </span>
+                      Event preferences
+                    </button>
+                    {notificationEventsExpanded && (
+                      <div className="space-y-2">
+                        <FieldRow label="Swarm completed">
+                          <Toggle
+                            checked={draft.general.notificationEvents.swarmCompleted}
+                            onChange={(swarmCompleted) =>
+                              update('general', {
+                                ...draft.general,
+                                notificationEvents: { ...draft.general.notificationEvents, swarmCompleted },
+                              })
+                            }
+                          />
+                        </FieldRow>
+                        <FieldRow label="Diff ready for review">
+                          <Toggle
+                            checked={draft.general.notificationEvents.diffReady}
+                            onChange={(diffReady) =>
+                              update('general', {
+                                ...draft.general,
+                                notificationEvents: { ...draft.general.notificationEvents, diffReady },
+                              })
+                            }
+                          />
+                        </FieldRow>
+                        <FieldRow label="Automation succeeded">
+                          <Toggle
+                            checked={draft.general.notificationEvents.automationSuccess}
+                            onChange={(automationSuccess) =>
+                              update('general', {
+                                ...draft.general,
+                                notificationEvents: { ...draft.general.notificationEvents, automationSuccess },
+                              })
+                            }
+                          />
+                        </FieldRow>
+                        <FieldRow label="Automation failed">
+                          <Toggle
+                            checked={draft.general.notificationEvents.automationFailure}
+                            onChange={(automationFailure) =>
+                              update('general', {
+                                ...draft.general,
+                                notificationEvents: { ...draft.general.notificationEvents, automationFailure },
+                              })
+                            }
+                          />
+                        </FieldRow>
+                        <FieldRow label="Agent session error">
+                          <Toggle
+                            checked={draft.general.notificationEvents.sessionError}
+                            onChange={(sessionError) =>
+                              update('general', {
+                                ...draft.general,
+                                notificationEvents: { ...draft.general.notificationEvents, sessionError },
+                              })
+                            }
+                          />
+                        </FieldRow>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </SettingsSection>
 
             <SettingsSection id="agents" title="Agents & Models">

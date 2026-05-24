@@ -1,4 +1,5 @@
 import { adapterRegistry } from '../agents'
+import { getMainWindow } from '../app/bootstrap'
 import { estimateCost } from '../cost'
 import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
@@ -9,6 +10,7 @@ import { extensionMarketplaceService, registerExtensionHandlers } from '../modul
 import { registerFeedbackHandlers } from '../modules/feedback/ipc/registerFeedbackHandlers'
 import { registerGitHandlers } from '../modules/git/ipc/registerGitHandlers'
 import { projectMemoryService, registerMemoryHandlers } from '../modules/memory'
+import { NotificationService, type NotificationDispatch } from '../modules/notifications'
 import { registerProjectHandlers } from '../modules/projects/ipc/registerProjectHandlers'
 import { runQualityGate } from '../modules/quality/application/qualityGateService'
 import { registerRoutingHandlers } from '../modules/routing/ipc/registerRoutingHandlers'
@@ -24,6 +26,7 @@ import { registerUpdateHandlers } from '../modules/updates'
 import { ModelRouter } from '../router'
 import { capacityFallbackModelsForAgent } from '../router/modelCapacityFallbacks'
 import { sessionManager } from '../session'
+import type { NotifierEvent } from '../session/SessionManager'
 import { projectsStore, runAuditStore, specRunsStore, threadsStore } from '../store'
 import { swarmOrchestrator } from '../swarm/SwarmOrchestrator'
 
@@ -33,11 +36,20 @@ const modelRouter = new ModelRouter({
   settingsProvider: (projectId) => settingsService.getEffective(projectId).settings,
 })
 
+const notificationService = new NotificationService({
+  getSettings: (projectId) => settingsService.getEffective(projectId).settings,
+  getMainWindow,
+  sendToRenderer: (channel, payload) => {
+    getMainWindow()?.webContents.send(channel, payload)
+  },
+})
+
 export function registerIpcHandlers(): void {
   const context = createMainIpcContext()
 
   configureSessionManager(context)
   configureSwarmOrchestrator(context)
+  configureNotifications(context)
 
   registerProjectHandlers()
   registerSessionHandlers()
@@ -63,6 +75,7 @@ function createMainIpcContext(): MainIpcContext {
   return {
     adapters: adapterRegistry,
     modelRouter,
+    notificationService,
     projectMemoryService,
     repositoryContext: repositoryContextService,
     sessionManager,
@@ -70,6 +83,68 @@ function createMainIpcContext(): MainIpcContext {
     swarmOrchestrator,
     worktreeManager,
   }
+}
+
+function configureNotifications(context: MainIpcContext): void {
+  context.sessionManager.setNotifier((event) => {
+    const dispatch = mapNotifierEventToDispatch(event)
+    if (dispatch) context.notificationService.dispatch(dispatch)
+  })
+}
+
+function mapNotifierEventToDispatch(event: NotifierEvent): NotificationDispatch | null {
+  const kind = event.spawnedAgent?.kind
+  if (kind === 'quality-repair' || kind === 'swarm') return null
+
+  const baseClick = {
+    projectId: event.projectId,
+    threadId: event.threadId,
+    sessionId: event.sessionId,
+  }
+
+  if (event.type === 'diff.ready') {
+    if (kind === 'automation') return null
+
+    return {
+      type: 'diff.ready',
+      title: 'Diff ready for review',
+      body: `${event.count} file${event.count === 1 ? '' : 's'} changed`,
+      click: { type: 'diff.ready', ...baseClick },
+    }
+  }
+
+  if (kind === 'automation') {
+    const name = event.spawnedAgent?.role ?? 'Automation'
+    if (event.type === 'session.done') {
+      return {
+        type: 'automation.success',
+        title: `${name} succeeded`,
+        body: 'Automation finished cleanly',
+        click: { type: 'automation.success', ...baseClick },
+      }
+    }
+    return {
+      type: 'automation.failure',
+      title: `${name} failed`,
+      body: truncate(event.message, 100),
+      click: { type: 'automation.failure', ...baseClick },
+    }
+  }
+
+  if (event.type === 'session.error') {
+    return {
+      type: 'session.error',
+      title: 'Agent session error',
+      body: truncate(event.message, 100),
+      click: { type: 'session.error', ...baseClick },
+    }
+  }
+
+  return null
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
 function configureSessionManager(context: MainIpcContext): void {
@@ -149,6 +224,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         runtimeSettings: settings.agents.runtimes[input.agentId],
         imageAttachments: input.imageAttachments,
         spawnedAgent: { kind: 'swarm', role: input.role },
+        modelRecoveryMode: input.strategy === 'managed' ? 'auto' : 'prompt',
       })
 
       return { sessionId, threadId, status: 'running' }

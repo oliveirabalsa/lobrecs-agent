@@ -14,7 +14,7 @@ describe('mergeSettings', () => {
     })
 
     expect(merged.agents.defaultAgentId).toBe('codex')
-    expect(merged.agents.fallbackAgentId).toBe('claude-code')
+    expect(merged.agents.fallbackAgentId).toBe('codex')
     expect(merged.swarms.defaultAgents).toEqual([{ role: 'solo', agentId: 'opencode' }])
   })
 })

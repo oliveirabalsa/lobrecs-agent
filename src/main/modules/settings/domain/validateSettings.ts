@@ -82,6 +82,20 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
         cloned.general.enableDesktopNotifications,
         true,
       ),
+      onlyWhenUnfocused: booleanOr(cloned.general.onlyWhenUnfocused, true),
+      notificationEvents: {
+        swarmCompleted: booleanOr(cloned.general.notificationEvents?.swarmCompleted, true),
+        diffReady: booleanOr(cloned.general.notificationEvents?.diffReady, true),
+        automationSuccess: booleanOr(
+          cloned.general.notificationEvents?.automationSuccess,
+          true,
+        ),
+        automationFailure: booleanOr(
+          cloned.general.notificationEvents?.automationFailure,
+          true,
+        ),
+        sessionError: booleanOr(cloned.general.notificationEvents?.sessionError, true),
+      },
     },
     agents: {
       defaultAgentId,
@@ -279,7 +293,10 @@ function normalizeTemplateAgents(agents: unknown): SwarmTemplate['agents'] {
     .map((agent): SwarmTemplate['agents'][number] | null => {
       const record = objectLike(agent)
       const role = stringOr(record.role, '').trim()
-      const agentId = supportedAgentOr(record.agentId, 'claude-code')
+      const agentId = supportedAgentOr(
+        record.agentId,
+        DEFAULT_APP_SETTINGS.agents.defaultAgentId,
+      )
       if (!role) return null
 
       return {

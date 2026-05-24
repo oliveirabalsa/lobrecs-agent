@@ -36,8 +36,8 @@ describe('settings validation', () => {
       },
     })
 
-    expect(settings.agents.defaultAgentId).toBe('claude-code')
-    expect(settings.agents.enabledAgentIds).toEqual(['claude-code'])
+    expect(settings.agents.defaultAgentId).toBe('opencode')
+    expect(settings.agents.enabledAgentIds).toEqual(['opencode'])
     expect(settings.agents.imageAttachments.maxCount).toBe(20)
     expect(settings.agents.imageAttachments.maxSizeMb).toBe(1)
     expect(settings.swarms.maxAgents).toBe(16)

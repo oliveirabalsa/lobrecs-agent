@@ -377,6 +377,64 @@ describe('SessionManager', () => {
     })
   })
 
+  it('auto retries managed swarm sessions with related fallback models', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter('claude-code')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'finish the managed swarm task',
+      agentId: 'claude-code',
+      model: 'claude-opus-4-7',
+      modelFallbacks: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+      modelRecoveryMode: 'auto',
+      repoPath: project.repoPath,
+      spawnedAgent: { kind: 'swarm', role: 'manager' },
+    })
+
+    adapter.emit({
+      type: 'error',
+      sessionId,
+      payload: { message: 'Claude usage limit reached. Please try again later.' },
+      timestamp: 10,
+    })
+
+    await waitFor(() => adapter.dispatches.length === 2)
+
+    expect(sessionsStore.get(sessionId)).toMatchObject({
+      status: 'running',
+      model: 'claude-sonnet-4-6',
+    })
+    expect(adapter.dispatches[1]).toMatchObject({
+      sessionId,
+      model: 'claude-sonnet-4-6',
+      modelFallbacks: ['claude-haiku-4-5-20251001'],
+    })
+    expect(
+      broadcasts.some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'model-recovery',
+      ),
+    ).toBe(false)
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+
+    await waitFor(() => sessionsStore.get(sessionId)?.status === 'done')
+  })
+
   it('pauses for model recovery when a process warning reports a session limit', async () => {
     const project = createProject()
     const adapter = new FakeAdapter('claude-code')
@@ -750,6 +808,37 @@ describe('SessionManager', () => {
     expect(broadcasts[0]).toMatchObject({ type: 'error', sessionId: session.id })
   })
 
+  it('notifies spawned automation failures that happen before the session becomes active', async () => {
+    const project = createProject()
+    const notifier = vi.fn()
+    const manager = new SessionManager({
+      broadcast: () => undefined,
+      notifier,
+      worktreeIsolation: false,
+    })
+
+    await expect(
+      manager.dispatch({
+        projectId: project.id,
+        prompt: 'missing automation adapter',
+        agentId: 'claude-code',
+        model: 'claude-sonnet-4-6',
+        repoPath: project.repoPath,
+        spawnedAgent: { kind: 'automation', role: 'Nightly QA' },
+      }),
+    ).rejects.toThrow('Adapter not found')
+
+    const [session] = sessionsStore.list(project.id)
+    expect(notifier).toHaveBeenCalledWith({
+      type: 'session.error',
+      sessionId: session.id,
+      projectId: project.id,
+      threadId: session.threadId,
+      message: 'Adapter not found: claude-code',
+      spawnedAgent: { kind: 'automation', role: 'Nightly QA' },
+    })
+  })
+
   it('treats non-zero completion exit codes as errors', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
@@ -776,6 +865,46 @@ describe('SessionManager', () => {
     expect(sessionsStore.get(sessionId)?.status).toBe('error')
     expect(sessionsStore.listEvents(sessionId).at(-1)?.payload).toMatchObject({
       status: 'error',
+    })
+  })
+
+  it('notifies spawned automation completion when a non-git repo has no diff baseline', async () => {
+    const repoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'lobrecs-agent-nongit-'))
+    tempDirs.push(repoPath)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const notifier = vi.fn()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      notifier,
+      worktreeIsolation: false,
+    })
+    const { sessionId, threadId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'run automation',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      spawnedAgent: { kind: 'automation', role: 'Nightly QA' },
+    })
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    expect(notifier).toHaveBeenCalledWith({
+      type: 'session.done',
+      sessionId,
+      projectId: project.id,
+      threadId,
+      spawnedAgent: { kind: 'automation', role: 'Nightly QA' },
     })
   })
 

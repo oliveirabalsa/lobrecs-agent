@@ -38,6 +38,7 @@ type MaybePromise<T> = T | Promise<T>
 export interface SwarmDispatchInput {
   sessionId: string
   swarmId: string
+  strategy: SwarmConfig['strategy']
   threadId: string
   projectId: string
   prompt: string
@@ -60,6 +61,7 @@ export interface SwarmRouteInput {
   prompt: string
   preferredAgentId: SupportedAgentId
   modelOverride?: string
+  autoAgentSelection?: boolean
 }
 
 export interface SwarmPlanConfirmation {
@@ -79,6 +81,16 @@ export interface SwarmCompletionResult {
   status: SessionStatus
   output?: string
 }
+
+export interface SwarmCompletionEvent {
+  swarmId: string
+  threadId: string
+  projectId: string
+  strategy: SwarmConfig['strategy']
+  sessionCount: number
+}
+
+export type SwarmCompletionListener = (event: SwarmCompletionEvent) => void
 
 export interface SwarmOrchestratorDependencies {
   getProject?: (projectId: string) => MaybePromise<Pick<Project, 'id' | 'repoPath'> | undefined>
@@ -113,6 +125,7 @@ interface ActiveManagedPhase {
 export class SwarmOrchestrator {
   private readonly swarms = new Map<string, SwarmResult>()
   private dependencies: SwarmOrchestratorDependencies
+  private onSwarmComplete: SwarmCompletionListener | undefined
 
   constructor(dependencies: SwarmOrchestratorDependencies = {}) {
     this.dependencies = {
@@ -126,6 +139,28 @@ export class SwarmOrchestrator {
       ...this.dependencies,
       ...dependencies,
       worktrees: dependencies.worktrees ?? this.dependencies.worktrees ?? worktreeManager,
+    }
+  }
+
+  setOnSwarmComplete(listener: SwarmCompletionListener | undefined): void {
+    this.onSwarmComplete = listener
+  }
+
+  private notifyComplete(swarmId: string, projectId: string): void {
+    const swarm = this.swarms.get(swarmId)
+    if (!swarm) return
+    const listener = this.onSwarmComplete
+    if (!listener) return
+    try {
+      listener({
+        swarmId,
+        threadId: swarm.threadId,
+        projectId,
+        strategy: swarm.strategy,
+        sessionCount: swarm.sessions.length,
+      })
+    } catch (error) {
+      console.error('[SwarmOrchestrator] onSwarmComplete listener threw', error)
     }
   }
 
@@ -167,6 +202,7 @@ export class SwarmOrchestrator {
       )
     } else if (config.strategy === 'parallel') {
       result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId, threadId)
+      void this.waitForParallelCompletion(result.swarmId, config.projectId, result.sessions)
     } else if (config.strategy === 'sequential') {
       result.sessions = await this.spawnSequential(
         config,
@@ -178,9 +214,21 @@ export class SwarmOrchestrator {
       this.injectSwarmFileSummary(result.sessions)
     } else {
       result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId, threadId)
+      void this.waitForParallelCompletion(result.swarmId, config.projectId, result.sessions)
     }
 
     return cloneResult(result)
+  }
+
+  private async waitForParallelCompletion(
+    swarmId: string,
+    projectId: string,
+    sessions: readonly SpawnedSession[],
+  ): Promise<void> {
+    await Promise.allSettled(
+      sessions.map((session) => Promise.resolve(this.waitForCompletion(session))),
+    )
+    this.notifyComplete(swarmId, projectId)
   }
 
   async cancel(swarmId: string): Promise<void> {
@@ -262,6 +310,7 @@ export class SwarmOrchestrator {
       config.agents.map((agentConfig) =>
         this.spawnAgent({
           agentConfig,
+          swarmStrategy: config.strategy,
           basePrompt: config.prompt,
           projectId: config.projectId,
           repoPath,
@@ -285,6 +334,7 @@ export class SwarmOrchestrator {
 
     const firstSession = await this.spawnAgent({
       agentConfig: firstAgent,
+      swarmStrategy: config.strategy,
       basePrompt: config.prompt,
       projectId: config.projectId,
       repoPath,
@@ -306,13 +356,17 @@ export class SwarmOrchestrator {
       remainingAgents,
       previousSession: firstSession,
       previousAgentConfig: firstAgent,
-    }).catch(() => {
-      const swarm = this.swarms.get(swarmId)
-      const lastSession = swarm?.sessions.at(-1)
-      if (lastSession && lastSession.status === 'running') {
-        lastSession.status = 'error'
-      }
     })
+      .catch(() => {
+        const swarm = this.swarms.get(swarmId)
+        const lastSession = swarm?.sessions.at(-1)
+        if (lastSession && lastSession.status === 'running') {
+          lastSession.status = 'error'
+        }
+      })
+      .finally(() => {
+        this.notifyComplete(swarmId, config.projectId)
+      })
 
     return [firstSession]
   }
@@ -354,13 +408,19 @@ export class SwarmOrchestrator {
         activePhase: firstPhase,
         completedPhaseOutputs: [],
         decisionRound: 1,
-      }).catch(() => {
-        const swarm = this.swarms.get(swarmId)
-        const lastSession = swarm?.sessions.at(-1)
-        if (lastSession && lastSession.status === 'running') {
-          lastSession.status = 'error'
-        }
       })
+        .catch(() => {
+          const swarm = this.swarms.get(swarmId)
+          const lastSession = swarm?.sessions.at(-1)
+          if (lastSession && lastSession.status === 'running') {
+            lastSession.status = 'error'
+          }
+        })
+        .finally(() => {
+          this.notifyComplete(swarmId, config.projectId)
+        })
+    } else {
+      queueMicrotask(() => this.notifyComplete(swarmId, config.projectId))
     }
 
     return this.swarms.get(swarmId)?.sessions ?? []
@@ -386,6 +446,7 @@ export class SwarmOrchestrator {
           maxAgents: input.settings.swarms.maxAgents,
         }),
       },
+      swarmStrategy: input.config.strategy,
       basePrompt: input.config.prompt,
       projectId: input.config.projectId,
       repoPath: input.repoPath,
@@ -437,6 +498,7 @@ export class SwarmOrchestrator {
         threadId: input.threadId,
         previousOutput: input.previousOutput ?? '',
         contextLabel: 'Manager context for this phase',
+        autoAgentSelection: true,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(...sessions)
@@ -448,6 +510,7 @@ export class SwarmOrchestrator {
 
     const firstSession = await this.spawnAgent({
       agentConfig: firstAgent,
+      swarmStrategy: input.config.strategy,
       basePrompt: input.config.prompt,
       projectId: input.config.projectId,
       repoPath: input.repoPath,
@@ -456,6 +519,7 @@ export class SwarmOrchestrator {
       previousOutput: input.previousOutput,
       contextLabel: input.previousOutput ? 'Manager context for this phase' : undefined,
       imageAttachments: input.imageAttachments,
+      autoAgentSelection: true,
     })
 
     this.swarms.get(input.swarmId)?.sessions.push(firstSession)
@@ -554,6 +618,7 @@ export class SwarmOrchestrator {
 
       const nextSession = await this.spawnAgent({
         agentConfig,
+        swarmStrategy: input.config.strategy,
         basePrompt: input.config.prompt,
         projectId: input.config.projectId,
         repoPath: input.repoPath,
@@ -562,6 +627,7 @@ export class SwarmOrchestrator {
         previousOutput,
         contextLabel: 'Manager context for this phase',
         imageAttachments: input.config.imageAttachments,
+        autoAgentSelection: true,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
@@ -585,11 +651,13 @@ export class SwarmOrchestrator {
     threadId: string
     previousOutput: string
     contextLabel: string
+    autoAgentSelection?: boolean
   }): Promise<SpawnedSession[]> {
     return Promise.all(
       input.config.agents.map((agentConfig) =>
         this.spawnAgent({
           agentConfig,
+          swarmStrategy: input.config.strategy,
           basePrompt: input.config.prompt,
           projectId: input.config.projectId,
           repoPath: input.repoPath,
@@ -598,6 +666,7 @@ export class SwarmOrchestrator {
           previousOutput: input.previousOutput,
           contextLabel: input.contextLabel,
           imageAttachments: input.config.imageAttachments,
+          autoAgentSelection: input.autoAgentSelection,
         }),
       ),
     )
@@ -630,6 +699,7 @@ export class SwarmOrchestrator {
 
       const reviewer = await this.spawnAgent({
         agentConfig: input.reviewerConfig,
+        swarmStrategy: 'sequential',
         basePrompt: input.basePrompt,
         projectId: input.projectId,
         repoPath: input.repoPath,
@@ -653,6 +723,7 @@ export class SwarmOrchestrator {
 
       const implementer = await this.spawnAgent({
         agentConfig: input.implementerConfig,
+        swarmStrategy: 'sequential',
         basePrompt: input.basePrompt,
         projectId: input.projectId,
         repoPath: input.repoPath,
@@ -740,6 +811,7 @@ export class SwarmOrchestrator {
 
       const nextSession = await this.spawnAgent({
         agentConfig: effectiveAgentConfig,
+        swarmStrategy: 'sequential',
         basePrompt: input.basePrompt,
         projectId: input.projectId,
         repoPath: input.repoPath,
@@ -798,6 +870,7 @@ export class SwarmOrchestrator {
 
   private async spawnAgent(input: {
     agentConfig: SwarmAgentConfig
+    swarmStrategy: SwarmConfig['strategy']
     basePrompt: string
     projectId: string
     repoPath: string
@@ -807,6 +880,7 @@ export class SwarmOrchestrator {
     contextLabel?: string
     extraInstruction?: string
     imageAttachments?: ImageAttachment[]
+    autoAgentSelection?: boolean
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
     const provisionalSessionId = randomUUID()
@@ -822,11 +896,13 @@ export class SwarmOrchestrator {
       prompt,
       preferredAgentId: input.agentConfig.agentId,
       modelOverride: input.agentConfig.modelOverride,
+      autoAgentSelection: input.autoAgentSelection,
     })
 
     const dispatchResult = await dependencies.dispatchSession({
       sessionId: provisionalSessionId,
       swarmId: input.swarmId,
+      strategy: input.swarmStrategy,
       threadId: input.threadId,
       projectId: input.projectId,
       prompt,
@@ -921,7 +997,7 @@ function buildSwarmThreadTitle(config: SwarmConfig): string {
 }
 
 function selectManagerAgent(agentIds: readonly SupportedAgentId[]): SupportedAgentId {
-  for (const preferred of ['claude-code', 'codex', 'antigravity', 'opencode'] as const) {
+  for (const preferred of ['codex', 'claude-code', 'antigravity', 'opencode'] as const) {
     if (agentIds.includes(preferred)) return preferred
   }
 
@@ -931,7 +1007,7 @@ function selectManagerAgent(agentIds: readonly SupportedAgentId[]): SupportedAge
 function enabledSwarmAgentIds(settings: AppSettings): SupportedAgentId[] {
   return settings.agents.enabledAgentIds.length > 0
     ? [...settings.agents.enabledAgentIds]
-    : ['claude-code']
+    : [DEFAULT_APP_SETTINGS.agents.defaultAgentId]
 }
 
 function isReviewerRole(role: string): boolean {
@@ -1108,6 +1184,7 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
         context: projectsStore.getContext(input.projectId),
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings: settings.agents.runtimes[input.agentId],
+        modelRecoveryMode: input.strategy === 'managed' ? 'auto' : 'prompt',
       })
 
       return { sessionId, threadId, status: 'running' }

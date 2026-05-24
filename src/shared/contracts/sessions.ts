@@ -9,7 +9,7 @@ export type SessionStatus =
   | 'error'
   | 'cancelled'
 
-export type SpawnedAgentKind = 'swarm' | 'quality-repair'
+export type SpawnedAgentKind = 'swarm' | 'quality-repair' | 'automation'
 
 export interface SpawnedAgentSession {
   kind: SpawnedAgentKind

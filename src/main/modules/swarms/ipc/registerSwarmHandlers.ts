@@ -3,6 +3,23 @@ import { applyPatch, createPatch } from '../../../git/utils'
 import type { MainIpcContext } from '../../shared/ipcContext'
 
 export function registerSwarmHandlers(context: MainIpcContext): void {
+  context.swarmOrchestrator.setOnSwarmComplete((event) => {
+    try {
+      context.notificationService.dispatch({
+        type: 'swarm.completed',
+        title: 'Swarm complete',
+        body: `${event.sessionCount} ${event.sessionCount === 1 ? 'agent' : 'agents'} finished`,
+        click: {
+          type: 'swarm.completed',
+          projectId: event.projectId,
+          threadId: event.threadId,
+        },
+      })
+    } catch (error) {
+      console.error('[swarm:notification] dispatch failed', error)
+    }
+  })
+
   ipcMain.handle('swarm:spawn', async (_event, config) =>
     context.swarmOrchestrator.spawn(config),
   )

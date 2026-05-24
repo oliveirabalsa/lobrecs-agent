@@ -53,8 +53,8 @@ export class ModelRouter {
 
   constructor(options: ModelRouterOptions = {}) {
     this.adapterRegistry = options.adapterRegistry
-    this.defaultAgentId = options.defaultAgentId ?? 'claude-code'
-    this.fallbackAgentId = options.fallbackAgentId ?? 'claude-code'
+    this.defaultAgentId = options.defaultAgentId ?? 'opencode'
+    this.fallbackAgentId = options.fallbackAgentId ?? 'codex'
     this.settingsProvider = options.settingsProvider
   }
 
@@ -155,8 +155,9 @@ export class ModelRouter {
       !settings.routing.allowOpenCodeForFrontier
     ) {
       const frontierCandidates = ([
-        'claude-code',
         'codex',
+        'claude-code',
+        'antigravity',
         ...enabledAgents,
       ] as SupportedAgentId[]).filter((id) => enabledAgents.includes(id))
 
@@ -218,19 +219,11 @@ export class ModelRouter {
   /**
    * Picks an agent when AUTO mode is on.
    *
-   * Default policy (below):
-   *   - frontier/advanced → claude-code (Opus has the strongest reasoning)
-   *   - balanced          → codex
-   *   - lightweight       → claude-code (Haiku is fast and cheap)
-   * Falls back to the preferredAgent if the policy's first choice isn't installed.
-   *
-   * TODO (Leonardo): refine this policy. Consider:
-   *   - Prompt cues: 'review/audit/security' → claude-code; 'scaffold/new project'
-   *     → codex; 'gemini/google'-flavored tasks → antigravity.
-   *   - Honor preferredAgent more strongly for balanced/lightweight where
-   *     differences between agents are small.
-   *   - Cost vs quality trade-off — escalate to claude-code only when score
-   *     is firmly in the upper range of its tier.
+   * Intelligence/cost policy:
+   *   - frontier/advanced → Codex first, then Claude Opus, then Gemini, then MiniMax
+   *   - balanced/lightweight → MiniMax first because it is cheap enough to use often
+   * Claude remains available as a high-quality fallback, but AUTO mode should
+   * not burn Opus by default.
    */
   private async pickAgentForTier(params: {
     tier: ModelTier
@@ -241,10 +234,10 @@ export class ModelRouter {
     defaultAgentId: SupportedAgentId
   }): Promise<SupportedAgentId> {
     const tierPreference: Record<ModelTier, SupportedAgentId[]> = {
-      frontier: ['claude-code', 'codex', 'antigravity'],
-      advanced: ['claude-code', 'codex', 'antigravity'],
-      balanced: ['codex', 'claude-code', 'antigravity'],
-      lightweight: ['claude-code', 'codex', 'antigravity'],
+      frontier: ['codex', 'claude-code', 'antigravity', 'opencode'],
+      advanced: ['codex', 'claude-code', 'antigravity', 'opencode'],
+      balanced: ['opencode', 'codex', 'antigravity', 'claude-code'],
+      lightweight: ['opencode', 'codex', 'antigravity', 'claude-code'],
     }
 
     const candidates: SupportedAgentId[] = [
@@ -278,7 +271,7 @@ export class ModelRouter {
     tier: ModelTier = 'frontier',
     settings?: AppSettings,
   ): Promise<SupportedAgentId> {
-    const priority = ['claude-code', 'codex', 'antigravity', 'opencode'] as SupportedAgentId[]
+    const priority = ['codex', 'claude-code', 'antigravity', 'opencode'] as SupportedAgentId[]
     for (const agentId of priority) {
       if (!enabledAgents.includes(agentId)) continue
       if (!(await this.isAgentAvailable(agentId))) continue
@@ -367,10 +360,18 @@ function fallbackSettings(): AppSettings {
       startOnLaunch: false,
       openLastProjectOnLaunch: true,
       enableDesktopNotifications: true,
+      onlyWhenUnfocused: true,
+      notificationEvents: {
+        swarmCompleted: true,
+        diffReady: true,
+        automationSuccess: true,
+        automationFailure: true,
+        sessionError: true,
+      },
     },
     agents: {
-      defaultAgentId: 'claude-code',
-      fallbackAgentId: 'claude-code',
+      defaultAgentId: 'opencode',
+      fallbackAgentId: 'codex',
       enabledAgentIds: [...SUPPORTED_AGENT_IDS],
       runtimes: {
         'claude-code': {

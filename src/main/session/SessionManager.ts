@@ -78,6 +78,7 @@ export type DispatchSessionParams = {
   isolate?: boolean
   qualityAttempt?: number
   spawnedAgent?: SpawnedAgentSession
+  modelRecoveryMode?: 'prompt' | 'auto'
   /** When provided, links the new session to an existing thread. */
   threadId?: string
   /**
@@ -112,6 +113,33 @@ export type QualityGateRunner = (input: {
   emitActivity(payload: AgentActivity): void
 }) => Promise<void>
 
+export type NotifierEvent =
+  | {
+      type: 'session.done'
+      sessionId: string
+      projectId: string
+      threadId: string
+      spawnedAgent?: SpawnedAgentSession
+    }
+  | {
+      type: 'session.error'
+      sessionId: string
+      projectId: string
+      threadId: string
+      message: string
+      spawnedAgent?: SpawnedAgentSession
+    }
+  | {
+      type: 'diff.ready'
+      sessionId: string
+      projectId: string
+      threadId: string
+      count: number
+      spawnedAgent?: SpawnedAgentSession
+    }
+
+export type NotifierCallback = (event: NotifierEvent) => void
+
 type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   repoPath: string
   threadId: string
@@ -132,6 +160,12 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   baseContext?: string | null
   /** Context retrieval query to preserve when a paused run is continued. */
   contextQuery?: string
+  prompt: string
+  agentId: AgentId
+  modelFallbacks: string[]
+  imageAttachments?: ImageAttachment[]
+  adapterContext?: string | null
+  modelRecoveryMode: 'prompt' | 'auto'
   /** Last provider-limit/capacity message observed before terminal failure. */
   providerLimitReason?: string
 }
@@ -215,6 +249,7 @@ export type SessionManagerOptions = {
   worktreeIsolation?: boolean
   resolveContext?: SessionContextResolver
   qualityGateRunner?: QualityGateRunner
+  notifier?: NotifierCallback
   idleHeartbeatMs?: number | false
 }
 
@@ -234,6 +269,7 @@ export class SessionManager {
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
   private qualityGateRunner?: QualityGateRunner
+  private notifier?: NotifierCallback
   private readonly idleHeartbeatMs: number | false
 
   constructor(options: SessionManagerOptions = {}) {
@@ -243,6 +279,7 @@ export class SessionManager {
     this.estimateCost = options.estimateCost ?? (() => 0)
     this.resolveContext = options.resolveContext
     this.qualityGateRunner = options.qualityGateRunner
+    this.notifier = options.notifier
     this.idleHeartbeatMs = options.idleHeartbeatMs ?? 45_000
 
     for (const adapter of options.adapters ?? []) {
@@ -264,6 +301,19 @@ export class SessionManager {
 
   setQualityGateRunner(runner: QualityGateRunner | undefined): void {
     this.qualityGateRunner = runner
+  }
+
+  setNotifier(notifier: NotifierCallback | undefined): void {
+    this.notifier = notifier
+  }
+
+  private emitNotifierEvent(event: NotifierEvent): void {
+    if (!this.notifier) return
+    try {
+      this.notifier(event)
+    } catch (error) {
+      console.error('[session] notifier callback failed:', errorMessage(error))
+    }
   }
 
   async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
@@ -387,6 +437,12 @@ export class SessionManager {
         runtimeSettings: params.runtimeSettings,
         baseContext: params.context,
         contextQuery: params.contextQuery,
+        prompt: params.prompt,
+        agentId: params.agentId,
+        modelFallbacks: params.modelFallbacks ?? [],
+        imageAttachments: params.imageAttachments,
+        adapterContext,
+        modelRecoveryMode: params.modelRecoveryMode ?? 'prompt',
       })
       this.scheduleIdleHeartbeat(session.id)
 
@@ -848,43 +904,16 @@ export class SessionManager {
         observedProviderLimit ?? active?.providerLimitReason ?? null
 
       if (status === 'error' && active && session && providerLimitReason) {
-        this.applyUsage(event)
-        void this.pauseForModelRecovery(event.sessionId, active, session, providerLimitReason)
-        return
-      }
-
-      this.applyUsage(event)
-      sessionsStore.updateStatus(event.sessionId, status)
-      this.stopIdleHeartbeat(event.sessionId)
-      this.stopLiveDiff(event.sessionId)
-      this.activeSessions.delete(event.sessionId)
-      this.processWarningsBySession.delete(event.sessionId)
-
-      // A plan-mode planning session bypasses the diff/quality pipeline
-      // entirely: the repo must stay untouched until the user approves, so
-      // diffs are never auto-applied and the quality gate never runs before
-      // review. This branch must precede `emitCompletionDiffs`.
-      if (active?.planMode) {
-        void this.completePlanModeSession(event.sessionId, active, completedEvent, session)
-        return
-      }
-
-      void this.emitCompletionDiffs(event.sessionId, active, completedEvent).then(() => {
-        if (status !== 'done') return
-        if (!active) return
-
-        if (!session?.threadId) {
-          console.warn(
-            `[session] skipping queued dispatch: session ${event.sessionId} missing thread on completion`,
-          )
-          return
-        }
-
-        void this.dispatchNextQueued(session.threadId, {
-          projectId: session.projectId,
-          repoPath: active.repoPath,
+        void this.handleProviderLimitCompletion({
+          event: completedEvent,
+          active,
+          session,
+          reason: providerLimitReason,
         })
-      })
+        return
+      }
+
+      this.completeSessionFromEvent(completedEvent, active, session)
       return
     }
 
@@ -897,17 +926,11 @@ export class SessionManager {
         observedProviderLimit ?? active?.providerLimitReason ?? null
 
       if (active && session && providerLimitReason) {
-        void this.pauseForModelRecovery(event.sessionId, active, session, providerLimitReason)
+        void this.handleProviderLimitError(event, active, session, providerLimitReason)
         return
       }
 
-      sessionsStore.updateStatus(event.sessionId, 'error')
-      this.recordEvent(event)
-      void this.removeWorktree(event.sessionId, active)
-      this.stopIdleHeartbeat(event.sessionId)
-      this.stopLiveDiff(event.sessionId)
-      this.activeSessions.delete(event.sessionId)
-      this.processWarningsBySession.delete(event.sessionId)
+      this.recordSessionErrorEvent(event, active, session)
       return
     }
 
@@ -918,6 +941,192 @@ export class SessionManager {
 
     this.recordEvent(event)
     this.recordActivityEvents(event)
+  }
+
+  private completeSessionFromEvent(
+    event: AgentEvent,
+    active: ActiveSession | undefined,
+    session: Session | null,
+    options: { applyUsage?: boolean } = {},
+  ): void {
+    const status = completionStatus(event)
+    if (options.applyUsage !== false) {
+      this.applyUsage(event)
+    }
+    sessionsStore.updateStatus(event.sessionId, status)
+    this.stopIdleHeartbeat(event.sessionId)
+    this.stopLiveDiff(event.sessionId)
+    this.activeSessions.delete(event.sessionId)
+    this.processWarningsBySession.delete(event.sessionId)
+
+    if (active?.planMode) {
+      void this.completePlanModeSession(event.sessionId, active, event, session)
+      return
+    }
+
+    void this.emitCompletionDiffs(event.sessionId, active, event).then(() => {
+      this.emitTerminalNotifierEvent(event.sessionId, active, event)
+
+      if (status !== 'done') return
+      if (!active) return
+
+      if (!session?.threadId) {
+        console.warn(
+          `[session] skipping queued dispatch: session ${event.sessionId} missing thread on completion`,
+        )
+        return
+      }
+
+      void this.dispatchNextQueued(session.threadId, {
+        projectId: session.projectId,
+        repoPath: active.repoPath,
+      })
+    })
+  }
+
+  private async handleProviderLimitCompletion(input: {
+    event: AgentEvent
+    active: ActiveSession
+    session: Session
+    reason: string
+  }): Promise<void> {
+    const retried = await this.retryAutoModelRecovery(
+      input.event.sessionId,
+      input.active,
+      input.session,
+      input.reason,
+    )
+    if (retried) {
+      return
+    }
+
+    if (input.active.modelRecoveryMode === 'auto') {
+      this.completeSessionFromEvent(input.event, input.active, input.session)
+      return
+    }
+
+    this.applyUsage(input.event)
+    await this.pauseForModelRecovery(
+      input.event.sessionId,
+      input.active,
+      input.session,
+      input.reason,
+    )
+  }
+
+  private async handleProviderLimitError(
+    event: AgentEvent,
+    active: ActiveSession,
+    session: Session,
+    reason: string,
+  ): Promise<void> {
+    if (await this.retryAutoModelRecovery(event.sessionId, active, session, reason)) {
+      return
+    }
+
+    if (active.modelRecoveryMode !== 'auto') {
+      await this.pauseForModelRecovery(event.sessionId, active, session, reason)
+      return
+    }
+
+    this.recordEvent({
+      type: 'activity',
+      sessionId: event.sessionId,
+      payload: {
+        kind: 'step',
+        title: 'Managed swarm model recovery exhausted',
+        detail: reason,
+        status: 'error',
+      },
+      timestamp: Date.now(),
+    })
+    this.recordSessionErrorEvent(event, active, session)
+  }
+
+  private async retryAutoModelRecovery(
+    sessionId: string,
+    active: ActiveSession,
+    session: Session,
+    reason: string,
+  ): Promise<boolean> {
+    if (active.modelRecoveryMode !== 'auto') return false
+
+    const nextModel = active.modelFallbacks.find((model) => model && model !== session.model)
+    if (!nextModel) return false
+
+    const remainingFallbacks = active.modelFallbacks.filter(
+      (model) => model !== nextModel && model !== session.model,
+    )
+    const adapter = this.resolveAdapter(active.agentId)
+    if (!adapter) return false
+
+    active.modelFallbacks = remainingFallbacks
+    active.providerLimitReason = undefined
+    sessionsStore.updateModel(sessionId, nextModel)
+    sessionsStore.updateStatus(sessionId, 'running')
+    this.recordEvent({
+      type: 'activity',
+      sessionId,
+      payload: {
+        kind: 'step',
+        title: 'Model limit reached; switching model',
+        detail: `${session.model} hit a provider limit (${reason}). Managed swarm is continuing with ${nextModel}.`,
+        status: 'running',
+      },
+      timestamp: Date.now(),
+    })
+
+    try {
+      const agentSession = await adapter.dispatch({
+        sessionId,
+        prompt: active.prompt,
+        repoPath: active.worktreePath ?? active.repoPath,
+        model: nextModel,
+        modelFallbacks: remainingFallbacks,
+        context: active.adapterContext ?? undefined,
+        imageAttachments: active.imageAttachments,
+        runtimeSettings: active.runtimeSettings,
+      })
+
+      active.approve = () => agentSession.approve()
+      active.reject = () => agentSession.reject()
+      active.cancel = () => agentSession.cancel()
+      active.lastAgentEventAt = Date.now()
+      this.activeSessions.set(sessionId, active)
+      this.scheduleIdleHeartbeat(sessionId)
+
+      agentSession.events.on('event', (event: AgentEvent) => {
+        this.handleAgentEvent({ ...event, sessionId })
+      })
+      return true
+    } catch (error) {
+      this.failSession(sessionId, error)
+      return true
+    }
+  }
+
+  private recordSessionErrorEvent(
+    event: AgentEvent,
+    active: ActiveSession | undefined,
+    session: Session | null,
+  ): void {
+    sessionsStore.updateStatus(event.sessionId, 'error')
+    this.recordEvent(event)
+    void this.removeWorktree(event.sessionId, active)
+    this.stopIdleHeartbeat(event.sessionId)
+    this.stopLiveDiff(event.sessionId)
+    if (session && active) {
+      this.emitNotifierEvent({
+        type: 'session.error',
+        sessionId: event.sessionId,
+        projectId: session.projectId,
+        threadId: active.threadId,
+        message: textFromUnknownPayload(event.payload) || 'Session error',
+        spawnedAgent: session.spawnedAgent,
+      })
+    }
+    this.activeSessions.delete(event.sessionId)
+    this.processWarningsBySession.delete(event.sessionId)
   }
 
   private recordEvent(event: AgentEvent): void {
@@ -1189,6 +1398,17 @@ export class SessionManager {
           payload: reviewedProposals,
           timestamp: Date.now(),
         })
+        const sessionForDiff = sessionsStore.get(sessionId)
+        if (sessionForDiff) {
+          this.emitNotifierEvent({
+            type: 'diff.ready',
+            sessionId,
+            projectId: sessionForDiff.projectId,
+            threadId: active.threadId,
+            count: reviewedProposals.length,
+            spawnedAgent: sessionForDiff.spawnedAgent,
+          })
+        }
       } else if (active.localBaseline) {
         this.recordEvent({
           type: 'activity',
@@ -1218,12 +1438,46 @@ export class SessionManager {
       try {
         await this.removeWorktree(sessionId, active)
       } finally {
-        if (completionStatus(finalEvent) === 'done') {
+        const status = completionStatus(finalEvent)
+        if (status === 'done') {
           await this.runQualityGate(sessionId, active, changedFiles)
         }
         this.recordEvent(finalEvent)
       }
     }
+  }
+
+  private emitTerminalNotifierEvent(
+    sessionId: string,
+    active: ActiveSession | undefined,
+    finalEvent: AgentEvent,
+  ): void {
+    const status = completionStatus(finalEvent)
+    if (status !== 'done' && status !== 'error') return
+
+    const completedSession = sessionsStore.get(sessionId)
+    const threadId = active?.threadId ?? completedSession?.threadId
+    if (!completedSession || !threadId) return
+
+    if (status === 'done') {
+      this.emitNotifierEvent({
+        type: 'session.done',
+        sessionId,
+        projectId: completedSession.projectId,
+        threadId,
+        spawnedAgent: completedSession.spawnedAgent,
+      })
+      return
+    }
+
+    this.emitNotifierEvent({
+      type: 'session.error',
+      sessionId,
+      projectId: completedSession.projectId,
+      threadId,
+      message: textFromUnknownPayload(finalEvent.payload) || 'Session error',
+      spawnedAgent: completedSession.spawnedAgent,
+    })
   }
 
   private async runQualityGate(
@@ -1407,10 +1661,11 @@ export class SessionManager {
   }
 
   private failSession(sessionId: string, error: unknown): void {
+    const message = errorMessage(error)
     const event: AgentEvent = {
       type: 'error',
       sessionId,
-      payload: { message: errorMessage(error) },
+      payload: { message },
       timestamp: Date.now(),
     }
 
@@ -1418,6 +1673,19 @@ export class SessionManager {
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
     this.stopIdleHeartbeat(sessionId)
+    const active = this.activeSessions.get(sessionId)
+    const session = sessionsStore.get(sessionId)
+    const threadId = active?.threadId ?? session?.threadId
+    if (session && threadId && (active || session.spawnedAgent)) {
+      this.emitNotifierEvent({
+        type: 'session.error',
+        sessionId,
+        projectId: session.projectId,
+        threadId,
+        message,
+        spawnedAgent: session.spawnedAgent,
+      })
+    }
     this.activeSessions.delete(sessionId)
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)

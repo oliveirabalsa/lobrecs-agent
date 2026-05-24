@@ -35,6 +35,7 @@ export function registerAutomationHandlers(context: MainIpcContext): void {
       model: decision.model,
       repoPath: project.repoPath,
       context: projectsStore.getContext(project.id),
+      spawnedAgent: { kind: 'automation', role: automation.name },
     })
 
     automationsStore.markRun(id)

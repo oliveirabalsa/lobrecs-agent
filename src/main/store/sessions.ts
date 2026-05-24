@@ -161,6 +161,12 @@ export const sessionsStore = {
     return requireSession(id)
   },
 
+  updateModel(id: string, model: string): Session {
+    getDb().prepare('UPDATE sessions SET model = ? WHERE id = ?').run(model, id)
+
+    return requireSession(id)
+  },
+
   updateUsage(id: string, tokensIn: number, tokensOut: number, costUsd: number): Session {
     getDb()
       .prepare('UPDATE sessions SET tokens_in = ?, tokens_out = ?, cost_usd = ? WHERE id = ?')
