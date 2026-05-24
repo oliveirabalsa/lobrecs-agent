@@ -118,6 +118,7 @@ export class AppUpdateService {
     }
 
     await this.downloader.openInstaller(this.pendingDownload.filePath)
+    app.quit()
   }
 
   async openReleaseUrl(): Promise<void> {
