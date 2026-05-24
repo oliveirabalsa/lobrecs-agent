@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
+import { buildGitGraphData } from '../application/gitGraphService'
 import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
 import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit } from '../infrastructure/runGit'
@@ -10,6 +11,7 @@ import type {
   GitDiffRequest,
   GitFileSelection,
   GitCommitPlanExecutionInput,
+  GitGraphRequest,
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
   GeneratePullRequestDraftInput,
@@ -149,6 +151,11 @@ export function registerGitHandlers(context: MainIpcContext): void {
   ipcMain.handle('git:fetch', async (_event, projectId: string) => {
     const project = requireProject(projectId)
     return runGit(['fetch'], project.repoPath)
+  })
+
+  ipcMain.handle('git:get-graph-data', async (_event, request: GitGraphRequest) => {
+    const project = requireProject(request.projectId)
+    return buildGitGraphData(request.projectId, project.repoPath, context.worktreeManager)
   })
 }
 

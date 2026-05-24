@@ -15,6 +15,7 @@ import type {
   GeneratePullRequestDraftInput,
   GeneratePullRequestDraftResult,
 } from '../../shared/contracts/git'
+import type { GitGraphData, GitGraphRequest } from '../../shared/contracts/gitGraph'
 import type { IpcInvoker } from './ipc'
 
 export interface GitApi {
@@ -38,6 +39,7 @@ export interface GitApi {
   listBranches(projectId: string): Promise<string[]>
   pull(projectId: string): Promise<GitCommandResult>
   fetch(projectId: string): Promise<GitCommandResult>
+  getGraphData(request: GitGraphRequest): Promise<GitGraphData>
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
@@ -63,5 +65,6 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     listBranches: (projectId) => ipcRenderer.invoke('git:list-branches', projectId),
     pull: (projectId) => ipcRenderer.invoke('git:pull', projectId),
     fetch: (projectId) => ipcRenderer.invoke('git:fetch', projectId),
+    getGraphData: (request) => ipcRenderer.invoke('git:get-graph-data', request),
   }
 }

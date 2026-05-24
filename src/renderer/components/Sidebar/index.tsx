@@ -28,10 +28,12 @@ interface SidebarProps {
   onPlugins?: () => void
   onCliTools?: () => void
   onAutomations?: () => void
+  onOpenGitGraph?: () => void
   onOpenUsage?: () => void
   onOpenSettings?: () => void
   settingsActive?: boolean
   cliToolsActive?: boolean
+  gitGraphActive?: boolean
   usageActive?: boolean
   /**
    * Optional slot overrides — if provided, these replace the corresponding
@@ -76,10 +78,12 @@ export function Sidebar({
   onPlugins,
   onCliTools,
   onAutomations,
+  onOpenGitGraph,
   onOpenUsage,
   onOpenSettings,
   settingsActive,
   cliToolsActive,
+  gitGraphActive,
   usageActive,
   slots,
 }: SidebarProps) {
@@ -213,6 +217,8 @@ export function Sidebar({
         onCliTools={onCliTools}
         cliToolsActive={cliToolsActive}
         onAutomations={onAutomations}
+        onOpenGitGraph={onOpenGitGraph}
+        gitGraphActive={gitGraphActive}
       />
     )
 

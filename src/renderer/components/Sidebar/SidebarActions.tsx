@@ -6,7 +6,9 @@ export interface SidebarActionsProps {
   onPlugins?: () => void
   onAutomations?: () => void
   onCliTools?: () => void
+  onOpenGitGraph?: () => void
   cliToolsActive?: boolean
+  gitGraphActive?: boolean
 }
 
 interface ActionRowProps {
@@ -24,7 +26,9 @@ export function SidebarActions({
   onPlugins,
   onAutomations,
   onCliTools,
+  onOpenGitGraph,
   cliToolsActive = false,
+  gitGraphActive = false,
 }: SidebarActionsProps) {
   return (
     <nav className="flex flex-col px-1.5 py-1">
@@ -63,7 +67,36 @@ export function SidebarActions({
           onClick={onAutomations}
         />
       ) : null}
+      {onOpenGitGraph ? (
+        <ActionRow
+          icon={<GitGraphIcon />}
+          label="Git Graph"
+          onClick={onOpenGitGraph}
+          active={gitGraphActive}
+        />
+      ) : null}
     </nav>
+  )
+}
+
+function GitGraphIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
   )
 }
 

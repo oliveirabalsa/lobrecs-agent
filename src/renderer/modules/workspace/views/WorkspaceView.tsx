@@ -14,6 +14,7 @@ import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
 import { ContextExplorer } from '../../context'
 import { CostDashboard } from '../../costs'
+import { GitGraphPanel } from '../../git-graph'
 import { MemoryManager } from '../../memory'
 import {
   TerminalPanel,
@@ -559,6 +560,28 @@ export function WorkspaceView({
     setRightPanelModeState('swarm')
   }, [])
 
+  const handleOpenSessionFromGraph = useCallback(
+    async (sessionId: string) => {
+      try {
+        const session = await window.agentforge.sessions.get(sessionId)
+        if (!session) return
+        await onOpenSession(session)
+      } catch (error: unknown) {
+        onBannerError(
+          error instanceof Error ? error.message : 'Failed to open session from graph',
+        )
+      }
+    },
+    [onBannerError, onOpenSession],
+  )
+
+  const handleOpenBranchManagerFromGraph = useCallback(
+    (_branchName: string) => {
+      setBranchesDialogOpen(true)
+    },
+    [],
+  )
+
   const openMarkdownDocument = useCallback((document: MarkdownPreviewDocument) => {
     setMarkdownPreview({ kind: 'ready', document })
   }, [])
@@ -992,6 +1015,12 @@ export function WorkspaceView({
                   <CostDashboard project={selectedProject} />
                 ) : mainView === 'automations' ? (
                   <AutomationManager project={selectedProject} />
+                ) : mainView === 'git-graph' ? (
+                  <GitGraphPanel
+                    project={selectedProject}
+                    onOpenSession={handleOpenSessionFromGraph}
+                    onOpenBranchManager={handleOpenBranchManagerFromGraph}
+                  />
                 ) : (
                   <MemoryManager project={selectedProject} />
                 )}

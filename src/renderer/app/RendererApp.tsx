@@ -4,6 +4,7 @@ import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
 import { CliToolsView } from '../modules/cli-tools'
 import { ExtensionMarketplaceView } from '../modules/extensions'
+import { useNotificationRouting } from '../modules/notifications'
 import { SettingsView, useSettings } from '../modules/settings'
 import { AppUpdateBanner } from '../modules/updates'
 import { useWorkspaceController } from '../modules/workspace'
@@ -176,6 +177,12 @@ export function RendererApp() {
     setShellView('workspace')
   }, [workspace])
 
+  const handleOpenGitGraph = useCallback(() => {
+    workspace.setMainView('git-graph')
+    setMobileSidebarOpen(false)
+    setShellView('workspace')
+  }, [workspace])
+
   const handleOpenExtensions = useCallback(() => {
     setShellView('extensions')
     setMobileSidebarOpen(false)
@@ -236,6 +243,8 @@ export function RendererApp() {
     })
     return unsub
   }, [shellView])
+
+  useNotificationRouting({ workspace, history, setShellView })
 
   const handleHistoryBack = useCallback(() => {
     const target = history.back()
@@ -311,10 +320,12 @@ export function RendererApp() {
           onPlugins={handleOpenExtensions}
           onCliTools={handleOpenCliTools}
           onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+          onOpenGitGraph={workspace.selectedProject ? handleOpenGitGraph : undefined}
           onOpenUsage={handleOpenUsage}
           onOpenSettings={handleOpenSettings}
           settingsActive={shellView === 'settings'}
           cliToolsActive={shellView === 'cli-tools'}
+          gitGraphActive={shellView === 'workspace' && workspace.mainView === 'git-graph'}
           usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
@@ -365,10 +376,12 @@ export function RendererApp() {
               onPlugins={handleOpenExtensions}
               onCliTools={handleOpenCliTools}
               onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
+              onOpenGitGraph={workspace.selectedProject ? handleOpenGitGraph : undefined}
               onOpenUsage={handleOpenUsage}
               onOpenSettings={handleOpenSettings}
               settingsActive={shellView === 'settings'}
               cliToolsActive={shellView === 'cli-tools'}
+              gitGraphActive={shellView === 'workspace' && workspace.mainView === 'git-graph'}
               usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
             />
           </div>
