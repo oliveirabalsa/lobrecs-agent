@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSwarmWorkspaceState,
   nextScopedDiffProposalState,
+  shouldOpenThreadLastSessionOnUpdate,
   visibleDiffProposalsForActiveSession,
   type ScopedDiffProposalState,
 } from './useWorkspaceController'
@@ -80,6 +81,64 @@ describe('buildSwarmWorkspaceState', () => {
   })
 })
 
+describe('shouldOpenThreadLastSessionOnUpdate', () => {
+  it('opens the new last session when an active thread advances after plan approval', () => {
+    expect(
+      shouldOpenThreadLastSessionOnUpdate({
+        thread: {
+          id: 'thread-1',
+          projectId: 'project-1',
+          lastSessionId: 'execution-session',
+        },
+        activeThreadId: 'thread-1',
+        activeSessionId: 'planning-session',
+        selectedProjectId: 'project-1',
+      }),
+    ).toBe(true)
+  })
+
+  it('ignores thread updates that do not point at a new visible session', () => {
+    expect(
+      shouldOpenThreadLastSessionOnUpdate({
+        thread: {
+          id: 'thread-1',
+          projectId: 'project-1',
+          lastSessionId: 'planning-session',
+        },
+        activeThreadId: 'thread-1',
+        activeSessionId: 'planning-session',
+        selectedProjectId: 'project-1',
+      }),
+    ).toBe(false)
+
+    expect(
+      shouldOpenThreadLastSessionOnUpdate({
+        thread: {
+          id: 'thread-2',
+          projectId: 'project-1',
+          lastSessionId: 'execution-session',
+        },
+        activeThreadId: 'thread-1',
+        activeSessionId: 'planning-session',
+        selectedProjectId: 'project-1',
+      }),
+    ).toBe(false)
+
+    expect(
+      shouldOpenThreadLastSessionOnUpdate({
+        thread: {
+          id: 'thread-1',
+          projectId: 'project-2',
+          lastSessionId: 'execution-session',
+        },
+        activeThreadId: 'thread-1',
+        activeSessionId: 'planning-session',
+        selectedProjectId: 'project-1',
+      }),
+    ).toBe(false)
+  })
+})
+
 describe('visibleDiffProposalsForActiveSession', () => {
   const state: ScopedDiffProposalState = {
     entries: [
@@ -97,18 +156,20 @@ describe('visibleDiffProposalsForActiveSession', () => {
     ],
   }
 
-  it('returns proposals only for the active chat session', () => {
+  it('returns proposals for the active thread', () => {
     expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-1')).toEqual(
       state.entries[0].proposals,
     )
   })
 
-  it('hides proposals captured from another thread or session in visible state', () => {
-    expect(visibleDiffProposalsForActiveSession(state, 'session-2', 'thread-1')).toEqual([])
+  it('hides proposals captured from another thread in visible state', () => {
+    expect(visibleDiffProposalsForActiveSession(state, 'session-2', 'thread-1')).toEqual(
+      state.entries[0].proposals,
+    )
     expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-2')).toEqual([])
   })
 
-  it('rejects proposals captured from another session in the active thread', () => {
+  it('accepts proposals captured from another session in the active thread', () => {
     const next = nextScopedDiffProposalState(
       null,
       [
@@ -123,7 +184,13 @@ describe('visibleDiffProposalsForActiveSession', () => {
       'thread-1',
     )
 
-    expect(visibleDiffProposalsForActiveSession(next, 'reviewer-session', 'thread-1')).toEqual([])
+    expect(visibleDiffProposalsForActiveSession(next, 'reviewer-session', 'thread-1')).toEqual([
+      {
+        filePath: '/repo/swarm-agent.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
+      },
+    ])
   })
 
   it('merges proposals from the active session instead of replacing earlier edits', () => {
@@ -293,6 +360,32 @@ describe('visibleDiffProposalsForActiveSession', () => {
         filePath: '/repo/new-thread-edit.ts',
         originalContent: 'before',
         proposedContent: 'after',
+      },
+    ])
+  })
+
+  it('keeps same-thread proposals visible when the thread advances to another session', () => {
+    const firstSessionState = nextScopedDiffProposalState(
+      null,
+      [
+        {
+          filePath: '/repo/thread-edit.ts',
+          originalContent: 'old',
+          proposedContent: 'new',
+        },
+      ],
+      { sessionId: 'session-1', threadId: 'thread-1' },
+      'session-1',
+      'thread-1',
+    )
+
+    expect(
+      visibleDiffProposalsForActiveSession(firstSessionState, 'session-2', 'thread-1'),
+    ).toEqual([
+      {
+        filePath: '/repo/thread-edit.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
       },
     ])
   })

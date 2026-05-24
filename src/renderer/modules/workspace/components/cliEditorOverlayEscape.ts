@@ -1,10 +1,14 @@
 export function closeCliEditorOverlay(
-  event: Pick<KeyboardEvent, 'preventDefault' | 'stopPropagation' | 'key'>,
+  event: Pick<KeyboardEvent, 'preventDefault' | 'stopPropagation' | 'key' | 'metaKey'>,
   onClose: () => void,
-): void {
-  if (event.key !== 'Escape') return
+  isVim = false,
+): boolean {
+  if (event.key !== 'Escape') return false
+  if (isVim && !event.metaKey) return false
 
   event.preventDefault()
   event.stopPropagation()
   onClose()
+  return true
 }
+

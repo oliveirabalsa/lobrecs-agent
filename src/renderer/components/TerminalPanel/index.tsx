@@ -126,17 +126,22 @@ export function TerminalPanel({
       seenEventsRef.current,
     )
 
+    let cancelled = false
     const unsubscribe = window.agentforge.on(`session:${sessionId}`, handleEvent)
     void window.agentforge.sessions
       .listEvents(sessionId)
       .then((events) => {
+        if (cancelled) return
         events
           .filter((event) => !(event.type === 'diff' && isLiveDiffPayload(event.payload)))
           .forEach(handleEvent)
       })
       .catch(() => undefined)
 
-    return unsubscribe
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [sessionId])
 
   useEffect(() => {

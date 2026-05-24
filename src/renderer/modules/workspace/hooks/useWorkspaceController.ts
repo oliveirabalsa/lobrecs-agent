@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { Thread } from '../../../../shared/contracts/threads'
 import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   AgentId,
@@ -89,12 +90,27 @@ export interface ScopedDiffProposalEntry {
   proposals: DiffProposal[]
 }
 
+export function shouldOpenThreadLastSessionOnUpdate(input: {
+  thread: Pick<Thread, 'id' | 'projectId' | 'lastSessionId'>
+  activeThreadId: string | null
+  activeSessionId: string | null
+  selectedProjectId: string | null | undefined
+}): boolean {
+  const { thread, activeThreadId, activeSessionId, selectedProjectId } = input
+
+  if (!activeThreadId || !selectedProjectId) return false
+  if (thread.id !== activeThreadId || thread.projectId !== selectedProjectId) return false
+  if (!thread.lastSessionId || thread.lastSessionId === activeSessionId) return false
+
+  return true
+}
+
 export function visibleDiffProposalsForActiveSession(
   state: ScopedDiffProposalState | null,
   activeSessionId: string | null,
   activeThreadId: string | null,
 ): DiffProposal[] {
-  if (!state || !activeSessionId) return []
+  if (!state || (!activeSessionId && !activeThreadId)) return []
 
   return (
     findScopedDiffProposalEntry(state, activeSessionId, activeThreadId)?.proposals ?? []
@@ -108,9 +124,9 @@ export function nextScopedDiffProposalState(
   activeSessionId: string | null,
   activeThreadId: string | null,
 ): ScopedDiffProposalState | null {
-  if (!activeSessionId) return current
+  if (!activeSessionId && !activeThreadId) return current
 
-  const sourceSessionId = source.sessionId ?? activeSessionId
+  const sourceSessionId = source.sessionId ?? activeSessionId ?? ''
   const sourceThreadId = source.threadId ?? activeThreadId
 
   if (proposals.length === 0) return current
@@ -131,9 +147,7 @@ export function nextScopedDiffProposalState(
   return {
     entries: [
       ...entries.filter(
-        (entry) =>
-          entry.sessionId !== nextEntry.sessionId ||
-          entry.threadId !== nextEntry.threadId,
+        (entry) => !scopedDiffProposalEntriesShareScope(entry, nextEntry),
       ),
       nextEntry,
     ],
@@ -142,13 +156,30 @@ export function nextScopedDiffProposalState(
 
 function findScopedDiffProposalEntry(
   state: ScopedDiffProposalState | null,
-  sessionId: string,
+  sessionId: string | null | undefined,
   threadId: string | null | undefined,
 ): ScopedDiffProposalEntry | undefined {
   const normalizedThreadId = threadId ?? null
+  const normalizedSessionId = sessionId ?? ''
+
+  if (normalizedThreadId) {
+    return state?.entries.find((entry) => entry.threadId === normalizedThreadId)
+  }
+
   return state?.entries.find(
-    (entry) => entry.sessionId === sessionId && entry.threadId === normalizedThreadId,
+    (entry) => !entry.threadId && entry.sessionId === normalizedSessionId,
   )
+}
+
+function scopedDiffProposalEntriesShareScope(
+  left: ScopedDiffProposalEntry,
+  right: ScopedDiffProposalEntry,
+): boolean {
+  if (left.threadId || right.threadId) {
+    return left.threadId === right.threadId
+  }
+
+  return left.sessionId === right.sessionId
 }
 
 export function mergeDiffProposals(
@@ -666,12 +697,22 @@ export function useWorkspaceController() {
 
     const unsubscribe = window.agentforge.threads.onUpdated((event) => {
       const thread = event.thread
-      if (thread.id !== activeThreadId || thread.projectId !== selectedProject.id) return
-      if (!thread.lastSessionId || thread.lastSessionId === activeSessionId) return
-      if (activeSessionId) return
+      if (
+        !shouldOpenThreadLastSessionOnUpdate({
+          thread,
+          activeThreadId,
+          activeSessionId,
+          selectedProjectId: selectedProject.id,
+        })
+      ) {
+        return
+      }
+
+      const lastSessionId = thread.lastSessionId
+      if (!lastSessionId) return
 
       void window.agentforge.sessions
-        .get(thread.lastSessionId)
+        .get(lastSessionId)
         .then((session) => {
           if (!session || session.threadId !== activeThreadId) return
           handleOpenSession(session)

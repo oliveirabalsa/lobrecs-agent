@@ -192,9 +192,9 @@ export function RunWorkspace({
   const diffReviewError = diffReviewState.error
 
   // Forwards session diff events to the upstream scoped store. The store
-  // (useWorkspaceController) rejects events whose source doesn't match the
-  // active session/thread, so a stale callback fired after a thread switch
-  // can't leak files into the new thread's "Edited N files" card.
+  // scopes proposals by thread first, so a stale callback fired after a
+  // thread switch can't leak files into the new thread's "Edited N files"
+  // card while follow-up sessions in the same thread keep the card visible.
   const handleSessionDiffProposals = useCallback(
     (proposals: DiffProposal[]) => {
       onDiffProposals(proposals, {

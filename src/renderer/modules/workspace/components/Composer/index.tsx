@@ -178,6 +178,7 @@ export function Composer({
   } = state
 
   const [submitting, setSubmitting] = useState(false)
+  const [submitPhase, setSubmitPhase] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [cursorPosition, setCursorPosition] = useState(0)
   const [slashOptions, setSlashOptions] = useState<SlashMentionOption[]>([])
@@ -292,6 +293,7 @@ export function Composer({
     if (busy) {
       if (!onEnqueue) return
       setSubmitting(true)
+      setSubmitPhase('Queueing message')
       setError(null)
       try {
         await onEnqueue(
@@ -310,11 +312,13 @@ export function Composer({
         )
       } finally {
         setSubmitting(false)
+        setSubmitPhase(null)
       }
       return
     }
 
     setSubmitting(true)
+    setSubmitPhase('Preparing context')
     setError(null)
     const startedAt = Date.now()
     const sentAttachments = attachments.map((image) => image.attachment)
@@ -332,6 +336,7 @@ export function Composer({
         threadId: activeThreadId ?? undefined,
         planMode: planMode || undefined,
       })
+      setSubmitPhase('Starting session')
       onSessionStarted({
         sessionId: result.sessionId,
         threadId: result.threadId,
@@ -355,6 +360,7 @@ export function Composer({
       )
     } finally {
       setSubmitting(false)
+      setSubmitPhase(null)
     }
   }, [
     activeThreadId,
@@ -574,6 +580,7 @@ export function Composer({
     if (!goal || submitting || attaching || !onDelegateTask) return
 
     setSubmitting(true)
+    setSubmitPhase('Delegating task')
     setError(null)
     try {
       await onDelegateTask(goal, {
@@ -589,6 +596,7 @@ export function Composer({
       )
     } finally {
       setSubmitting(false)
+      setSubmitPhase(null)
     }
   }, [
     approvalMode,
@@ -730,6 +738,11 @@ export function Composer({
             ) : null}
             {busyReason && !queueAllowed ? (
               <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
+            ) : null}
+            {submitPhase ? (
+              <span className="min-w-0 truncate text-[11px] text-muted" role="status">
+                {submitPhase}...
+              </span>
             ) : null}
           </div>
 

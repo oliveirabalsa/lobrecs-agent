@@ -20,6 +20,8 @@ import {
 import { CliEditorCursorBadge } from './CliEditorCursorBadge'
 import { closeCliEditorOverlay } from './cliEditorOverlayEscape'
 
+const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
+
 interface CliEditorTerminalOverlayProps {
   editorId: string
   editorName: string
@@ -52,13 +54,13 @@ export function CliEditorTerminalOverlay({
     if (!exitEvent) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      closeCliEditorOverlay(event, () => onCloseRef.current())
+      const isVim = editorId === 'vim' || editorId === 'nvim'
+      closeCliEditorOverlay(event, () => onCloseRef.current(), isVim)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [exitEvent])
+  }, [exitEvent, editorId])
 
   useEffect(() => {
     const container = containerRef.current
@@ -102,9 +104,12 @@ export function CliEditorTerminalOverlay({
     })
 
     term.attachCustomKeyEventHandler((event) => {
-      if (event.key !== 'Escape') return true
-      closeCliEditorOverlay(event, () => onCloseRef.current())
-      return false
+      const isVim = editorId === 'vim' || editorId === 'nvim'
+      if (event.key === 'Escape') {
+        const closed = closeCliEditorOverlay(event, () => onCloseRef.current(), isVim)
+        if (closed) return false
+      }
+      return true
     })
 
     applyCliEditorCursorState(term, cursorTracker.state)
@@ -210,7 +215,9 @@ export function CliEditorTerminalOverlay({
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg text-secondary hover:text-primary hover:bg-white/5 transition-colors border border-hairline hover:border-white/15"
             >
               <span>Close</span>
-              <kbd className="text-[10px] opacity-60">Esc</kbd>
+              <kbd className="text-[10px] opacity-60">
+                {editorId === 'vim' || editorId === 'nvim' ? (isMac ? '⌘Esc' : 'Cmd+Esc') : 'Esc'}
+              </kbd>
             </button>
           </div>
         </div>
