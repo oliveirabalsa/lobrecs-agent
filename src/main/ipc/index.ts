@@ -7,6 +7,7 @@ import { delegateTask } from '../modules/agents/application/delegateTask'
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
 import { registerContextHandlers, repositoryContextService } from '../modules/context'
+import { buildBoundedPromptContext } from '../modules/context/application/contextBudget'
 import { extensionMarketplaceService, registerExtensionHandlers } from '../modules/extensions'
 import { registerFeedbackHandlers } from '../modules/feedback/ipc/registerFeedbackHandlers'
 import { registerGitHandlers } from '../modules/git/ipc/registerGitHandlers'
@@ -265,9 +266,15 @@ async function buildSessionContext(
     baseContext: null,
   })
 
-  return [projectContext, memoryContext, repositoryContext, DELEGATION_CONTEXT]
-    .filter(Boolean)
-    .join('\n\n') || null
+  return buildBoundedPromptContext(
+    [
+      { title: 'Project instructions:', content: projectContext, maxChars: 4_000 },
+      { title: 'Project memory:', content: memoryContext, maxChars: 3_000 },
+      { title: 'Repository evidence:', content: repositoryContext, maxChars: 12_000 },
+      { title: 'Delegation guidance:', content: DELEGATION_CONTEXT, maxChars: 1_000 },
+    ],
+    { maxChars: 20_000 },
+  )
 }
 
 const DELEGATION_CONTEXT = [

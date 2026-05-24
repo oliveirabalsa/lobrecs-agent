@@ -12,10 +12,14 @@ import {
 } from '../infrastructure/contextRepository'
 import { scanRepository } from '../infrastructure/repositoryScanner'
 import { extractRepositorySymbolManifest } from '../infrastructure/symbolExtractor'
+import { buildBoundedPromptContext, truncateForContext } from './contextBudget'
+import { redactSensitiveText } from '../domain/secretRedaction'
 
 const DEFAULT_LIMIT = 6
 const MAX_LIMIT = 12
-const MAX_CONTEXT_CHARS = 12_000
+const MAX_REPOSITORY_CONTEXT_CHARS = 12_000
+const MAX_CHUNK_CONTEXT_CHARS = 7_500
+const MAX_SYMBOL_CONTEXT_CHARS = 4_500
 const COMPACT_SINGLE_FILE_CONTEXT_CHARS = 8_000
 const COMPACT_SINGLE_FILE_CHUNKS = 3
 const REINDEX_AFTER_MS = 5 * 60 * 1000
@@ -99,12 +103,24 @@ export class RepositoryContextService {
       }),
     ])
 
-    const chunkContext = renderChunkContext(chunks)
-    const sections = [symbolManifest, chunkContext].filter((section): section is string =>
-      Boolean(section),
+    return buildBoundedPromptContext(
+      [
+        {
+          title: 'Repository symbol map (repo-wide; use before guessing filenames or APIs):',
+          content: stripContextTitle(
+            symbolManifest,
+            'Repository symbol map (repo-wide; use before guessing filenames or APIs):',
+          ),
+          maxChars: MAX_SYMBOL_CONTEXT_CHARS,
+        },
+        {
+          title: 'Repository context (retrieved automatically; use only when relevant):',
+          content: renderChunkContext(chunks),
+          maxChars: MAX_CHUNK_CONTEXT_CHARS,
+        },
+      ],
+      { maxChars: MAX_REPOSITORY_CONTEXT_CHARS },
     )
-
-    return sections.length > 0 ? sections.join('\n\n') : null
   }
 
   private async ensureFreshIndex(projectId: string, repoPath: string): Promise<void> {
@@ -133,20 +149,20 @@ function renderChunkContext(chunks: readonly RepositoryContextChunk[]): string |
 
   for (const chunk of chunks) {
     const header = `File: ${chunk.path}:${chunk.startLine}-${chunk.endLine}`
-    const body = truncateSnippet(chunk.content, Math.max(800, MAX_CONTEXT_CHARS - usedChars))
+    const body = truncateForContext(
+      redactSensitiveText(chunk.content),
+      Math.max(800, MAX_CHUNK_CONTEXT_CHARS - usedChars),
+    )
     const block = `${header}\n${body}`
 
-    if (usedChars + block.length > MAX_CONTEXT_CHARS && rendered.length > 0) break
+    if (usedChars + block.length > MAX_CHUNK_CONTEXT_CHARS && rendered.length > 0) break
     rendered.push(block)
     usedChars += block.length
   }
 
   if (rendered.length === 0) return null
 
-  return [
-    'Repository context (retrieved automatically; use only when relevant):',
-    ...rendered.map((block) => `---\n${block}`),
-  ].join('\n')
+  return rendered.map((block) => `---\n${block}`).join('\n')
 }
 
 function compactContextForLargeSingleFile(
@@ -172,6 +188,11 @@ function compactContextForLargeSingleFile(
     'This project is dominated by one large file, so the full snippet was not injected.',
     'Read focused ranges from that file before editing to avoid duplicating large context.',
   ].join('\n')
+}
+
+function stripContextTitle(value: string | null, title: string): string | null {
+  if (!value) return null
+  return value.startsWith(title) ? value.slice(title.length).trim() : value
 }
 
 function clampLimit(limit: number | undefined): number {
@@ -204,10 +225,4 @@ function pathScore(queryTokens: ReadonlySet<string>, filePath: string): number {
   }
 
   return matches * 0.2
-}
-
-function truncateSnippet(content: string, maxChars: number): string {
-  if (content.length <= maxChars) return content
-
-  return `${content.slice(0, maxChars).trimEnd()}\n[truncated]`
 }

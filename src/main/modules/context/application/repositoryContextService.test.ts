@@ -145,6 +145,62 @@ describe('RepositoryContextService', () => {
     expect(context).toContain('full snippet was not injected')
     expect(context).not.toContain('function renderGuest')
   })
+
+  it('redacts secrets before indexing and prompt injection', async () => {
+    await writeFile(
+      path.join(repoPath, 'config.ts'),
+      [
+        'export const githubToken = "ghp_1234567890abcdefghijklmnop"',
+        'export const openAiKey = "sk-1234567890abcdefghijklmnop"',
+        'export const publicName = "visible context"',
+      ].join('\n'),
+    )
+    await writeFile(path.join(repoPath, '.env'), 'SECRET_TOKEN=do-not-index-this-value\n')
+
+    const service = new RepositoryContextService()
+    const result = await service.indexProject({ projectId: 'project-1', repoPath })
+    const context = await service.buildPromptContext({
+      projectId: 'project-1',
+      repoPath,
+      prompt: 'github token openai key visible context',
+    })
+    const storedRows = getDb()
+      .prepare('SELECT path, content FROM project_context_chunks ORDER BY path ASC')
+      .all() as Array<{ path: string; content: string }>
+
+    expect(result.indexedFiles).toBe(1)
+    expect(storedRows.map((row) => row.path)).toEqual(['config.ts'])
+    expect(JSON.stringify(storedRows)).not.toContain('ghp_1234567890abcdefghijklmnop')
+    expect(JSON.stringify(storedRows)).not.toContain('sk-1234567890abcdefghijklmnop')
+    expect(context).toContain('[REDACTED_SECRET]')
+    expect(context).toContain('visible context')
+    expect(context).not.toContain('do-not-index-this-value')
+  })
+
+  it('keeps injected repository context under its budget', async () => {
+    await mkdir(path.join(repoPath, 'src'), { recursive: true })
+    for (let index = 0; index < 20; index += 1) {
+      await writeFile(
+        path.join(repoPath, 'src', `workflow-${index}.ts`),
+        Array.from(
+          { length: 120 },
+          (_, line) =>
+            `export function workflow${index}_${line}() { return "dispatch context memory ${index} ${line}" }`,
+        ).join('\n'),
+      )
+    }
+
+    const service = new RepositoryContextService()
+    const context = await service.buildPromptContext({
+      projectId: 'project-1',
+      repoPath,
+      prompt: 'dispatch context memory workflow',
+    })
+
+    expect(context?.length).toBeLessThanOrEqual(12_000)
+    expect(context).toContain('Repository symbol map')
+    expect(context).toContain('Repository context')
+  })
 })
 
 function seedProject(projectId: string): void {

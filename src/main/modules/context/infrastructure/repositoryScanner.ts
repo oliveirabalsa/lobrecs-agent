@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { RepositoryFileSnapshot } from '../domain/chunking'
+import { isSensitiveRepositoryPath, redactSensitiveText } from '../domain/secretRedaction'
 
 const MAX_FILE_BYTES = 220 * 1024
 const MAX_FILES = 2_500
@@ -75,7 +76,11 @@ export async function scanRepository(repoPath: string): Promise<RepositoryScanRe
         continue
       }
 
-      if (!entry.isFile() || !shouldIndexFile(entry.name)) {
+      if (
+        !entry.isFile() ||
+        isSensitiveRepositoryPath(relativePath) ||
+        !shouldIndexFile(entry.name)
+      ) {
         skippedFiles += 1
         continue
       }
@@ -93,7 +98,7 @@ export async function scanRepository(repoPath: string): Promise<RepositoryScanRe
           continue
         }
 
-        files.push({ path: relativePath, content })
+        files.push({ path: relativePath, content: redactSensitiveText(content) })
       } catch {
         skippedFiles += 1
       }
