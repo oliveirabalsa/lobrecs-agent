@@ -13,14 +13,30 @@ describe('modelDiscovery', () => {
     const models = parseCodexModels(
       JSON.stringify({
         models: [
-          { slug: 'gpt-5.5', display_name: 'GPT-5.5', visibility: 'list' },
+          {
+            slug: 'gpt-5.5',
+            display_name: 'GPT-5.5',
+            visibility: 'list',
+            default_reasoning_level: 'medium',
+            supported_reasoning_levels: [
+              { effort: 'low' },
+              { effort: 'medium' },
+              { effort: 'high' },
+              { effort: 'xhigh' },
+            ],
+          },
           { slug: 'internal-model', display_name: 'Internal', visibility: 'hidden' },
         ],
       }),
     )
 
     expect(models.map((model) => model.id)).toEqual(['gpt-5.5'])
-    expect(models[0]).toMatchObject({ agentId: 'codex', tier: 'frontier' })
+    expect(models[0]).toMatchObject({
+      agentId: 'codex',
+      tier: 'frontier',
+      defaultThinkingLevel: 'medium',
+      supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+    })
   })
 
   it('parses all OpenCode model lines with provider labels', () => {
@@ -77,6 +93,8 @@ describe('modelDiscovery', () => {
     expect(inferModelTier('gemini-2.5-flash-lite')).toBe('lightweight')
     expect(inferModelTier('gemini-3.0-pro')).toBe('advanced')
     expect(inferModelTier('antigravity-3.0-pro')).toBe('advanced')
+    expect(inferModelTier('gemini-3.1-pro')).toBe('advanced')
+    expect(inferModelTier('antigravity-3.1-pro')).toBe('advanced')
     expect(inferModelTier('gemini-3.0-flash')).toBe('balanced')
     expect(inferModelTier('gemini-3.5-flash')).toBe('frontier')
     expect(inferModelTier('antigravity-3.5-flash')).toBe('frontier')
@@ -91,15 +109,26 @@ describe('modelDiscovery', () => {
     expect(ids).not.toContain('opus')
     expect(ids).not.toContain('sonnet')
     expect(ids).not.toContain('haiku')
+    expect(fallbackModelsForAgent('claude-code').find((model) => model.id === 'claude-opus-4-7')).toMatchObject({
+      supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    })
   })
 
-  it('provides Antigravity fallback aliases from MODEL_MAP', () => {
+  it('provides maintained Antigravity fallback models', () => {
     expect(fallbackModelsForAgent('antigravity').map((model) => model.id)).toEqual([
       'gemini-2.0-flash-lite',
       'gemini-2.5-flash',
       'gemini-3.0-pro',
+      'gemini-3.1-pro',
       'gemini-3.5-flash',
     ])
+  })
+
+  it('adds Codex fallback thinking metadata', () => {
+    expect(fallbackModelsForAgent('codex').find((model) => model.id === 'gpt-5.5')).toMatchObject({
+      defaultThinkingLevel: 'medium',
+      supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh'],
+    })
   })
 
   describe('modelSupportsImages', () => {

@@ -5,8 +5,9 @@ import path from 'node:path'
 import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
 import { commandExists, resolveCommand, withContextAndImages } from './command'
+import { fallbackModelsForAgent } from './modelDiscovery'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
-import type { AgentEvent } from '../../shared/types'
+import type { AgentEvent, AgentModel } from '../../shared/types'
 
 const ANTIGRAVITY_COMMAND_ENV = 'ANTIGRAVITY_COMMAND'
 const TRANSCRIPT_POLL_MS = 250
@@ -42,6 +43,10 @@ export class AntigravityAdapter implements AgentAdapter {
 
   async isInstalled(): Promise<boolean> {
     return commandExists(resolveCommand(ANTIGRAVITY_COMMAND_ENV, 'agy'))
+  }
+
+  async listModels(): Promise<AgentModel[]> {
+    return fallbackModelsForAgent(this.id)
   }
 
   async dispatch(params: AgentDispatchParams): Promise<AgentSession> {

@@ -218,7 +218,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       'gemini-2.0-flash-lite': { inputPer1M: 0, outputPer1M: 0 },
       'gemini-2.5-flash': { inputPer1M: 0, outputPer1M: 0 },
       'gemini-3.0-pro': { inputPer1M: 0, outputPer1M: 0 },
-      'gemini-3.5-pro': { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-3.1-pro': { inputPer1M: 0, outputPer1M: 0 },
+      'gemini-3.5-flash': { inputPer1M: 0, outputPer1M: 0 },
     },
   },
   ui: {

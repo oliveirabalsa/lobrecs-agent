@@ -4,6 +4,7 @@ export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'antigravity' | 'cu
 export type SupportedAgentId = Exclude<AgentId, 'cursor'>
 
 export type ModelTier = 'lightweight' | 'balanced' | 'advanced' | 'frontier'
+export type AgentThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export const SUPPORTED_AGENT_IDS = [
   'claude-code',
@@ -26,6 +27,8 @@ export interface AgentModel {
   tier: ModelTier
   source: 'cli' | 'config' | 'history' | 'fallback'
   description?: string
+  defaultThinkingLevel?: Exclude<AgentThinkingLevel, 'off'>
+  supportedThinkingLevels?: Array<Exclude<AgentThinkingLevel, 'off'>>
 }
 
 export interface AgentModelCatalog {
@@ -55,6 +58,7 @@ export interface AgentDispatchParams {
    * `AgentPlanReviewDecisionPayload`).
    */
   planMode?: boolean
+  thinking?: AgentThinkingLevel
 }
 
 export interface AgentDispatchResult {
@@ -164,6 +168,7 @@ export interface QueuedMessage {
   agentId: AgentId
   model: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
   createdAt: number
 }
 
@@ -175,6 +180,7 @@ export interface EnqueueParams {
   agentId?: AgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
 }
 
 /** Broadcast payload when the queue for a thread changes. */
@@ -192,6 +198,7 @@ export interface SteerParams {
   agentId?: AgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
 }
 
 export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
@@ -218,7 +225,7 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
   antigravity: {
     lightweight: 'gemini-2.0-flash-lite',
     balanced: 'gemini-2.5-flash',
-    advanced: 'gemini-3.0-pro',
+    advanced: 'gemini-3.1-pro',
     frontier: 'gemini-3.5-flash',
   },
 }

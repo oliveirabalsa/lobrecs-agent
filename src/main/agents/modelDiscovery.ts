@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { MODEL_MAP, OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER } from '../../shared/types'
-import type { AgentModel, ModelTier, SupportedAgentId } from '../../shared/types'
+import type {
+  AgentModel,
+  AgentThinkingLevel,
+  ModelTier,
+  SupportedAgentId,
+} from '../../shared/types'
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
 const CLAUDE_MODEL_PATTERN = /^claude-[a-z0-9-]+$/i
@@ -14,8 +19,25 @@ const CLAUDE_FALLBACK_MODELS = [
   'claude-opus-4-7',
 ]
 
+const FALLBACK_MODELS_BY_AGENT: Partial<Record<SupportedAgentId, readonly string[]>> = {
+  antigravity: [
+    'gemini-2.0-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-3.0-pro',
+    'gemini-3.1-pro',
+    'gemini-3.5-flash',
+  ],
+}
+
+const CLAUDE_THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+const CODEX_THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh'] as const
+const SUPPORTED_THINKING_LEVELS = new Set<string>([
+  ...CLAUDE_THINKING_LEVELS,
+  ...CODEX_THINKING_LEVELS,
+])
+
 export function fallbackModelsForAgent(agentId: SupportedAgentId): AgentModel[] {
-  const mappedModels = Object.values(MODEL_MAP[agentId])
+  const mappedModels = FALLBACK_MODELS_BY_AGENT[agentId] ?? Object.values(MODEL_MAP[agentId])
   const ids = agentId === 'claude-code'
     ? [...mappedModels, ...CLAUDE_FALLBACK_MODELS]
     : mappedModels
@@ -55,11 +77,17 @@ export function parseCodexModels(output: string): AgentModel[] {
         const label = typeof record.display_name === 'string' ? record.display_name : id
         const description =
           typeof record.description === 'string' ? record.description : undefined
+        const supportedThinkingLevels = parseSupportedThinkingLevels(
+          record.supported_reasoning_levels,
+        )
+        const defaultThinkingLevel = parseThinkingLevel(record.default_reasoning_level)
 
         return [
           createAgentModel('codex', id, 'cli', {
             label,
             description,
+            supportedThinkingLevels,
+            defaultThinkingLevel,
           }),
         ]
       }),
@@ -103,8 +131,18 @@ export function createAgentModel(
   agentId: SupportedAgentId,
   id: string,
   source: AgentModel['source'],
-  overrides: Partial<Pick<AgentModel, 'label' | 'description' | 'tier'>> = {},
+  overrides: Partial<
+    Pick<
+      AgentModel,
+      'label' | 'description' | 'tier' | 'defaultThinkingLevel' | 'supportedThinkingLevels'
+    >
+  > = {},
 ): AgentModel {
+  const supportedThinkingLevels =
+    overrides.supportedThinkingLevels ?? defaultThinkingLevelsForAgent(agentId, id)
+  const defaultThinkingLevel =
+    overrides.defaultThinkingLevel ?? defaultThinkingLevelForAgent(agentId, id)
+
   return {
     id,
     label: overrides.label ?? labelForModelId(id),
@@ -112,7 +150,52 @@ export function createAgentModel(
     tier: overrides.tier ?? inferModelTier(id, overrides.label),
     source,
     description: overrides.description,
+    ...(defaultThinkingLevel ? { defaultThinkingLevel } : {}),
+    ...(supportedThinkingLevels?.length ? { supportedThinkingLevels } : {}),
   }
+}
+
+function parseSupportedThinkingLevels(
+  value: unknown,
+): Array<Exclude<AgentThinkingLevel, 'off'>> | undefined {
+  if (!Array.isArray(value)) return undefined
+
+  const levels = value.flatMap((entry) => {
+    const effort = typeof entry === 'string'
+      ? entry
+      : entry && typeof entry === 'object'
+        ? (entry as Record<string, unknown>).effort
+        : undefined
+    const parsed = parseThinkingLevel(effort)
+    return parsed ? [parsed] : []
+  })
+
+  return levels.length > 0 ? levels : undefined
+}
+
+function parseThinkingLevel(value: unknown): Exclude<AgentThinkingLevel, 'off'> | undefined {
+  if (typeof value !== 'string') return undefined
+  return SUPPORTED_THINKING_LEVELS.has(value)
+    ? (value as Exclude<AgentThinkingLevel, 'off'>)
+    : undefined
+}
+
+function defaultThinkingLevelsForAgent(
+  agentId: SupportedAgentId,
+  _modelId: string,
+): Array<Exclude<AgentThinkingLevel, 'off'>> | undefined {
+  if (agentId === 'claude-code') return [...CLAUDE_THINKING_LEVELS]
+  if (agentId === 'codex') return [...CODEX_THINKING_LEVELS]
+  return undefined
+}
+
+function defaultThinkingLevelForAgent(
+  agentId: SupportedAgentId,
+  modelId: string,
+): Exclude<AgentThinkingLevel, 'off'> | undefined {
+  if (agentId === 'claude-code') return 'medium'
+  if (agentId !== 'codex') return undefined
+  return modelId.includes('spark') ? 'high' : 'medium'
 }
 
 function labelForModelId(id: string): string {
@@ -173,6 +256,10 @@ export function inferModelTier(id: string, label = ''): ModelTier {
   }
 
   if (normalized.includes('gemini-3.0') || normalized.includes('antigravity-3.0')) {
+    return normalized.includes('flash') ? 'balanced' : 'advanced'
+  }
+
+  if (normalized.includes('gemini-3.1') || normalized.includes('antigravity-3.1')) {
     return normalized.includes('flash') ? 'balanced' : 'advanced'
   }
 
@@ -309,4 +396,3 @@ export function modelSupportsImages(modelId: string): boolean {
 
   return false
 }
-

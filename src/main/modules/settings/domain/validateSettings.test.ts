@@ -105,7 +105,7 @@ describe('settings validation', () => {
     expect(settings.agents.modelMap.antigravity).toMatchObject({
       lightweight: 'gemini-2.0-flash-lite',
       balanced: 'gemini-2.5-flash',
-      advanced: 'gemini-3.0-pro',
+      advanced: 'gemini-3.1-pro',
       frontier: 'gemini-3.5-flash',
     })
   })
