@@ -9,6 +9,7 @@ import type {
 import {
   completionStatus,
   eventKey,
+  isLiveDiffPayload,
   normalizeApprovalPayload,
   normalizeDiffPayload,
   textFromPayload,
@@ -82,7 +83,7 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
       .listEvents(sessionId)
       .then((loadedEvents) => {
         if (cancelled) return
-        loadedEvents.forEach(append)
+        loadedEvents.filter(shouldReplayHistoricalSessionEvent).forEach(append)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -167,6 +168,10 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
 
 export function deriveSessionActivities(events: readonly AgentEvent[]): AgentActivity[] {
   return timedActivitiesFromEvents(events).map(({ activity }) => activity)
+}
+
+export function shouldReplayHistoricalSessionEvent(event: AgentEvent): boolean {
+  return !(event.type === 'diff' && isLiveDiffPayload(event.payload))
 }
 
 function timedActivitiesFromEvents(events: readonly AgentEvent[]): TimedActivity[] {
@@ -263,6 +268,7 @@ function activityFromEvent(
   }
 
   if (event.type === 'diff') {
+    if (isLiveDiffPayload(event.payload)) return []
     return [{ kind: 'step', title: 'Code changes applied', status: 'done' }]
   }
 
