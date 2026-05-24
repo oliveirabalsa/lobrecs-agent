@@ -62,6 +62,8 @@ export function WorkspaceTopBar({
   const [draftTitle, setDraftTitle] = useState(title)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const editRef = useRef<HTMLInputElement | null>(null)
+  const [panelMenuOpen, setPanelMenuOpen] = useState(false)
+  const panelMenuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setDraftTitle(title)
@@ -80,6 +82,23 @@ export function WorkspaceTopBar({
   useEffect(() => {
     if (editing) editRef.current?.focus()
   }, [editing])
+
+  useEffect(() => {
+    if (!panelMenuOpen) return
+    function onDocClick(event: MouseEvent) {
+      if (!panelMenuRef.current) return
+      if (!panelMenuRef.current.contains(event.target as Node)) setPanelMenuOpen(false)
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setPanelMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [panelMenuOpen])
 
   function commitRename() {
     const trimmed = draftTitle.trim()
@@ -233,45 +252,124 @@ export function WorkspaceTopBar({
           />
         ) : null}
 
-        <IconButton
-          aria-label={diffActive ? 'Hide diff panel' : 'Show diff panel'}
-          onClick={() => onToggleRightPanel('diff')}
-          disabled={!hasDiff}
-          active={diffActive}
-        >
-          <DiffIcon />
-        </IconButton>
-        <IconButton
-          aria-label={swarmActive ? 'Hide swarm graph' : 'Show swarm graph'}
-          onClick={() => onToggleRightPanel('swarm')}
-          disabled={!hasSwarmGraph}
-          active={swarmActive}
-        >
-          <GraphIcon />
-        </IconButton>
-        <IconButton
-          aria-label={contextActive ? 'Hide context explorer' : 'Show context explorer'}
-          onClick={() => onToggleRightPanel('context')}
-          disabled={!hasContext}
-          active={contextActive}
-        >
-          <ContextIcon />
-        </IconButton>
-        <IconButton
-          aria-label={reviewsActive ? 'Hide review inbox' : 'Show review inbox'}
-          onClick={() => onToggleRightPanel('reviews')}
-          disabled={!hasReviews}
-          active={reviewsActive}
-        >
-          <ReviewInboxIcon />
-        </IconButton>
-        <IconButton
-          aria-label={termActive ? 'Hide terminal panel' : 'Show terminal panel'}
-          onClick={() => onToggleRightPanel('terminal')}
-          active={termActive}
-        >
-          <TerminalIcon />
-        </IconButton>
+        <div ref={panelMenuRef} className="relative flex items-center shrink-0">
+          <IconButton
+            aria-label="Panel views menu"
+            onClick={() => setPanelMenuOpen((value) => !value)}
+            active={panelMenuOpen || rightPanelOpen}
+          >
+            <PanelsMenuIcon />
+          </IconButton>
+
+          {panelMenuOpen ? (
+            <div
+              role="menu"
+              className="absolute right-0 top-8 z-50 w-56 overflow-hidden rounded-card border border-hairline bg-card-raised/95 py-1 shadow-xl shadow-black/40 backdrop-blur-md"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!hasDiff}
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('diff')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+              >
+                <DiffIcon />
+                <span className="flex-1">Diff</span>
+                {diffActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : !hasDiff ? (
+                  <span className="text-[10px] font-normal text-muted/60">No changes</span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!hasSwarmGraph}
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('swarm')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+              >
+                <GraphIcon />
+                <span className="flex-1">Swarm</span>
+                {swarmActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : !hasSwarmGraph ? (
+                  <span className="text-[10px] font-normal text-muted/60">Inactive</span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!hasContext}
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('context')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+              >
+                <ContextIcon />
+                <span className="flex-1">Context</span>
+                {contextActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : !hasContext ? (
+                  <span className="text-[10px] font-normal text-muted/60">Unavailable</span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!hasReviews}
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('reviews')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+              >
+                <ReviewInboxIcon />
+                <span className="flex-1">Reviews</span>
+                {reviewsActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : !hasReviews ? (
+                  <span className="text-[10px] font-normal text-muted/60">No reviews</span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('terminal')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+              >
+                <TerminalIcon />
+                <span className="flex-1">Terminal</span>
+                {termActive && (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                )}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -479,6 +577,44 @@ function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
       ) : (
         <path d="M14 14l-2-2 2-2" />
       )}
+    </svg>
+  )
+}
+
+function PanelsMenuIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="15" y1="3" x2="15" y2="21" />
+      <line x1="15" y1="12" x2="21" y2="12" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="20 6 9 17 4 12" />
     </svg>
   )
 }

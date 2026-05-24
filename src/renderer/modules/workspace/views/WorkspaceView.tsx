@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   AgentId,
   AgentApprovalMode,
@@ -122,7 +122,7 @@ const RIGHT_PANEL_FULLSCREEN_CLASS =
 const RIGHT_PANEL_DOCKED_CLASS =
   'absolute inset-y-0 right-0 z-30 flex w-full min-w-0 flex-col border-l border-hairline bg-canvas ' +
   'shadow-2xl shadow-black/40 sm:w-[420px] lg:relative lg:inset-auto lg:z-auto lg:w-[420px] ' +
-  'lg:min-w-[320px] lg:max-w-[720px] lg:shrink-0 lg:shadow-none 2xl:w-[520px]'
+  'lg:min-w-[320px] lg:max-w-[800px] lg:shrink-0 lg:shadow-none 2xl:w-[520px]'
 
 function safeStorage(): Storage | null {
   try {
@@ -246,9 +246,64 @@ export function WorkspaceView({
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
   const [bottomPanelOpen, setBottomPanelOpen] = useState(false)
   const [bottomPanelFullscreen, setBottomPanelFullscreen] = useState(false)
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(
-    () => globalSettings?.ui.terminalDefaultHeight ?? 260,
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(() => {
+    const ls = safeStorage()
+    const saved = ls?.getItem('lobrecs.right-panel-width')
+    if (saved) {
+      const val = parseInt(saved, 10)
+      if (!isNaN(val)) return val
+    }
+    return typeof window !== 'undefined' && window.innerWidth >= 1536 ? 520 : 420
+  })
+
+  const startRightPanelResize = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      const startX = event.clientX
+      const startWidth = rightPanelWidth
+
+      function handlePointerMove(moveEvent: PointerEvent) {
+        const delta = moveEvent.clientX - startX
+        const newWidth = Math.max(320, Math.min(800, startWidth - delta))
+        setRightPanelWidth(newWidth)
+        const ls = safeStorage()
+        if (ls) {
+          ls.setItem('lobrecs.right-panel-width', String(newWidth))
+        }
+      }
+
+      function handlePointerUp() {
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        window.removeEventListener('pointermove', handlePointerMove)
+        window.removeEventListener('pointerup', handlePointerUp)
+      }
+
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+      window.addEventListener('pointermove', handlePointerMove)
+      window.addEventListener('pointerup', handlePointerUp)
+    },
+    [rightPanelWidth],
   )
+
+  const [bottomPanelHeight, setBottomPanelHeightState] = useState<number>(() => {
+    const ls = safeStorage()
+    const saved = ls?.getItem('lobrecs.bottom-terminal-height')
+    if (saved) {
+      const val = parseInt(saved, 10)
+      if (!isNaN(val)) return val
+    }
+    return globalSettings?.ui.terminalDefaultHeight ?? 260
+  })
+
+  const setBottomPanelHeight = useCallback((height: number) => {
+    setBottomPanelHeightState(height)
+    const ls = safeStorage()
+    if (ls) {
+      ls.setItem('lobrecs.bottom-terminal-height', String(height))
+    }
+  }, [])
   const [markdownPreview, setMarkdownPreview] = useState<MarkdownPreviewState | null>(null)
   const terminalCountRef = useRef(0)
   const bottomPanelAddTabRef = useRef<((tab: TerminalTab) => void) | null>(null)
@@ -489,9 +544,11 @@ export function WorkspaceView({
   }, [globalSettings?.ui.rightPanelDefaultMode])
 
   useEffect(() => {
+    const ls = safeStorage()
+    if (ls?.getItem('lobrecs.bottom-terminal-height') !== null) return
     const defaultHeight = globalSettings?.ui.terminalDefaultHeight
     if (!defaultHeight || bottomPanelOpen) return
-    setBottomPanelHeight(defaultHeight)
+    setBottomPanelHeightState(defaultHeight)
   }, [bottomPanelOpen, globalSettings?.ui.terminalDefaultHeight])
 
   // Persist panel state per thread.
@@ -1088,11 +1145,17 @@ export function WorkspaceView({
                       ? RIGHT_PANEL_FULLSCREEN_CLASS
                       : RIGHT_PANEL_DOCKED_CLASS
                   }
+                  style={rightPanelFullscreen ? undefined : { width: rightPanelWidth }}
                   onAnimationEnd={(event) => {
                     if (event.target !== event.currentTarget) return
                     if (!rightPanelOpen) setRightPanelMounted(false)
                   }}
                 >
+                  <div
+                    role="separator"
+                    className="absolute top-0 bottom-0 left-0 w-2 cursor-col-resize z-20 hidden lg:block hover:bg-accent-primary/60"
+                    onPointerDown={startRightPanelResize}
+                  />
                   <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline px-2">
                     <RightPanelTab
                       label="Diff"
