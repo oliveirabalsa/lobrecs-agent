@@ -27,6 +27,7 @@ interface SettingsViewProps {
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
   onClose?: () => void
+  onReplayWalkthrough?: () => void
 }
 
 const sectionNav = [
@@ -60,6 +61,7 @@ export function SettingsView({
   sidebarCollapsed = false,
   onToggleSidebar,
   onClose,
+  onReplayWalkthrough,
 }: SettingsViewProps) {
   const settingsDraft = useSettingsDraft({ project: selectedProject })
   const [notificationEventsExpanded, setNotificationEventsExpanded] = useState(false)
@@ -213,6 +215,20 @@ export function SettingsView({
                   }
                 />
               </FieldRow>
+              {onReplayWalkthrough ? (
+                <FieldRow
+                  label="Walkthrough"
+                  detail="Replay first-run setup for agents, credentials, project creation, and the Swarm Builder demo."
+                >
+                  <button
+                    type="button"
+                    onClick={onReplayWalkthrough}
+                    className="h-8 rounded-card border border-hairline bg-card px-2.5 text-[13px] text-secondary outline-none hover:bg-card-raised hover:text-primary focus:border-hairline-strong"
+                  >
+                    Replay walkthrough
+                  </button>
+                </FieldRow>
+              ) : null}
               {draft.general.enableDesktopNotifications && (
                 <>
                   <FieldRow label="Only when window is not focused">

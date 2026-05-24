@@ -5,6 +5,7 @@ import { Sidebar, type Thread } from '../components/Sidebar'
 import { CliToolsView } from '../modules/cli-tools'
 import { ExtensionMarketplaceView } from '../modules/extensions'
 import { useNotificationRouting } from '../modules/notifications'
+import { OnboardingFlow, resetOnboarding, shouldShowOnboarding } from '../modules/onboarding'
 import { SettingsView, useSettings } from '../modules/settings'
 import { AppUpdateBanner } from '../modules/updates'
 import { useWorkspaceController } from '../modules/workspace'
@@ -45,6 +46,13 @@ export function RendererApp() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [mobileSidebarMounted, setMobileSidebarMounted] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    try {
+      return shouldShowOnboarding(window.localStorage)
+    } catch {
+      return false
+    }
+  })
   const [shellView, setShellView] = useState<'workspace' | 'settings' | 'extensions' | 'cli-tools'>(
     'workspace',
   )
@@ -273,6 +281,13 @@ export function RendererApp() {
     setShellView('workspace')
   }, [])
 
+  const handleReplayWalkthrough = useCallback(() => {
+    try {
+      resetOnboarding(window.localStorage)
+    } catch {}
+    setOnboardingOpen(true)
+  }, [])
+
   useEffect(() => {
     if (!mobileSidebarOpen) return
 
@@ -397,6 +412,7 @@ export function RendererApp() {
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
             onClose={handleCloseSettings}
+            onReplayWalkthrough={handleReplayWalkthrough}
           />
         ) : shellView === 'extensions' ? (
           <ExtensionMarketplaceView
@@ -462,6 +478,7 @@ export function RendererApp() {
           onOpenSidebar={() => setMobileSidebarOpen(true)}
           pendingQueue={workspace.pendingQueue}
           onEnqueue={workspace.handleEnqueue}
+          onDelegateTask={workspace.handleDelegateTask}
           onForceSteerQueuedMessage={workspace.handleForceSteerQueuedMessage}
           onRemoveQueueItem={workspace.handleRemoveQueueItem}
           onClearQueue={workspace.handleClearQueue}
@@ -474,6 +491,20 @@ export function RendererApp() {
         open={searchOpen}
         onOpenChange={setSearchOpen}
         onOpenResult={(result) => void handleOpenSearchResult(result)}
+      />
+      <OnboardingFlow
+        open={onboardingOpen}
+        selectedProject={workspace.selectedProject}
+        onClose={() => setOnboardingOpen(false)}
+        onProjectCreated={(project) => {
+          workspace.handleProjectSelect(project)
+          setShellView('workspace')
+        }}
+        onSwarmStarted={(result) => {
+          workspace.handleSwarmStarted(result)
+          history.push(result.threadId)
+          setShellView('workspace')
+        }}
       />
       <AppUpdateBanner />
     </div>
