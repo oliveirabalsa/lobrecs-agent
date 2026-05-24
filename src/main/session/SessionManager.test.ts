@@ -2007,6 +2007,134 @@ describe('SessionManager', () => {
     expect(execution).not.toBeNull()
     expect(adapter.dispatches).toHaveLength(2)
   })
+
+  it('mirrors delegated child session progress into the parent stream', async () => {
+    const project = createProject()
+    const parentAdapter = new FakeAdapter('claude-code')
+    const childAdapter = new FakeAdapter('codex')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [parentAdapter, childAdapter],
+      broadcast: (event) => broadcasts.push(event),
+    })
+
+    const parent = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'Investigate the harness',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    const child = await manager.dispatch({
+      projectId: project.id,
+      prompt: '[Delegated task]\nResearch Hermes delegation',
+      agentId: 'codex',
+      model: 'gpt-5-codex',
+      repoPath: project.repoPath,
+      threadId: parent.threadId,
+      spawnedAgent: { kind: 'delegation', role: 'Research Hermes delegation' },
+      delegatedTask: {
+        delegationId: 'delegate-1',
+        parentSessionId: parent.sessionId,
+        goal: 'Research Hermes delegation',
+      },
+    })
+
+    expect(sessionsStore.get(child.sessionId)?.spawnedAgent).toEqual({
+      kind: 'delegation',
+      role: 'Research Hermes delegation',
+    })
+    expect(latestDelegationActivity(broadcasts, parent.sessionId)).toMatchObject({
+      delegationId: 'delegate-1',
+      childSessionId: child.sessionId,
+      status: 'running',
+      agentId: 'codex',
+      model: 'gpt-5-codex',
+    })
+
+    childAdapter.emit({
+      type: 'stdout',
+      sessionId: child.sessionId,
+      payload: { text: 'Hermes child agents use isolated context.' },
+      timestamp: 10,
+    })
+
+    expect(latestDelegationActivity(broadcasts, parent.sessionId)).toMatchObject({
+      status: 'running',
+      lastOutput: 'Hermes child agents use isolated context.',
+    })
+
+    childAdapter.emit({
+      type: 'session-complete',
+      sessionId: child.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+
+    expect(latestDelegationActivity(broadcasts, parent.sessionId)).toMatchObject({
+      status: 'done',
+      summary: 'Hermes child agents use isolated context.',
+    })
+  })
+
+  it('runs delegate-task tool calls through the configured background runner', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const delegateTaskRunner = vi.fn().mockResolvedValue(undefined)
+    const manager = new SessionManager({
+      adapters: [adapter],
+      delegateTaskRunner,
+    })
+
+    const parent = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'Investigate the harness',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    adapter.emit({
+      type: 'activity',
+      sessionId: parent.sessionId,
+      payload: {
+        kind: 'tool-call',
+        name: 'delegate_task',
+        input: {
+          goal: 'Research Hermes delegate_task behavior',
+          context: 'Focus on isolated child context.',
+        },
+        status: 'running',
+      },
+      timestamp: 10,
+    })
+
+    await waitFor(() => delegateTaskRunner.mock.calls.length === 1)
+    expect(delegateTaskRunner).toHaveBeenCalledWith({
+      parentSessionId: parent.sessionId,
+      projectId: project.id,
+      threadId: parent.threadId,
+      goal: 'Research Hermes delegate_task behavior',
+      context: 'Focus on isolated child context.',
+    })
+
+    adapter.emit({
+      type: 'activity',
+      sessionId: parent.sessionId,
+      payload: {
+        kind: 'tool-call',
+        name: 'delegate_task',
+        input: {
+          goal: 'Research Hermes delegate_task behavior',
+          context: 'Focus on isolated child context.',
+        },
+        status: 'running',
+      },
+      timestamp: 11,
+    })
+
+    expect(delegateTaskRunner).toHaveBeenCalledTimes(1)
+  })
 })
 
 class FakeAdapter implements AgentAdapter {
@@ -2062,6 +2190,22 @@ function proposalsFromLiveDiffPayload(payload: unknown): unknown[] {
 
   const proposals = (payload as { proposals?: unknown }).proposals
   return Array.isArray(proposals) ? proposals : []
+}
+
+function latestDelegationActivity(
+  events: readonly AgentEvent[],
+  parentSessionId: string,
+): unknown {
+  return [...events]
+    .reverse()
+    .find(
+      (event) =>
+        event.sessionId === parentSessionId &&
+        event.type === 'activity' &&
+        typeof event.payload === 'object' &&
+        event.payload !== null &&
+        (event.payload as { kind?: unknown }).kind === 'delegation',
+    )?.payload
 }
 
 async function createGitRepo(tempDirs: string[]): Promise<string> {

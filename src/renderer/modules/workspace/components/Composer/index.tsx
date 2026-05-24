@@ -91,6 +91,14 @@ export interface ComposerProps {
     approvalMode?: AgentApprovalMode,
     thinking?: AgentThinkingLevel,
   ) => void | Promise<void>
+  /** Starts the draft as a background child agent on the active thread. */
+  onDelegateTask?: (
+    goal: string,
+    options?: {
+      approvalMode?: AgentApprovalMode
+      thinking?: AgentThinkingLevel
+    },
+  ) => void | Promise<void>
 }
 
 const MIN_TEXTAREA_HEIGHT = 56
@@ -144,6 +152,7 @@ export function Composer({
   onOpenSwarm,
   onSessionStarted,
   onEnqueue,
+  onDelegateTask,
 }: ComposerProps) {
   const state = useComposerState({ projectId: project.id, prefillPrompt })
   const {
@@ -544,6 +553,7 @@ export function Composer({
 
   const hasContent = draft.trim().length > 0 || attachments.length > 0
   const queueAllowed = busy && !awaitingInput && Boolean(onEnqueue)
+  const delegateAllowed = Boolean(activeThreadId && activeSessionId && onDelegateTask)
   const canSend = hasContent && !attaching && (!busy || queueAllowed)
   const showRouterPreview = modelSelection.kind === 'auto' && draft.trim().length > 0
   const placeholder = awaitingInput
@@ -558,6 +568,39 @@ export function Composer({
     : queueAllowed
       ? 'Queue message'
       : undefined
+
+  const delegateDraft = useCallback(async () => {
+    const goal = draft.trim()
+    if (!goal || submitting || attaching || !onDelegateTask) return
+
+    setSubmitting(true)
+    setError(null)
+    try {
+      await onDelegateTask(goal, {
+        approvalMode,
+        thinking: modelSelection.thinking,
+      })
+      setDraft('')
+      clearAttachments()
+      window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
+    } catch (delegateError: unknown) {
+      setError(
+        delegateError instanceof Error ? delegateError.message : 'Failed to delegate task',
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }, [
+    approvalMode,
+    attaching,
+    clearAttachments,
+    draft,
+    modelSelection.thinking,
+    onDelegateTask,
+    setDraft,
+    setError,
+    submitting,
+  ])
 
   const wrapperBorderClass = 'border-hairline focus-within:border-white/15'
   // Soft accent glow breathing behind the bar while the agent runs a turn.
@@ -671,6 +714,18 @@ export function Composer({
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary"
               >
                 <BeeIcon />
+              </button>
+            ) : null}
+            {delegateAllowed ? (
+              <button
+                type="button"
+                onClick={() => void delegateDraft()}
+                disabled={!draft.trim() || submitting || attaching}
+                aria-label="Delegate draft to background agent"
+                title="Delegate draft to background agent"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <DelegateIcon />
               </button>
             ) : null}
             {busyReason && !queueAllowed ? (
@@ -797,6 +852,30 @@ function BeeIcon() {
       <path d="m14.5 5.5 1.5-2" />
       <path d="M11 18.5 9.5 21" />
       <path d="m13 18.5 1.5 2.5" />
+    </svg>
+  )
+}
+
+function DelegateIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 6h6" />
+      <path d="M5 12h4" />
+      <path d="M5 18h6" />
+      <path d="M14 7h2a3 3 0 0 1 3 3v1" />
+      <path d="M14 17h2a3 3 0 0 0 3-3v-1" />
+      <path d="m17 10 2 2 2-2" />
+      <path d="m17 14 2-2 2 2" />
     </svg>
   )
 }

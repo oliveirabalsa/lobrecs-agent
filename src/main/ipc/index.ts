@@ -3,6 +3,7 @@ import { getMainWindow } from '../app/bootstrap'
 import { estimateCost } from '../cost'
 import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
+import { delegateTask } from '../modules/agents/application/delegateTask'
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
 import { registerContextHandlers, repositoryContextService } from '../modules/context'
@@ -13,6 +14,7 @@ import { projectMemoryService, registerMemoryHandlers } from '../modules/memory'
 import { NotificationService, type NotificationDispatch } from '../modules/notifications'
 import { registerProjectHandlers } from '../modules/projects/ipc/registerProjectHandlers'
 import { runQualityGate } from '../modules/quality/application/qualityGateService'
+import { registerReviewHandlers } from '../modules/reviews'
 import { registerRoutingHandlers } from '../modules/routing/ipc/registerRoutingHandlers'
 import { registerRunHandlers } from '../modules/runs/ipc/registerRunHandlers'
 import { registerSessionHandlers } from '../modules/sessions/ipc/registerSessionHandlers'
@@ -52,6 +54,7 @@ export function registerIpcHandlers(): void {
   configureNotifications(context)
 
   registerProjectHandlers()
+  registerReviewHandlers()
   registerSessionHandlers()
   registerThreadHandlers()
   registerAgentHandlers(context)
@@ -94,7 +97,7 @@ function configureNotifications(context: MainIpcContext): void {
 
 function mapNotifierEventToDispatch(event: NotifierEvent): NotificationDispatch | null {
   const kind = event.spawnedAgent?.kind
-  if (kind === 'quality-repair' || kind === 'swarm') return null
+  if (kind === 'quality-repair' || kind === 'swarm' || kind === 'delegation') return null
 
   const baseClick = {
     projectId: event.projectId,
@@ -197,6 +200,15 @@ function configureSessionManager(context: MainIpcContext): void {
       },
     }),
   )
+  context.sessionManager.setDelegateTaskRunner((input) =>
+    delegateTask(context, {
+      projectId: input.projectId,
+      threadId: input.threadId,
+      parentSessionId: input.parentSessionId,
+      goal: input.goal,
+      context: input.context,
+    }),
+  )
 }
 
 function configureSwarmOrchestrator(context: MainIpcContext): void {
@@ -253,5 +265,16 @@ async function buildSessionContext(
     baseContext: null,
   })
 
-  return [projectContext, memoryContext, repositoryContext].filter(Boolean).join('\n\n') || null
+  return [projectContext, memoryContext, repositoryContext, DELEGATION_CONTEXT]
+    .filter(Boolean)
+    .join('\n\n') || null
 }
+
+const DELEGATION_CONTEXT = [
+  'Lobrecs background delegation:',
+  'When an independent background agent would help, call `DelegateTask` with',
+  'JSON input like {"goal":"specific task","context":"only the context needed"}.',
+  'Use it for isolated research, review, comparison, or investigation work that',
+  'would otherwise flood the main context. Keep the goal self-contained; the',
+  'child agent starts fresh and only its final summary returns to the thread.',
+].join('\n')

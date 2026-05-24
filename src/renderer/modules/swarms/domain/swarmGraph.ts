@@ -179,6 +179,8 @@ function textFromActivity(activity: AgentActivity): string {
       return `Continue to ${activity.nextRole}?`
     case 'model-recovery':
       return `Model recovery needed: ${activity.failedAgentId} / ${activity.failedModel}`
+    case 'delegation':
+      return activity.summary ?? activity.lastOutput ?? `Delegated task: ${activity.goal}`
   }
 }
 
@@ -225,6 +227,9 @@ function summarizeActivities(events: readonly AgentEvent[]) {
       case 'user-question':
       case 'swarm-step-approval':
         counts.approvalCount += 1
+        break
+      case 'delegation':
+        counts.messageCount += 1
         break
     }
   }

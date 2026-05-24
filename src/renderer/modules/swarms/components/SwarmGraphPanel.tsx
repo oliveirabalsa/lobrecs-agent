@@ -692,6 +692,12 @@ function activityPreviewFromActivity(
         detail: `${activity.failedAgentId} / ${activity.failedModel}`,
         tone: 'warn',
       }
+    case 'delegation':
+      return {
+        label: 'Delegated task',
+        detail: activity.summary ?? activity.lastOutput ?? activity.goal,
+        tone: activity.status === 'error' ? 'danger' : activity.status === 'done' ? 'success' : 'info',
+      }
   }
 }
 

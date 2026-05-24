@@ -80,6 +80,10 @@ export interface DiffProposalScope {
 }
 
 export interface ScopedDiffProposalState {
+  entries: ScopedDiffProposalEntry[]
+}
+
+export interface ScopedDiffProposalEntry {
   sessionId: string
   threadId: string | null
   proposals: DiffProposal[]
@@ -90,11 +94,11 @@ export function visibleDiffProposalsForActiveSession(
   activeSessionId: string | null,
   activeThreadId: string | null,
 ): DiffProposal[] {
-  if (!state || state.sessionId !== activeSessionId || state.threadId !== activeThreadId) {
-    return []
-  }
+  if (!state || !activeSessionId) return []
 
-  return state.proposals
+  return (
+    findScopedDiffProposalEntry(state, activeSessionId, activeThreadId)?.proposals ?? []
+  )
 }
 
 export function nextScopedDiffProposalState(
@@ -108,23 +112,43 @@ export function nextScopedDiffProposalState(
 
   const sourceSessionId = source.sessionId ?? activeSessionId
   const sourceThreadId = source.threadId ?? activeThreadId
-  const sourceMatchesActiveSession =
-    sourceSessionId === activeSessionId && (sourceThreadId ?? null) === activeThreadId
 
-  if (!sourceMatchesActiveSession) return current
+  if (proposals.length === 0) return current
 
-  if (proposals.length === 0) return null
+  const entries = current?.entries ?? []
+  const existingEntry = findScopedDiffProposalEntry(
+    current,
+    sourceSessionId,
+    sourceThreadId,
+  )
 
-  const currentProposals =
-    current?.sessionId === activeSessionId && current.threadId === activeThreadId
-      ? current.proposals
-      : []
+  const nextEntry: ScopedDiffProposalEntry = {
+    sessionId: sourceSessionId,
+    threadId: sourceThreadId ?? null,
+    proposals: mergeDiffProposals(existingEntry?.proposals ?? [], proposals),
+  }
 
   return {
-    sessionId: activeSessionId,
-    threadId: activeThreadId,
-    proposals: mergeDiffProposals(currentProposals, proposals),
+    entries: [
+      ...entries.filter(
+        (entry) =>
+          entry.sessionId !== nextEntry.sessionId ||
+          entry.threadId !== nextEntry.threadId,
+      ),
+      nextEntry,
+    ],
   }
+}
+
+function findScopedDiffProposalEntry(
+  state: ScopedDiffProposalState | null,
+  sessionId: string,
+  threadId: string | null | undefined,
+): ScopedDiffProposalEntry | undefined {
+  const normalizedThreadId = threadId ?? null
+  return state?.entries.find(
+    (entry) => entry.sessionId === sessionId && entry.threadId === normalizedThreadId,
+  )
 }
 
 export function mergeDiffProposals(
@@ -213,7 +237,6 @@ export function useWorkspaceController() {
       const targetProjectId = projectId ?? selectedProject?.id
       if (targetProjectId) writeActiveThread(targetProjectId, null)
       setActiveSession(null)
-      setDiffProposalState(null)
       setApprovalRequest(null)
       setBannerError(null)
     },
@@ -270,6 +293,7 @@ export function useWorkspaceController() {
 
   function handleSelectedProjectDeleted() {
     setSelectedProject(null)
+    setDiffProposalState(null)
     clearActiveThread()
   }
 
@@ -323,7 +347,6 @@ export function useWorkspaceController() {
       planMode: summary.planMode,
       createdAt: summary.createdAt ?? Date.now(),
     })
-    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
     if (selectedProject) writeActiveThread(selectedProject.id, summary.threadId)
@@ -446,7 +469,6 @@ export function useWorkspaceController() {
       updateActiveStatus('cancelled')
       tabs.updateStatus(sessionId, 'cancelled')
       setApprovalRequest(null)
-      setDiffProposalState(null)
       setBannerError(null)
     } catch (error: unknown) {
       setBannerError(error instanceof Error ? error.message : 'Failed to cancel session')
@@ -475,6 +497,31 @@ export function useWorkspaceController() {
       setBannerError(null)
     } catch (error: unknown) {
       setBannerError(error instanceof Error ? error.message : 'Failed to queue message')
+      throw error
+    }
+  }
+
+  async function handleDelegateTask(
+    goal: string,
+    options?: {
+      approvalMode?: StartedSessionSummary['approvalMode']
+      thinking?: AgentThinkingLevel
+    },
+  ): Promise<void> {
+    if (!selectedProject || !activeThreadId || !activeSessionId) return
+
+    try {
+      await window.agentforge.agent.delegateTask({
+        projectId: selectedProject.id,
+        threadId: activeThreadId,
+        parentSessionId: activeSessionId,
+        goal,
+        approvalMode: options?.approvalMode,
+        thinking: options?.thinking,
+      })
+      setBannerError(null)
+    } catch (error: unknown) {
+      setBannerError(error instanceof Error ? error.message : 'Failed to delegate task')
       throw error
     }
   }
@@ -610,7 +657,6 @@ export function useWorkspaceController() {
       createdAt: session.createdAt,
     })
     setMainView('workspace')
-    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
   }
@@ -671,7 +717,6 @@ export function useWorkspaceController() {
     tabs.closeTab(sessionId)
     if (activeSession?.id === sessionId) {
       setActiveSession(null)
-      setDiffProposalState(null)
       setApprovalRequest(null)
       if (selectedProject) writeActiveThread(selectedProject.id, null)
     }
@@ -717,10 +762,12 @@ export function useWorkspaceController() {
     // Clear the stored active thread for this project so handleProjectSelect
     // won't try to restore it asynchronously, then open a blank workspace.
     writeActiveThread(project.id, null)
+    if (selectedProject?.id !== project.id) {
+      setDiffProposalState(null)
+    }
     setSelectedProject(project)
     setActiveSession(null)
     tabs.resetTabs()
-    setDiffProposalState(null)
     setApprovalRequest(null)
     setBannerError(null)
     setMainView('workspace')
@@ -760,6 +807,7 @@ export function useWorkspaceController() {
     handleRerunActiveSession,
     handleCancelSession,
     handleEnqueue,
+    handleDelegateTask,
     handleForceSteerQueuedMessage,
     handleRemoveQueueItem,
     handleClearQueue,

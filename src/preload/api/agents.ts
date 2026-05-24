@@ -2,6 +2,8 @@ import type { IpcRendererEvent } from 'electron'
 import type {
   AgentDispatchParams,
   AgentDispatchResult,
+  AgentDelegateTaskParams,
+  AgentDelegateTaskResult,
   AgentModelRecoveryDecisionPayload,
   AgentPlanDecisionPayload,
   AgentPlanReviewDecisionPayload,
@@ -15,6 +17,7 @@ import type { IpcInvoker, IpcSubscriber } from './ipc'
 
 export interface AgentApi {
   dispatch(params: AgentDispatchParams): Promise<AgentDispatchResult>
+  delegateTask(params: AgentDelegateTaskParams): Promise<AgentDelegateTaskResult>
   approve(sessionId: string): Promise<void>
   reject(sessionId: string): Promise<void>
   cancel(sessionId: string): Promise<void>
@@ -64,6 +67,7 @@ export interface AgentApi {
 export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentApi {
   return {
     dispatch: (params) => ipcRenderer.invoke('agent:dispatch', params),
+    delegateTask: (params) => ipcRenderer.invoke('agent:delegate-task', params),
     approve: (sessionId) => ipcRenderer.invoke('agent:approve', sessionId),
     reject: (sessionId) => ipcRenderer.invoke('agent:reject', sessionId),
     cancel: (sessionId) => ipcRenderer.invoke('agent:cancel', sessionId),

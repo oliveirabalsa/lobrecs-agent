@@ -148,6 +148,51 @@ describe('groupTurns', () => {
     ])
   })
 
+  it('keeps only the latest delegation card update on the parent turn', () => {
+    const activities: AgentActivity[] = [
+      { kind: 'message', role: 'assistant', text: 'delegating research' },
+      {
+        kind: 'delegation',
+        delegationId: 'delegate-1',
+        childSessionId: 'child-1',
+        childThreadId: 'thread-1',
+        goal: 'Research Hermes delegation',
+        status: 'running',
+        agentId: 'codex',
+        model: 'gpt-5-codex',
+      },
+      { kind: 'completion', status: 'done', summary: 'Session complete' },
+      {
+        kind: 'delegation',
+        delegationId: 'delegate-1',
+        childSessionId: 'child-1',
+        childThreadId: 'thread-1',
+        goal: 'Research Hermes delegation',
+        status: 'done',
+        agentId: 'codex',
+        model: 'gpt-5-codex',
+        summary: 'Only final summaries return to the parent context.',
+      },
+    ]
+
+    const result = groupTurns(activities, {
+      seedUserMessage: { text: 'do the thing', at: 1_000 },
+      activityTimes: [2_000, 3_000, 4_000, 5_000],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].streamItems.map((item) => item.kind)).toEqual([
+      'message',
+      'completion',
+      'delegation',
+    ])
+    expect(result[0].streamItems.at(-1)).toMatchObject({
+      kind: 'delegation',
+      status: 'done',
+      summary: 'Only final summaries return to the parent context.',
+    })
+  })
+
   it('splits multiple completions into separate turns', () => {
     const activities: AgentActivity[] = [
       { kind: 'message', role: 'assistant', text: 'turn 1' },

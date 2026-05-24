@@ -249,6 +249,20 @@ function aggregateStreamItems(
       continue
     }
 
+    if (activity.kind === 'delegation') {
+      const existingIndex = items.findIndex(
+        (item) =>
+          item.kind === 'delegation' &&
+          item.delegationId === activity.delegationId,
+      )
+      if (existingIndex >= 0) {
+        items.splice(existingIndex, 1)
+      }
+      items.push(activity)
+      i += 1
+      continue
+    }
+
     if (isMcpToolActivity(activity)) {
       const batch: McpToolActivity[] = []
       let j = i
@@ -458,7 +472,10 @@ function isPostCompletionArtifact(activity: AgentActivity): boolean {
     activity.kind === 'swarm-step-approval' ||
     // Provider-limit recovery pauses the failed turn and lets the user start a
     // replacement model on the same thread.
-    activity.kind === 'model-recovery'
+    activity.kind === 'model-recovery' ||
+    // Delegated child sessions can finish after the parent run is terminal;
+    // keep their status card attached to the turn that requested the work.
+    activity.kind === 'delegation'
   )
 }
 

@@ -87,6 +87,16 @@ export type DispatchSessionParams = {
    * draining the thread queue. Execution waits for `resolvePlanReview`.
    */
   planMode?: boolean
+  /**
+   * Mirrors this spawned session back into a parent session as a compact
+   * background-delegation activity. The child still runs as a normal session
+   * on the same thread.
+   */
+  delegatedTask?: {
+    delegationId?: string
+    parentSessionId: string
+    goal: string
+  }
 }
 
 export type DispatchSessionResult = {
@@ -112,6 +122,14 @@ export type QualityGateRunner = (input: {
   attempt: number
   emitActivity(payload: AgentActivity): void
 }) => Promise<void>
+
+export type DelegateTaskRunner = (input: {
+  parentSessionId: string
+  projectId: string
+  threadId: string
+  goal: string
+  context?: string
+}) => Promise<unknown>
 
 export type NotifierEvent =
   | {
@@ -235,6 +253,17 @@ type PendingQueuedMessage = QueuedMessage & {
   runtimeSettings?: AgentRuntimeSettings
 }
 
+type DelegatedTaskRecord = {
+  delegationId: string
+  parentSessionId: string
+  childSessionId: string
+  childThreadId: string
+  goal: string
+  agentId: AgentId
+  model: string
+  lastOutput?: string
+}
+
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
 const THREAD_CONTEXT_SESSION_LIMIT = 6
 const THREAD_CONTEXT_PROMPT_CHARS = 2_000
@@ -249,6 +278,7 @@ export type SessionManagerOptions = {
   worktreeIsolation?: boolean
   resolveContext?: SessionContextResolver
   qualityGateRunner?: QualityGateRunner
+  delegateTaskRunner?: DelegateTaskRunner
   notifier?: NotifierCallback
   idleHeartbeatMs?: number | false
 }
@@ -266,9 +296,13 @@ export class SessionManager {
   private readonly pendingPlanReviews = new Map<string, PlanReviewRecord>()
   /** Provider-limit recoveries awaiting Continue/Cancel, keyed by recoveryId. */
   private readonly pendingModelRecoveries = new Map<string, ModelRecoveryRecord>()
+  /** Background child sessions mirrored into their parent stream. */
+  private readonly delegatedTasksByChildSession = new Map<string, DelegatedTaskRecord>()
+  private readonly processedDelegationRequests = new Set<string>()
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
   private qualityGateRunner?: QualityGateRunner
+  private delegateTaskRunner?: DelegateTaskRunner
   private notifier?: NotifierCallback
   private readonly idleHeartbeatMs: number | false
 
@@ -279,6 +313,7 @@ export class SessionManager {
     this.estimateCost = options.estimateCost ?? (() => 0)
     this.resolveContext = options.resolveContext
     this.qualityGateRunner = options.qualityGateRunner
+    this.delegateTaskRunner = options.delegateTaskRunner
     this.notifier = options.notifier
     this.idleHeartbeatMs = options.idleHeartbeatMs ?? 45_000
 
@@ -301,6 +336,10 @@ export class SessionManager {
 
   setQualityGateRunner(runner: QualityGateRunner | undefined): void {
     this.qualityGateRunner = runner
+  }
+
+  setDelegateTaskRunner(runner: DelegateTaskRunner | undefined): void {
+    this.delegateTaskRunner = runner
   }
 
   setNotifier(notifier: NotifierCallback | undefined): void {
@@ -449,6 +488,18 @@ export class SessionManager {
       agentSession.events.on('event', (event: AgentEvent) => {
         this.handleAgentEvent({ ...event, sessionId: session.id })
       })
+
+      if (params.delegatedTask) {
+        this.registerDelegatedTask({
+          delegationId: params.delegatedTask.delegationId ?? randomUUID(),
+          parentSessionId: params.delegatedTask.parentSessionId,
+          childSessionId: session.id,
+          childThreadId: threadId,
+          goal: params.delegatedTask.goal,
+          agentId: params.agentId,
+          model: params.model,
+        })
+      }
 
       return { sessionId: session.id, threadId }
     } catch (error) {
@@ -869,6 +920,10 @@ export class SessionManager {
   private handleAgentEvent(event: AgentEvent): void {
     if (this.sessionsPausedForUserInput.has(event.sessionId)) return
     this.noteAgentEvent(event.sessionId)
+    this.mirrorDelegatedTaskEvent(event)
+    if (event.type === 'activity') {
+      this.maybeRunDelegateTask(event)
+    }
 
     const observedProviderLimit = providerLimitReasonFromEvent(event)
     if (observedProviderLimit) {
@@ -1209,6 +1264,7 @@ export class SessionManager {
       if (isUserQuestionActivity(activityEvent.payload)) {
         shouldPauseForUserInput = true
       }
+      this.maybeRunDelegateTask(activityEvent)
     }
 
     if (shouldPauseForUserInput) {
@@ -1218,6 +1274,43 @@ export class SessionManager {
     if (shouldRefreshLiveDiff) {
       this.scheduleLiveLocalDiff(event.sessionId)
     }
+  }
+
+  private maybeRunDelegateTask(activityEvent: AgentEvent): void {
+    if (!this.delegateTaskRunner) return
+    if (!isDelegateTaskToolCall(activityEvent.payload)) return
+
+    const session = sessionsStore.get(activityEvent.sessionId)
+    const threadId = session?.threadId ?? this.activeSessions.get(activityEvent.sessionId)?.threadId
+    if (!session || !threadId) return
+    if (session.spawnedAgent?.kind === 'delegation') return
+
+    const request = delegateTaskRequestFromToolCall(activityEvent.payload)
+    if (!request) return
+
+    const requestKey = delegationRequestKey(activityEvent.sessionId, request)
+    if (this.processedDelegationRequests.has(requestKey)) return
+    this.processedDelegationRequests.add(requestKey)
+
+    void this.delegateTaskRunner({
+      parentSessionId: activityEvent.sessionId,
+      projectId: session.projectId,
+      threadId,
+      goal: request.goal,
+      context: request.context,
+    }).catch((error) => {
+      this.recordEvent({
+        type: 'activity',
+        sessionId: activityEvent.sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Delegated task failed to start',
+          detail: errorMessage(error),
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
+    })
   }
 
   private scheduleLiveLocalDiff(sessionId: string): void {
@@ -1690,6 +1783,70 @@ export class SessionManager {
     this.processWarningsBySession.delete(sessionId)
     this.sessionsPausedForUserInput.delete(sessionId)
     this.dropModelRecoveriesForSession(sessionId)
+    this.delegatedTasksByChildSession.delete(sessionId)
+  }
+
+  private registerDelegatedTask(record: DelegatedTaskRecord): void {
+    this.delegatedTasksByChildSession.set(record.childSessionId, record)
+    this.recordDelegationActivity(record, 'running')
+  }
+
+  private mirrorDelegatedTaskEvent(event: AgentEvent): void {
+    const record = this.delegatedTasksByChildSession.get(event.sessionId)
+    if (!record) return
+
+    const lastOutput = delegationOutputFromEvent(event)
+    if (lastOutput) {
+      record.lastOutput = truncateDelegationText(lastOutput, 500)
+    }
+
+    if (event.type === 'session-complete') {
+      const status = delegationStatusFromSessionStatus(completionStatus(event))
+      this.recordDelegationActivity(record, status, {
+        summary: delegationSummary(record.childSessionId, event),
+      })
+      this.delegatedTasksByChildSession.delete(event.sessionId)
+      return
+    }
+
+    if (event.type === 'error') {
+      const error = textFromUnknownPayload(event.payload).trim()
+      this.recordDelegationActivity(record, 'error', {
+        error: truncateDelegationText(error || 'Delegated task failed.', 500),
+        summary: delegationSummary(record.childSessionId, event),
+      })
+      this.delegatedTasksByChildSession.delete(event.sessionId)
+      return
+    }
+
+    if (lastOutput || event.type === 'activity') {
+      this.recordDelegationActivity(record, 'running')
+    }
+  }
+
+  private recordDelegationActivity(
+    record: DelegatedTaskRecord,
+    status: Extract<AgentActivity, { kind: 'delegation' }>['status'],
+    options: { summary?: string; error?: string } = {},
+  ): void {
+    this.recordEvent({
+      type: 'activity',
+      sessionId: record.parentSessionId,
+      payload: {
+        kind: 'delegation',
+        delegationId: record.delegationId,
+        childSessionId: record.childSessionId,
+        childThreadId: record.childThreadId,
+        goal: record.goal,
+        status,
+        agentId: record.agentId,
+        model: record.model,
+        lastOutput: record.lastOutput,
+        summary: options.summary,
+        error: options.error,
+      },
+      timestamp: Date.now(),
+    })
   }
 }
 
@@ -1797,6 +1954,124 @@ function textFromUnknownPayload(payload: unknown): string {
   } catch {
     return String(payload)
   }
+}
+
+function isDelegateTaskToolCall(
+  payload: unknown,
+): payload is Extract<AgentActivity, { kind: 'tool-call' }> {
+  if (!payload || typeof payload !== 'object') return false
+  const activity = payload as Partial<Extract<AgentActivity, { kind: 'tool-call' }>>
+  if (activity.kind !== 'tool-call') return false
+
+  const normalized = activity.name?.replace(/[^a-z0-9]/gi, '').toLowerCase()
+  return normalized === 'delegatetask' || normalized === 'delegate'
+}
+
+function delegateTaskRequestFromToolCall(
+  activity: Extract<AgentActivity, { kind: 'tool-call' }>,
+): { goal: string; context?: string } | null {
+  const input = structuredDelegationInput(activity.input)
+  const goal =
+    cleanDelegationString(input.goal) ??
+    cleanDelegationString(input.task) ??
+    cleanDelegationString(input.prompt)
+  if (!goal) return null
+
+  return {
+    goal,
+    context: cleanDelegationString(input.context),
+  }
+}
+
+function structuredDelegationInput(input: unknown): Record<string, unknown> {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    return input as Record<string, unknown>
+  }
+
+  if (typeof input === 'string') {
+    try {
+      const parsed = JSON.parse(input) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      return { goal: input }
+    }
+  }
+
+  return {}
+}
+
+function cleanDelegationString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+function delegationRequestKey(
+  sessionId: string,
+  request: { goal: string; context?: string },
+): string {
+  return createHash('sha1')
+    .update(sessionId)
+    .update('\0')
+    .update(request.goal)
+    .update('\0')
+    .update(request.context ?? '')
+    .digest('hex')
+}
+
+function delegationOutputFromEvent(event: AgentEvent): string | null {
+  if (event.type === 'stdout' || event.type === 'stderr') {
+    const text = textFromUnknownPayload(event.payload).trim()
+    return text || null
+  }
+
+  if (event.type !== 'activity') return null
+  if (!event.payload || typeof event.payload !== 'object') return null
+
+  const payload = event.payload as AgentActivity
+  switch (payload.kind) {
+    case 'message':
+      return payload.text.trim() || null
+    case 'tool-call':
+      return `Running ${payload.name}`
+    case 'tool-result':
+      return payload.output?.trim() || `${payload.name} finished`
+    case 'command':
+      return payload.command
+    case 'step':
+      return payload.detail?.trim() || payload.title
+    case 'completion':
+      return payload.summary
+    default:
+      return null
+  }
+}
+
+function delegationSummary(childSessionId: string, terminalEvent: AgentEvent): string | undefined {
+  const events = [...sessionsStore.listEvents(childSessionId), terminalEvent]
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const output = delegationOutputFromEvent(events[index])
+    if (output) return truncateDelegationText(output, 2_000)
+  }
+
+  const fallback = textFromUnknownPayload(terminalEvent.payload).trim()
+  return fallback ? truncateDelegationText(fallback, 2_000) : undefined
+}
+
+function delegationStatusFromSessionStatus(
+  status: SessionStatus,
+): Extract<AgentActivity, { kind: 'delegation' }>['status'] {
+  if (status === 'error' || status === 'cancelled') return status
+  return 'done'
+}
+
+function truncateDelegationText(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength - 3)}...`
 }
 
 function publicQueuedMessage(message: PendingQueuedMessage): QueuedMessage {

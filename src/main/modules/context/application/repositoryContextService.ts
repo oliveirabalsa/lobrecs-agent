@@ -11,6 +11,7 @@ import {
   type StoredRepositoryContextChunk,
 } from '../infrastructure/contextRepository'
 import { scanRepository } from '../infrastructure/repositoryScanner'
+import { extractRepositorySymbolManifest } from '../infrastructure/symbolExtractor'
 
 const DEFAULT_LIMIT = 6
 const MAX_LIMIT = 12
@@ -88,37 +89,22 @@ export class RepositoryContextService {
     repoPath: string
     prompt: string
   }): Promise<string | null> {
-    const chunks = await this.search({
-      projectId: input.projectId,
-      repoPath: input.repoPath,
-      query: input.prompt,
-      limit: DEFAULT_LIMIT,
-    })
+    const [symbolManifest, chunks] = await Promise.all([
+      extractRepositorySymbolManifest(input.repoPath),
+      this.search({
+        projectId: input.projectId,
+        repoPath: input.repoPath,
+        query: input.prompt,
+        limit: DEFAULT_LIMIT,
+      }),
+    ])
 
-    if (chunks.length === 0) return null
+    const chunkContext = renderChunkContext(chunks)
+    const sections = [symbolManifest, chunkContext].filter((section): section is string =>
+      Boolean(section),
+    )
 
-    const compactSingleFileContext = compactContextForLargeSingleFile(chunks)
-    if (compactSingleFileContext) return compactSingleFileContext
-
-    let usedChars = 0
-    const rendered: string[] = []
-
-    for (const chunk of chunks) {
-      const header = `File: ${chunk.path}:${chunk.startLine}-${chunk.endLine}`
-      const body = truncateSnippet(chunk.content, Math.max(800, MAX_CONTEXT_CHARS - usedChars))
-      const block = `${header}\n${body}`
-
-      if (usedChars + block.length > MAX_CONTEXT_CHARS && rendered.length > 0) break
-      rendered.push(block)
-      usedChars += block.length
-    }
-
-    if (rendered.length === 0) return null
-
-    return [
-      'Repository context (retrieved automatically; use only when relevant):',
-      ...rendered.map((block) => `---\n${block}`),
-    ].join('\n')
+    return sections.length > 0 ? sections.join('\n\n') : null
   }
 
   private async ensureFreshIndex(projectId: string, repoPath: string): Promise<void> {
@@ -135,6 +121,33 @@ export class RepositoryContextService {
 }
 
 export const repositoryContextService = new RepositoryContextService()
+
+function renderChunkContext(chunks: readonly RepositoryContextChunk[]): string | null {
+  if (chunks.length === 0) return null
+
+  const compactSingleFileContext = compactContextForLargeSingleFile(chunks)
+  if (compactSingleFileContext) return compactSingleFileContext
+
+  let usedChars = 0
+  const rendered: string[] = []
+
+  for (const chunk of chunks) {
+    const header = `File: ${chunk.path}:${chunk.startLine}-${chunk.endLine}`
+    const body = truncateSnippet(chunk.content, Math.max(800, MAX_CONTEXT_CHARS - usedChars))
+    const block = `${header}\n${body}`
+
+    if (usedChars + block.length > MAX_CONTEXT_CHARS && rendered.length > 0) break
+    rendered.push(block)
+    usedChars += block.length
+  }
+
+  if (rendered.length === 0) return null
+
+  return [
+    'Repository context (retrieved automatically; use only when relevant):',
+    ...rendered.map((block) => `---\n${block}`),
+  ].join('\n')
+}
 
 function compactContextForLargeSingleFile(
   chunks: readonly RepositoryContextChunk[],

@@ -66,3 +66,6 @@ export type { PromptEvidenceCardProps } from './PromptEvidenceCard'
 
 export { DiffReviewCard } from './DiffReviewCard'
 export type { DiffReviewCardProps, DiffReviewFixSelection } from './DiffReviewCard'
+
+export { DelegationCard } from './DelegationCard'
+export type { DelegationActivity, DelegationCardProps } from './DelegationCard'

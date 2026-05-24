@@ -9,7 +9,7 @@ export type SessionStatus =
   | 'error'
   | 'cancelled'
 
-export type SpawnedAgentKind = 'swarm' | 'quality-repair' | 'automation'
+export type SpawnedAgentKind = 'swarm' | 'quality-repair' | 'automation' | 'delegation'
 
 export interface SpawnedAgentSession {
   kind: SpawnedAgentKind
@@ -180,6 +180,24 @@ export type AgentActivity =
       reason: string
       /** True when the continuation model must support image inputs. */
       requiresImageSupport?: boolean
+    }
+  | {
+      /**
+       * Mirrors the lifecycle of a background delegated child session onto the
+       * parent turn. The child session owns execution; this activity is a
+       * compact status card for the parent stream.
+       */
+      kind: 'delegation'
+      delegationId: string
+      childSessionId: string
+      childThreadId: string
+      goal: string
+      status: 'running' | 'done' | 'error' | 'cancelled'
+      agentId: string
+      model: string
+      lastOutput?: string
+      summary?: string
+      error?: string
     }
 
 export interface AgentEvent {

@@ -66,6 +66,22 @@ export interface AgentDispatchResult {
   threadId: string
 }
 
+export interface AgentDelegateTaskParams {
+  projectId: string
+  threadId: string
+  parentSessionId: string
+  goal: string
+  context?: string
+  approvalMode?: AgentApprovalMode
+  thinking?: AgentThinkingLevel
+}
+
+export interface AgentDelegateTaskResult extends AgentDispatchResult {
+  delegationId: string
+  agentId: SupportedAgentId
+  model: string
+}
+
 /** Renderer→main payload for resolving a plan-prompt awaiting user decision. */
 export interface AgentPlanDecisionPayload {
   /** Identifier returned by the matching `plan-prompt` activity event. */

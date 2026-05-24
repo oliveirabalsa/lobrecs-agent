@@ -82,20 +82,24 @@ describe('buildSwarmWorkspaceState', () => {
 
 describe('visibleDiffProposalsForActiveSession', () => {
   const state: ScopedDiffProposalState = {
-    sessionId: 'session-1',
-    threadId: 'thread-1',
-    proposals: [
+    entries: [
       {
-        filePath: '/repo/current.ts',
-        originalContent: 'old',
-        proposedContent: 'new',
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        proposals: [
+          {
+            filePath: '/repo/current.ts',
+            originalContent: 'old',
+            proposedContent: 'new',
+          },
+        ],
       },
     ],
   }
 
   it('returns proposals only for the active chat session', () => {
     expect(visibleDiffProposalsForActiveSession(state, 'session-1', 'thread-1')).toEqual(
-      state.proposals,
+      state.entries[0].proposals,
     )
   })
 
@@ -124,13 +128,17 @@ describe('visibleDiffProposalsForActiveSession', () => {
 
   it('merges proposals from the active session instead of replacing earlier edits', () => {
     const current: ScopedDiffProposalState = {
-      sessionId: 'session-1',
-      threadId: 'thread-1',
-      proposals: [
+      entries: [
         {
-          filePath: '/repo/first.ts',
-          originalContent: 'old',
-          proposedContent: 'new',
+          sessionId: 'session-1',
+          threadId: 'thread-1',
+          proposals: [
+            {
+              filePath: '/repo/first.ts',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
         },
       ],
     }
@@ -148,7 +156,7 @@ describe('visibleDiffProposalsForActiveSession', () => {
         { sessionId: 'session-1', threadId: 'thread-1' },
         'session-1',
         'thread-1',
-      )?.proposals,
+      )?.entries[0].proposals,
     ).toEqual([
       {
         filePath: '/repo/first.ts',
@@ -171,18 +179,22 @@ describe('visibleDiffProposalsForActiveSession', () => {
   // structurally impossible, so freeze the contract here.
   it('starts a new thread with no visible proposals even if the store still holds the previous thread', () => {
     const previousThreadState: ScopedDiffProposalState = {
-      sessionId: 'session-prev',
-      threadId: 'thread-prev',
-      proposals: [
+      entries: [
         {
-          filePath: '/repo/cli-tools/CliToolsView.tsx',
-          originalContent: 'old',
-          proposedContent: 'new',
-        },
-        {
-          filePath: '/repo/agents/registerAgentHandlers.ts',
-          originalContent: 'old',
-          proposedContent: 'new',
+          sessionId: 'session-prev',
+          threadId: 'thread-prev',
+          proposals: [
+            {
+              filePath: '/repo/cli-tools/CliToolsView.tsx',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+            {
+              filePath: '/repo/agents/registerAgentHandlers.ts',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
         },
       ],
     }
@@ -196,20 +208,24 @@ describe('visibleDiffProposalsForActiveSession', () => {
     ).toEqual([])
   })
 
-  // Regression: a stale diff event firing after the user switches threads
-  // (closure still tagged with the previous source) must not be merged
-  // into the new thread's visible state. Without this guard the renderer
-  // would render an "Edited N files" card for the previous thread inside
-  // the new one — exactly the bug reported in the screenshot.
-  it('rejects stale diff events tagged with the previous thread after a switch', () => {
+  // Regression: a diff event firing after the user switches threads
+  // (closure still tagged with the previous source) may update its own
+  // cached entry, but must not become visible in the newly active thread.
+  // Without this guard the renderer would render an "Edited N files" card
+  // for the previous thread inside the new one.
+  it('keeps stale diff events tagged with the previous thread out of the active thread', () => {
     const previousThreadState: ScopedDiffProposalState = {
-      sessionId: 'session-prev',
-      threadId: 'thread-prev',
-      proposals: [
+      entries: [
         {
-          filePath: '/repo/cli-tools/CliToolsView.tsx',
-          originalContent: 'old',
-          proposedContent: 'new',
+          sessionId: 'session-prev',
+          threadId: 'thread-prev',
+          proposals: [
+            {
+              filePath: '/repo/cli-tools/CliToolsView.tsx',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
         },
       ],
     }
@@ -241,13 +257,17 @@ describe('visibleDiffProposalsForActiveSession', () => {
   // ONLY the new thread's files — never the previous thread's.
   it('only exposes the active thread\'s proposals once it has emitted its own diff', () => {
     const previousThreadState: ScopedDiffProposalState = {
-      sessionId: 'session-prev',
-      threadId: 'thread-prev',
-      proposals: [
+      entries: [
         {
-          filePath: '/repo/cli-tools/CliToolsView.tsx',
-          originalContent: 'old',
-          proposedContent: 'new',
+          sessionId: 'session-prev',
+          threadId: 'thread-prev',
+          proposals: [
+            {
+              filePath: '/repo/cli-tools/CliToolsView.tsx',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
         },
       ],
     }
@@ -273,6 +293,81 @@ describe('visibleDiffProposalsForActiveSession', () => {
         filePath: '/repo/new-thread-edit.ts',
         originalContent: 'before',
         proposedContent: 'after',
+      },
+    ])
+  })
+
+  it('keeps cached proposals visible when returning to their session and thread', () => {
+    const state: ScopedDiffProposalState = {
+      entries: [
+        {
+          sessionId: 'session-prev',
+          threadId: 'thread-prev',
+          proposals: [
+            {
+              filePath: '/repo/previous.ts',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
+        },
+        {
+          sessionId: 'session-current',
+          threadId: 'thread-current',
+          proposals: [
+            {
+              filePath: '/repo/current.ts',
+              originalContent: 'before',
+              proposedContent: 'after',
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(
+      visibleDiffProposalsForActiveSession(state, 'session-prev', 'thread-prev'),
+    ).toEqual([
+      {
+        filePath: '/repo/previous.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
+      },
+    ])
+  })
+
+  it('ignores empty diff resets so terminal remounts do not erase cached proposals', () => {
+    const current: ScopedDiffProposalState = {
+      entries: [
+        {
+          sessionId: 'session-1',
+          threadId: 'thread-1',
+          proposals: [
+            {
+              filePath: '/repo/current.ts',
+              originalContent: 'old',
+              proposedContent: 'new',
+            },
+          ],
+        },
+      ],
+    }
+
+    const afterEmptyReset = nextScopedDiffProposalState(
+      current,
+      [],
+      { sessionId: 'session-1', threadId: 'thread-1' },
+      'session-1',
+      'thread-1',
+    )
+
+    expect(
+      visibleDiffProposalsForActiveSession(afterEmptyReset, 'session-1', 'thread-1'),
+    ).toEqual([
+      {
+        filePath: '/repo/current.ts',
+        originalContent: 'old',
+        proposedContent: 'new',
       },
     ])
   })

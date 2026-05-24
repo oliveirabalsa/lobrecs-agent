@@ -12,6 +12,7 @@ import {
   Callout,
   CommandPreview,
   CommandsGroup,
+  DelegationCard,
   CompletionFooter,
   EditedFilesCard,
   McpCallCard,
@@ -276,6 +277,9 @@ export function renderStreamItem(
           onSessionStarted={ctx.onSessionStarted}
         />
       )
+
+    case 'delegation':
+      return <DelegationCard key={key} delegation={item} />
 
     case 'step':
       // Informational steps (worktree created, model starting, "thinking", …)

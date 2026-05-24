@@ -4,6 +4,7 @@ import path from 'node:path'
 import { modelTierFromModel } from '../../../router'
 import { capacityFallbackModelsForAgent } from '../../../router/modelCapacityFallbacks'
 import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
+import { delegateTask } from '../application/delegateTask'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { submitStepApprovalDecision } from '../../../swarm/stepApprovalPrompt'
 import { requireProject } from '../../projects/application/requireProject'
@@ -15,6 +16,7 @@ import {
 import { isSupportedAgentId } from '../domain/isSupportedAgentId'
 import type {
   AgentDispatchParams,
+  AgentDelegateTaskParams,
   AgentId,
   AgentModelRecoveryDecisionPayload,
   AgentPlanDecisionPayload,
@@ -133,6 +135,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
 
       return { sessionId, threadId }
     },
+  )
+
+  ipcMain.handle(
+    'agent:delegate-task',
+    async (_event, params: AgentDelegateTaskParams) => delegateTask(context, params),
   )
   ipcMain.handle('agent:approve', async (_event, sessionId: string) => {
     context.sessionManager.approve(sessionId)
@@ -364,7 +371,9 @@ export function registerAgentHandlers(context: MainIpcContext): void {
 
 function normalizeSpawnedAgent(value: AgentDispatchParams['spawnedAgent']): SpawnedAgentSession | undefined {
   if (!value) return undefined
-  if (value.kind !== 'swarm' && value.kind !== 'quality-repair') return undefined
+  if (value.kind !== 'swarm' && value.kind !== 'quality-repair' && value.kind !== 'delegation') {
+    return undefined
+  }
   const role = typeof value.role === 'string' ? value.role.trim() : ''
   return role ? { kind: value.kind, role } : undefined
 }

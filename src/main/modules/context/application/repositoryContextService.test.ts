@@ -73,9 +73,57 @@ describe('RepositoryContextService', () => {
       prompt: 'model routing for security work',
     })
 
+    expect(context).toContain('Repository symbol map')
+    expect(context).toContain('function routeModel(prompt: string)')
     expect(context).toContain('Repository context')
     expect(context).toContain('src/routing.ts:1-3')
     expect(context).toContain('routeModel')
+    expect(context?.indexOf('Repository symbol map')).toBeLessThan(
+      context?.indexOf('Repository context') ?? 0,
+    )
+  })
+
+  it('builds a repo-wide symbol map even when no snippets match the prompt', async () => {
+    await mkdir(path.join(repoPath, 'src'), { recursive: true })
+    await writeFile(
+      path.join(repoPath, 'src', 'sessions.ts'),
+      [
+        'export interface AgentRun {',
+        '  stop(reason: string): Promise<void>',
+        '}',
+        '',
+        'export class SessionManager {',
+        '  dispatchNextQueued(threadId: string): string {',
+        '    return threadId',
+        '  }',
+        '',
+        '  private readSecret(): string {',
+        '    return "secret"',
+        '  }',
+        '}',
+        '',
+        'export function createSession(prompt: string): AgentRun {',
+        '  return { stop: async () => undefined }',
+        '}',
+      ].join('\n'),
+    )
+
+    const service = new RepositoryContextService()
+    const context = await service.buildPromptContext({
+      projectId: 'project-1',
+      repoPath,
+      prompt: '   ',
+    })
+
+    expect(context).toContain('Repository symbol map')
+    expect(context).toContain('- src/sessions.ts')
+    expect(context).toContain('interface AgentRun')
+    expect(context).toContain('stop(reason: string): Promise<void>')
+    expect(context).toContain('class SessionManager')
+    expect(context).toContain('dispatchNextQueued(threadId: string): string')
+    expect(context).toContain('function createSession(prompt: string): AgentRun')
+    expect(context).not.toContain('readSecret')
+    expect(context).not.toContain('Repository context (retrieved automatically')
   })
 
   it('uses compact context when one large file dominates the matches', async () => {
