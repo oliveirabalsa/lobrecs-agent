@@ -132,14 +132,24 @@ function mergeContractWithSession(
     agents: threadSessions
       .slice()
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map((item, index) => ({
-        sessionId: item.id,
-        role: roleFromPrompt(item.prompt) ?? `agent ${index + 1}`,
-        agentId: item.agentId,
-        model: item.model,
-        status: item.status,
-        createdAt: item.createdAt,
-      })),
+      .flatMap((item) => {
+        const summary = threadAgentSummaryFromSession(item)
+        return summary ? [summary] : []
+      }),
+  }
+}
+
+export function threadAgentSummaryFromSession(session: Session): ThreadAgentSummary | null {
+  const role = session.spawnedAgent?.role.trim()
+  if (!role) return null
+
+  return {
+    sessionId: session.id,
+    role,
+    agentId: session.agentId,
+    model: session.model,
+    status: session.status,
+    createdAt: session.createdAt,
   }
 }
 
@@ -410,10 +420,4 @@ export function useProjectTree(): ProjectTreeApi {
     refreshThreads,
     deleteThread,
   }
-}
-
-function roleFromPrompt(prompt: string): string | null {
-  const match = prompt.match(/^\s*\[Role:\s*([^\]]+)\]/i)
-  const role = match?.[1]?.trim()
-  return role || null
 }

@@ -71,6 +71,13 @@ export interface QualityGateDependencies {
     exitCode?: number
     phase: RunAuditPhase
   } | null
+  /**
+   * Returns true when another QA-repair session is already running. Used to
+   * serialize repairs: with multiple parallel sessions verifying the same
+   * project build, every failure would otherwise spawn its own repair agent
+   * for the same root cause.
+   */
+  isRepairInFlight?: () => boolean
 }
 
 interface VerificationFailure {
@@ -172,6 +179,37 @@ export async function runQualityGate(
     })
     return
   }
+
+  // TODO(user): Implement the "another QA repair is already running" guard.
+  //
+  // Context: multiple agent sessions run in parallel against the same project.
+  // Verification runs the whole-app build, so every session sees the same
+  // failure and each one would otherwise spawn its own repair agent for one
+  // shared root cause. We want at most one QA-repair session in flight at a
+  // time.
+  //
+  // Available dependency:
+  //   dependencies.isRepairInFlight?.() -> boolean
+  //
+  // Recommended behavior (5-7 lines):
+  //   1. Call dependencies.isRepairInFlight?.() — note it's optional, so guard
+  //      against undefined (treat as "no repair running").
+  //   2. If a repair IS in flight: emit an `error`-status activity explaining
+  //      we skipped dispatching because another repair is already working on
+  //      the same problem.
+  //   3. Record an audit with `phase: 'gate-stopped'` and the new
+  //      `stopReason: 'repair-in-flight'`, plus the usual recipe/exit/output
+  //      fields from `failure` so the timeline still shows what failed.
+  //   4. `return` early so dispatchRepair is never called.
+  //
+  // Trade-offs worth weighing while you write this:
+  //   - Activity status: 'error' vs 'done' vs a softer 'step' — affects how
+  //     loud this looks in the UI.
+  //   - Should the message name the in-flight repair? We don't have its
+  //     sessionId here; mentioning it would require plumbing more state.
+  //   - finalStatus: 'failed' or 'pending'? 'pending' reads as "we'll come
+  //     back to it"; 'failed' reads as "this gate gave up". Pick the one that
+  //     matches how you want the run timeline to behave.
 
   await dispatchRepair(input, dependencies, settings, changedFiles, failure)
 }

@@ -19,6 +19,7 @@ export function registerRoutingHandlers(context: MainIpcContext): void {
       preferredAgentId: project?.agentId,
       projectId: project?.id,
       recentFailures,
+      autoAgentSelection: true,
     })
   })
 }

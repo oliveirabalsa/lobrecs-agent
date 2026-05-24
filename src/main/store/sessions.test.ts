@@ -61,6 +61,24 @@ describe('sessionsStore', () => {
     expect(sessionsStore.get(session.id)?.planMode).toBe(true)
   })
 
+  it('persists spawned-agent metadata for sidebar subagents', () => {
+    const project = createProject()
+
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: '[Role: implementer]\nBuild it',
+      spawnedAgent: { kind: 'swarm', role: 'implementer' },
+    })
+
+    expect(session.spawnedAgent).toEqual({ kind: 'swarm', role: 'implementer' })
+    expect(sessionsStore.get(session.id)?.spawnedAgent).toEqual({
+      kind: 'swarm',
+      role: 'implementer',
+    })
+  })
+
   it('updates terminal status timestamps and clears them for non-terminal states', () => {
     vi.useFakeTimers()
     const project = createProject()

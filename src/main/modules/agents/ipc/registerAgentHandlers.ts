@@ -19,7 +19,9 @@ import type {
   EnqueueParams,
   ImageAttachment,
   QueuedMessage,
+  SpawnedAgentSession,
   SteerParams,
+  SupportedAgentId,
   SwarmStepApprovalDecisionPayload,
 } from '../../../../shared/types'
 
@@ -72,8 +74,9 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         params.imageAttachments,
         settings.agents.imageAttachments,
       )
-      const preferredAgentId = isSupportedAgentId(params.agentId)
-        ? params.agentId
+      const userPickedAgent = isSupportedAgentId(params.agentId)
+      const preferredAgentId = userPickedAgent
+        ? (params.agentId as SupportedAgentId)
         : settings.agents.defaultAgentId
       const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
         prompt: failure.prompt,
@@ -87,6 +90,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         modelOverride: params.modelOverride,
         projectId: project.id,
         recentFailures,
+        autoAgentSelection: !userPickedAgent && !params.modelOverride,
       })
 
       if (imageAttachments.length > 0 && !context.modelRouter.supportsImages(decision.agentId, decision.model)) {
@@ -117,6 +121,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings,
         planMode: params.planMode,
+        spawnedAgent: normalizeSpawnedAgent(params.spawnedAgent),
       })
 
       return { sessionId, threadId }
@@ -228,8 +233,9 @@ export function registerAgentHandlers(context: MainIpcContext): void {
     async (_event, params: EnqueueParams): Promise<QueuedMessage> => {
       const project = requireProject(params.projectId)
       const settings = context.settingsService.getEffective(project.id).settings
-      const preferredAgentId = isSupportedAgentId(params.agentId)
-        ? params.agentId
+      const userPickedAgent = isSupportedAgentId(params.agentId)
+      const preferredAgentId = userPickedAgent
+        ? (params.agentId as SupportedAgentId)
         : settings.agents.defaultAgentId
       const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
         prompt: failure.prompt,
@@ -243,6 +249,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         modelOverride: params.modelOverride,
         projectId: project.id,
         recentFailures,
+        autoAgentSelection: !userPickedAgent && !params.modelOverride,
       })
 
       if (
@@ -337,4 +344,11 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       runtimeSettings,
     })
   })
+}
+
+function normalizeSpawnedAgent(value: AgentDispatchParams['spawnedAgent']): SpawnedAgentSession | undefined {
+  if (!value) return undefined
+  if (value.kind !== 'swarm' && value.kind !== 'quality-repair') return undefined
+  const role = typeof value.role === 'string' ? value.role.trim() : ''
+  return role ? { kind: value.kind, role } : undefined
 }

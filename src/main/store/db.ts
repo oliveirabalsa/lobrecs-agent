@@ -317,6 +317,13 @@ const migrations: Migration[] = [
         ON extension_installations(scope, installed_at DESC);
     `,
   },
+  {
+    version: 13,
+    up: `
+      ALTER TABLE sessions ADD COLUMN spawned_agent_kind TEXT;
+      ALTER TABLE sessions ADD COLUMN spawned_agent_role TEXT;
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
@@ -370,6 +377,53 @@ function ensureSessionsCompatibilityColumns(db: Database.Database): void {
     db.exec('ALTER TABLE sessions ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0')
   } catch {
     // Column already exists.
+  }
+
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN spawned_agent_kind TEXT')
+  } catch {
+    // Column already exists.
+  }
+
+  try {
+    db.exec('ALTER TABLE sessions ADD COLUMN spawned_agent_role TEXT')
+  } catch {
+    // Column already exists.
+  }
+
+  backfillSpawnedAgentMetadata(db)
+}
+
+function backfillSpawnedAgentMetadata(db: Database.Database): void {
+  try {
+    db.exec(`
+      UPDATE sessions
+      SET spawned_agent_kind = 'quality-repair',
+          spawned_agent_role = 'QA repair agent'
+      WHERE spawned_agent_kind IS NULL
+        AND prompt LIKE '[Role: QA repair agent]%';
+    `)
+  } catch {
+    // Older ad-hoc test schemas may not carry every session column.
+  }
+
+  try {
+    db.exec(`
+      UPDATE sessions
+      SET spawned_agent_kind = 'swarm',
+          spawned_agent_role = trim(substr(prompt, 8, instr(prompt, ']') - 8))
+      WHERE spawned_agent_kind IS NULL
+        AND prompt LIKE '[Role: %]%'
+        AND thread_id IN (
+          SELECT id
+          FROM threads
+          WHERE title LIKE 'Swarm:%'
+             OR title LIKE 'Managed swarm%'
+             OR title LIKE 'Sequential swarm%'
+        );
+    `)
+  } catch {
+    // `threads` is absent in some narrowly-scoped legacy migration tests.
   }
 }
 

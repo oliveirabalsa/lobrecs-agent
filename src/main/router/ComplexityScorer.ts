@@ -23,13 +23,14 @@ export interface ScoringContext {
 }
 
 const SIGNAL_WEIGHTS = {
-  length: 0.05,
-  reasoningKeywords: 0.3,
-  newCreation: 0.2,
-  crossService: 0.2,
+  length: 0.15,
+  reasoningKeywords: 0.25,
+  newCreation: 0.15,
+  crossService: 0.15,
   fileCount: 0.05,
   history: 0.05,
-  riskReview: 0.15,
+  riskReview: 0.1,
+  intentVerb: 0.1,
 } as const
 
 const REASONING_KEYWORDS = [
@@ -101,6 +102,28 @@ const RISK_REVIEW_KEYWORDS = [
   'vulnerability',
 ]
 
+const INTENT_VERB_KEYWORDS = [
+  'add',
+  'broken',
+  'bug',
+  'debug',
+  'diagnose',
+  'fix',
+  'investigate',
+  'optimize',
+  'refactor',
+  'remove',
+  'rename',
+  'replace',
+  'review',
+  'rewrite',
+  'test',
+  'trace',
+  'troubleshoot',
+  'update',
+  'wire',
+]
+
 const TIER_THRESHOLDS = {
   lightweightMax: 30,
   balancedMax: 65,
@@ -120,6 +143,7 @@ export function scoreComplexity(prompt: string, context?: ScoringContext): Scori
       context?.useRecentFailureEscalation === false ? undefined : context?.recentFailures,
     ),
     scoreRiskReviewKeywords(normalizedPrompt),
+    scoreIntentVerbKeywords(normalizedPrompt),
   ]
 
   const weightedScore = clampScore(
@@ -203,6 +227,18 @@ function scoreFileCountEstimate(prompt: string): ScoringSignal {
   }
 }
 
+function scoreIntentVerbKeywords(prompt: string): ScoringSignal {
+  const matches = countKeywordMatches(prompt, INTENT_VERB_KEYWORDS)
+  const score = matches === 0 ? 0 : matches === 1 ? 40 : 70
+
+  return {
+    name: 'intent-verb',
+    score,
+    weight: SIGNAL_WEIGHTS.intentVerb,
+    matched: matches > 0,
+  }
+}
+
 function scoreRiskReviewKeywords(prompt: string): ScoringSignal {
   const matches = countKeywordMatches(prompt, RISK_REVIEW_KEYWORDS)
   const score = matches === 0 ? 0 : matches === 1 ? 80 : 100
@@ -281,7 +317,7 @@ function buildReasoning(signals: ScoringSignal[], score: number, tier: ModelTier
   const activeSignals = signals.filter((signal) => signal.matched).map((signal) => signal.name)
 
   if (activeSignals.length === 0) {
-    return `Simple task: score ${score}, using ${tier} tier`
+    return `No complexity signals detected (score ${score}); routing to ${tier} tier`
   }
 
   return `Signals: ${activeSignals.join(', ')}. Score ${score}, using ${tier} tier`

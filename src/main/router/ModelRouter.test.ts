@@ -51,6 +51,37 @@ describe('ModelRouter', () => {
     expect(decision.model).toBe('gpt-5.3-codex-spark')
   })
 
+  it('ignores preferredAgentId when autoAgentSelection is true', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ codex: true, 'claude-code': true }),
+    })
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'codex',
+      autoAgentSelection: true,
+    })
+
+    // Lightweight tier policy prefers claude-code (Haiku) over Codex Spark
+    // even when the project's preferredAgent is codex.
+    expect(decision.agentId).toBe('claude-code')
+    expect(decision.model).toBe('claude-haiku-4-5-20251001')
+  })
+
+  it('routes complex prompts via AUTO mode to claude-code at advanced tier', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ codex: true, 'claude-code': true }),
+    })
+    const decision = await router.route({
+      prompt:
+        'design and implement a new authentication microservice with JWT, kafka integration, and a thorough security review of the existing code',
+      preferredAgentId: 'codex',
+      autoAgentSelection: true,
+    })
+
+    expect(['advanced', 'frontier']).toContain(decision.tier)
+    expect(decision.agentId).toBe('claude-code')
+  })
+
   it('routes installed Antigravity preferences through the Antigravity model map', async () => {
     const router = new ModelRouter({
       adapterRegistry: createRegistry({ antigravity: true, 'claude-code': true }),

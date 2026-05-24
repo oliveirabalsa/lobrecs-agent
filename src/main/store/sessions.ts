@@ -6,6 +6,7 @@ import type {
   ListThreadTranscriptOptions,
   Session,
   SessionStatus,
+  SpawnedAgentSession,
   ThreadTranscriptTurn,
 } from '../../shared/types'
 import { getDb } from './db'
@@ -19,6 +20,8 @@ type SessionRow = {
   prompt: string
   image_attachments: string | null
   plan_mode: number
+  spawned_agent_kind: SpawnedAgentSession['kind'] | null
+  spawned_agent_role: string | null
   status: SessionStatus
   tokens_in: number
   tokens_out: number
@@ -44,6 +47,7 @@ export type CreateSessionInput = {
   prompt: string
   imageAttachments?: ImageAttachment[] | null
   planMode?: boolean
+  spawnedAgent?: SpawnedAgentSession | null
   status?: SessionStatus
   tokensIn?: number
   tokensOut?: number
@@ -68,6 +72,10 @@ function rowToSession(row: SessionRow): Session {
     prompt: row.prompt,
     imageAttachments: parseImageAttachments(row.image_attachments),
     planMode: row.plan_mode === 1,
+    spawnedAgent:
+      row.spawned_agent_kind && row.spawned_agent_role
+        ? { kind: row.spawned_agent_kind, role: row.spawned_agent_role }
+        : undefined,
     status: row.status,
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
@@ -110,9 +118,10 @@ export const sessionsStore = {
         `
           INSERT INTO sessions (
             id, project_id, agent_id, model, prompt, status,
-            image_attachments, plan_mode, tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
+            image_attachments, plan_mode, spawned_agent_kind, spawned_agent_role,
+            tokens_in, tokens_out, cost_usd, created_at, completed_at, thread_id
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -124,6 +133,8 @@ export const sessionsStore = {
         status,
         serializeImageAttachments(data.imageAttachments),
         data.planMode ? 1 : 0,
+        data.spawnedAgent?.kind ?? null,
+        data.spawnedAgent?.role.trim() || null,
         data.tokensIn ?? 0,
         data.tokensOut ?? 0,
         data.costUsd ?? 0,

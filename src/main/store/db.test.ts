@@ -16,7 +16,12 @@ describe('database migrations', () => {
         INSERT INTO schema_version (version) VALUES (1), (2), (3), (4), (5), (6);
 
         CREATE TABLE projects (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL);
-        CREATE TABLE sessions (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL);
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL,
+          prompt TEXT NOT NULL DEFAULT '',
+          thread_id TEXT
+        );
         CREATE TABLE automations (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL);
         CREATE TABLE run_attempts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL);
         CREATE TABLE specs (id TEXT PRIMARY KEY, selected_agents TEXT NOT NULL);

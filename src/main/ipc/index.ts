@@ -98,6 +98,7 @@ function configureSessionManager(context: MainIpcContext): void {
         if (!last) return null
         return { recipeId: last.recipeId, exitCode: last.exitCode, phase: last.phase }
       },
+      isRepairInFlight: () => context.sessionManager.hasActiveRepairSession(),
       dispatchRepair: async (repairInput) => {
         const settings = context.settingsService.getEffective(repairInput.projectId).settings
         return context.sessionManager.dispatch({
@@ -116,6 +117,7 @@ function configureSessionManager(context: MainIpcContext): void {
           isolate: settings.execution.worktreeIsolation,
           runtimeSettings: settings.agents.runtimes[repairInput.agentId],
           qualityAttempt: repairInput.qualityAttempt,
+          spawnedAgent: { kind: 'quality-repair', role: 'QA repair agent' },
         })
       },
     }),
@@ -146,6 +148,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings: settings.agents.runtimes[input.agentId],
         imageAttachments: input.imageAttachments,
+        spawnedAgent: { kind: 'swarm', role: input.role },
       })
 
       return { sessionId, threadId, status: 'running' }

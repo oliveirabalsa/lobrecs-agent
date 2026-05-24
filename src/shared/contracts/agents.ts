@@ -1,3 +1,5 @@
+import type { SpawnedAgentSession } from './sessions'
+
 export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'antigravity' | 'cursor'
 export type SupportedAgentId = Exclude<AgentId, 'cursor'>
 
@@ -43,6 +45,8 @@ export interface AgentDispatchParams {
   modelOverride?: string
   approvalMode?: AgentApprovalMode
   imageAttachments?: ImageAttachment[]
+  /** Internal UI-orchestration marker for real spawned agents such as swarms. */
+  spawnedAgent?: SpawnedAgentSession
   /** When provided, links the new session to an existing thread instead of creating one. */
   threadId?: string
   /**

@@ -9,6 +9,13 @@ export type SessionStatus =
   | 'error'
   | 'cancelled'
 
+export type SpawnedAgentKind = 'swarm' | 'quality-repair'
+
+export interface SpawnedAgentSession {
+  kind: SpawnedAgentKind
+  role: string
+}
+
 export interface Session {
   id: string
   projectId: string
@@ -18,6 +25,7 @@ export interface Session {
   prompt: string
   imageAttachments?: ImageAttachment[]
   planMode?: boolean
+  spawnedAgent?: SpawnedAgentSession
   status: SessionStatus
   tokensIn: number
   tokensOut: number

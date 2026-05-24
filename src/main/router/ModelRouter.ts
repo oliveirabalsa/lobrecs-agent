@@ -34,6 +34,13 @@ export interface RouteParams {
   modelOverride?: string
   projectId?: string
   recentFailures?: ScoringContext['recentFailures']
+  /**
+   * When true, the router treats `preferredAgentId` as a tiebreaker rather
+   * than a lock — it picks the agent from prompt characteristics and the
+   * resolved tier. The renderer sets this when the composer's model
+   * selection is `{ kind: 'auto' }`.
+   */
+  autoAgentSelection?: boolean
 }
 
 const TIER_PRIORITY: ModelTier[] = ['frontier', 'advanced', 'balanced', 'lightweight']
@@ -108,7 +115,20 @@ export class ModelRouter {
       securityMinimumTier: settings.routing.securityMinimumTier,
       useRecentFailureEscalation: settings.routing.useRecentFailureEscalation,
     })
-    let agentId = this.normalizeAgentId(params.preferredAgentId, enabledAgents) ?? defaultAgentId
+    const preferredAgent = this.normalizeAgentId(params.preferredAgentId, enabledAgents)
+    let agentId: SupportedAgentId
+    if (params.autoAgentSelection) {
+      agentId = await this.pickAgentForTier({
+        tier: scoring.tier,
+        prompt: params.prompt,
+        enabledAgents,
+        preferredAgent,
+        fallbackAgentId,
+        defaultAgentId,
+      })
+    } else {
+      agentId = preferredAgent ?? defaultAgentId
+    }
 
     if (imageSupportRequired) {
       const resolvedModel = await this.resolveModelForTier(agentId, scoring.tier, settings)
@@ -193,6 +213,49 @@ export class ModelRouter {
     } catch {
       return false
     }
+  }
+
+  /**
+   * Picks an agent when AUTO mode is on.
+   *
+   * Default policy (below):
+   *   - frontier/advanced → claude-code (Opus has the strongest reasoning)
+   *   - balanced          → codex
+   *   - lightweight       → claude-code (Haiku is fast and cheap)
+   * Falls back to the preferredAgent if the policy's first choice isn't installed.
+   *
+   * TODO (Leonardo): refine this policy. Consider:
+   *   - Prompt cues: 'review/audit/security' → claude-code; 'scaffold/new project'
+   *     → codex; 'gemini/google'-flavored tasks → antigravity.
+   *   - Honor preferredAgent more strongly for balanced/lightweight where
+   *     differences between agents are small.
+   *   - Cost vs quality trade-off — escalate to claude-code only when score
+   *     is firmly in the upper range of its tier.
+   */
+  private async pickAgentForTier(params: {
+    tier: ModelTier
+    prompt: string
+    enabledAgents: readonly SupportedAgentId[]
+    preferredAgent?: SupportedAgentId
+    fallbackAgentId: SupportedAgentId
+    defaultAgentId: SupportedAgentId
+  }): Promise<SupportedAgentId> {
+    const tierPreference: Record<ModelTier, SupportedAgentId[]> = {
+      frontier: ['claude-code', 'codex', 'antigravity'],
+      advanced: ['claude-code', 'codex', 'antigravity'],
+      balanced: ['codex', 'claude-code', 'antigravity'],
+      lightweight: ['claude-code', 'codex', 'antigravity'],
+    }
+
+    const candidates: SupportedAgentId[] = [
+      ...tierPreference[params.tier].filter((id) => params.enabledAgents.includes(id)),
+      ...(params.preferredAgent ? [params.preferredAgent] : []),
+      params.defaultAgentId,
+      params.fallbackAgentId,
+      ...params.enabledAgents,
+    ]
+
+    return this.firstAvailableAgent(candidates, params.fallbackAgentId)
   }
 
   private async firstAvailableAgent(
