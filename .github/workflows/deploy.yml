@@ -1,0 +1,41 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SSH key
+        env:
+          VPS_PRIVATE_KEY: ${{ secrets.VPS_PRIVATE_KEY }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_PRIVATE_KEY" > ~/.ssh/lobrecs-agent-deploy
+          chmod 600 ~/.ssh/lobrecs-agent-deploy
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync landing files
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/lobrecs-agent-deploy" \
+            landing/ "$VPS_USER@$VPS_HOST:/var/www/lobrecs-agent-landing/"
+
+      - name: Reload nginx
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+        run: |
+          ssh -i ~/.ssh/lobrecs-agent-deploy "$VPS_USER@$VPS_HOST" \
+            "chown -R www-data:www-data /var/www/lobrecs-agent-landing && nginx -t && systemctl reload nginx"
