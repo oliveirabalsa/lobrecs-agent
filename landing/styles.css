@@ -168,17 +168,17 @@ h2 {
 }
 
 h1 {
-  max-width: 12ch;
-  margin-bottom: 1.4rem;
-  font-size: clamp(3.6rem, 7.8vw, 7.8rem);
-  line-height: 0.88;
+  max-width: 13ch;
+  margin-bottom: 1.3rem;
+  font-size: clamp(3rem, 6.1vw, 6.1rem);
+  line-height: 0.94;
 }
 
 h2 {
-  max-width: 15ch;
-  margin-bottom: 2rem;
-  font-size: clamp(2.7rem, 6.5vw, 6.6rem);
-  line-height: 0.88;
+  max-width: 16ch;
+  margin-bottom: 1.4rem;
+  font-size: clamp(2.15rem, 4.8vw, 4.9rem);
+  line-height: 0.96;
 }
 
 h3 {
@@ -363,40 +363,48 @@ h3 {
   color: var(--green);
 }
 
-.pipeline {
+.console-footer {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
   border-top: 1px solid var(--faint);
+  background: var(--faint);
 }
 
-.pipeline i {
-  height: 4rem;
+.console-footer a {
+  min-height: 5.6rem;
+  padding: 0.85rem;
   background:
-    linear-gradient(90deg, transparent, rgba(255, 36, 61, 0.75), transparent),
-    rgba(255, 244, 232, 0.04);
-  background-size: 200% 100%, auto;
-  animation: pulse-track 1.8s linear infinite;
+    linear-gradient(180deg, rgba(255, 36, 61, 0.14), rgba(255, 244, 232, 0.035)),
+    rgba(9, 5, 5, 0.92);
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 
-.pipeline i:nth-child(2) {
-  animation-delay: 180ms;
+.console-footer a:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 36, 61, 0.25), rgba(255, 200, 87, 0.08)),
+    rgba(9, 5, 5, 0.96);
 }
 
-.pipeline i:nth-child(3) {
-  animation-delay: 360ms;
+.console-footer span {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--red-hot);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
-.pipeline i:nth-child(4) {
-  animation-delay: 540ms;
-}
-
-.pipeline i:nth-child(5) {
-  animation-delay: 720ms;
-}
-
-.pipeline.is-hot i {
-  background-color: rgba(255, 36, 61, 0.16);
+.console-footer strong {
+  display: block;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.2vw, 0.78rem);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .signal-strip {
@@ -412,13 +420,16 @@ h3 {
 
 .signal-strip article,
 .feature-grid article,
-.steps li {
+.detail-grid article,
+.steps li,
+.repo-card {
   opacity: 0;
   transform: translateY(18px);
 }
 
 .signal-strip article.is-visible,
 .feature-grid article.is-visible,
+.detail-grid article.is-visible,
 .steps li.is-visible {
   opacity: 1;
   transform: translateY(0);
@@ -448,18 +459,41 @@ h3 {
 }
 
 .control-room,
-.workflow {
+.detail-section,
+.workflow,
+.contribute {
   padding: clamp(4rem, 8vw, 8rem) 0;
 }
 
-.feature-grid {
+.section-head {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(18rem, 0.72fr);
+  gap: clamp(1.4rem, 5vw, 5rem);
+  align-items: end;
+  margin-bottom: clamp(1.6rem, 4vw, 3rem);
+}
+
+.section-head p,
+.workflow > div > p,
+.download p {
+  color: var(--muted);
+  line-height: 1.62;
+}
+
+.feature-grid,
+.detail-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
 }
 
-.feature-grid article {
-  min-height: 22rem;
+.detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.feature-grid article,
+.detail-grid article {
+  min-height: 17rem;
   padding: 1.1rem;
   border: 1px solid var(--faint);
   border-radius: 8px;
@@ -470,13 +504,16 @@ h3 {
 
 .feature-index {
   display: inline-flex;
-  margin-bottom: 5rem;
+  margin-bottom: clamp(2.3rem, 5vw, 4rem);
   color: var(--red-hot);
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .feature-grid p,
+.detail-grid p,
 .steps p,
 .download h2,
 footer {
@@ -533,8 +570,70 @@ footer {
 }
 
 .download h2 {
-  max-width: 17ch;
-  margin-bottom: 0;
+  max-width: 20ch;
+  margin-bottom: 0.7rem;
+}
+
+.contribute {
+  border-top: 1px solid var(--faint);
+  border-bottom: 1px solid var(--faint);
+}
+
+.repo-panel {
+  display: grid;
+  grid-template-columns: minmax(20rem, 0.9fr) minmax(0, 1.35fr);
+  gap: 1rem;
+}
+
+.repo-card {
+  min-height: 100%;
+  padding: 1.2rem;
+  border: 1px solid rgba(255, 36, 61, 0.38);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(255, 36, 61, 0.18), rgba(93, 255, 155, 0.045) 48%, rgba(255, 200, 87, 0.07)),
+    var(--panel-strong);
+}
+
+.repo-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 520ms ease,
+    transform 520ms ease;
+}
+
+.repo-card h3 {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.repo-card p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.repo-actions,
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.2rem;
+}
+
+.detail-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-grid.compact article {
+  min-height: 11rem;
+}
+
+code {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
 }
 
 footer {
@@ -573,15 +672,11 @@ footer {
   }
 }
 
-@keyframes pulse-track {
-  to {
-    background-position: -200% 0, 0 0;
-  }
-}
-
 @media (max-width: 980px) {
   .hero,
-  .workflow {
+  .workflow,
+  .section-head,
+  .repo-panel {
     grid-template-columns: 1fr;
   }
 
@@ -601,7 +696,8 @@ footer {
     width: 100%;
   }
 
-  .feature-grid {
+  .feature-grid,
+  .detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -621,22 +717,26 @@ footer {
   }
 
   h1 {
-    max-width: 10ch;
-    font-size: clamp(3.1rem, 15.5vw, 4.8rem);
-    line-height: 0.9;
+    max-width: 11ch;
+    font-size: clamp(2.7rem, 13.2vw, 4.1rem);
+    line-height: 0.94;
   }
 
   h2 {
-    font-size: clamp(2.4rem, 14vw, 4rem);
+    font-size: clamp(2rem, 10.5vw, 3.35rem);
   }
 
   .signal-strip,
-  .feature-grid {
+  .feature-grid,
+  .detail-grid,
+  .detail-grid.compact,
+  .console-footer {
     grid-template-columns: 1fr;
   }
 
-  .feature-grid article {
-    min-height: 17rem;
+  .feature-grid article,
+  .detail-grid article {
+    min-height: 14rem;
   }
 
   .feature-index {

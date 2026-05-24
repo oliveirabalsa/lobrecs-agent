@@ -1,4 +1,6 @@
-const cards = document.querySelectorAll('.feature-grid article, .steps li, .signal-strip article')
+const cards = document.querySelectorAll(
+  '.feature-grid article, .detail-grid article, .steps li, .signal-strip article, .repo-card',
+)
 
 const observer = new IntersectionObserver(
   (entries) => {
@@ -15,9 +17,3 @@ const observer = new IntersectionObserver(
 for (const card of cards) {
   observer.observe(card)
 }
-
-const pipeline = document.querySelector('.pipeline')
-
-setInterval(() => {
-  pipeline?.classList.toggle('is-hot')
-}, 2600)

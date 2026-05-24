@@ -27,7 +27,9 @@
       </a>
       <nav aria-label="Primary">
         <a href="#control-room">Control room</a>
+        <a href="#features">Features</a>
         <a href="#workflow">Workflow</a>
+        <a href="#contribute">Contribute</a>
         <a href="#download">Deploy</a>
       </nav>
     </header>
@@ -66,8 +68,19 @@
               <p class="dim">terminal.capture: tests, diffs, failures</p>
               <p class="ok">quality.gate: patch applied, review ready</p>
             </div>
-            <div class="pipeline" aria-hidden="true">
-              <i></i><i></i><i></i><i></i><i></i>
+            <div class="console-footer" aria-label="Project links and run status">
+              <a href="https://github.com/oliveirabalsa/lobrecs-agent">
+                <span>repo</span>
+                <strong>oliveirabalsa/lobrecs-agent</strong>
+              </a>
+              <a href="https://github.com/oliveirabalsa/lobrecs-agent/issues">
+                <span>contribute</span>
+                <strong>issues + requests</strong>
+              </a>
+              <a href="https://github.com/oliveirabalsa/lobrecs-agent/releases">
+                <span>release</span>
+                <strong>desktop builds</strong>
+              </a>
             </div>
           </div>
         </div>
@@ -89,8 +102,18 @@
       </section>
 
       <section id="control-room" class="control-room" aria-labelledby="control-title">
-        <div class="section-kicker">Control room</div>
-        <h2 id="control-title">A desktop IDE for agent work that has to be inspectable.</h2>
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Control room</div>
+            <h2 id="control-title">A desktop IDE for agent work that has to be inspectable.</h2>
+          </div>
+          <p>
+            Lobrecs Agent keeps the prompt, local command stream, repository
+            context, code changes, and review state in one place. The app is a
+            harness around the tools developers already use instead of a black
+            box that hides what changed.
+          </p>
+        </div>
         <div class="feature-grid">
           <article>
             <span class="feature-index">01</span>
@@ -115,10 +138,60 @@
         </div>
       </section>
 
+      <section id="features" class="detail-section" aria-labelledby="features-title">
+        <div class="section-head">
+          <div>
+            <div class="section-kicker">Features</div>
+            <h2 id="features-title">Everything is organized around visible agent work.</h2>
+          </div>
+          <p>
+            Each capability follows the same pattern: gather local context,
+            choose the right agent, stream the evidence, apply completed diffs,
+            and leave the user with reviewable output.
+          </p>
+        </div>
+        <div class="detail-grid">
+          <article>
+            <span class="feature-index">01</span>
+            <h3>Model routing</h3>
+            <p>Small fixes, medium refactors, and high-reasoning work can be routed to different CLIs and models based on task complexity.</p>
+          </article>
+          <article>
+            <span class="feature-index">02</span>
+            <h3>Local context scan</h3>
+            <p>The app indexes repository files and project memory so prompts include the codebase facts that matter for the current task.</p>
+          </article>
+          <article>
+            <span class="feature-index">03</span>
+            <h3>Terminal capture</h3>
+            <p>Commands, failures, tests, and repair attempts are preserved as artifacts instead of disappearing into a background process.</p>
+          </article>
+          <article>
+            <span class="feature-index">04</span>
+            <h3>Quality gate</h3>
+            <p>Completed sessions can run focused verification and show whether the patch is ready, failed, or needs another pass.</p>
+          </article>
+          <article>
+            <span class="feature-index">05</span>
+            <h3>Diff review</h3>
+            <p>File edits are applied locally by the main process and surfaced in the UI with enough context to inspect before shipping.</p>
+          </article>
+          <article>
+            <span class="feature-index">06</span>
+            <h3>PR handoff</h3>
+            <p>Git-aware helpers prepare commits, branch state, and pull request context so finished agent work can move into normal review.</p>
+          </article>
+        </div>
+      </section>
+
       <section id="workflow" class="workflow" aria-labelledby="workflow-title">
         <div>
           <div class="section-kicker">Workflow</div>
           <h2 id="workflow-title">From prompt to verified patch without hiding the machine.</h2>
+          <p>
+            The same run structure appears throughout the app: context first,
+            agent selection second, observable execution third, review last.
+          </p>
         </div>
         <ol class="steps">
           <li>
@@ -145,6 +218,13 @@
           <li>
             <span>04</span>
             <div>
+              <h3>Apply completed diffs</h3>
+              <p>When the agent finishes, the main process applies the patch locally and keeps the review UI focused on inspection.</p>
+            </div>
+          </li>
+          <li>
+            <span>05</span>
+            <div>
               <h3>Review and ship</h3>
               <p>Use the diff, quality gates, and PR helpers to move from completed work to delivery.</p>
             </div>
@@ -152,12 +232,64 @@
         </ol>
       </section>
 
+      <section id="contribute" class="contribute" aria-labelledby="contribute-title">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Open repository</p>
+            <h2 id="contribute-title">Built in public workflow style, ready for contributors.</h2>
+          </div>
+          <p>
+            Contributions are most useful when they preserve the local-first
+            security model: no API keys in storage, narrow preload APIs,
+            visible terminal evidence, and deterministic review states.
+          </p>
+        </div>
+        <div class="repo-panel">
+          <div class="repo-card">
+            <span class="feature-index">repo</span>
+            <h3>oliveirabalsa/lobrecs-agent</h3>
+            <p>Electron, React, TypeScript, SQLite, xterm.js, Monaco, and local agent CLIs working as one desktop control room.</p>
+            <div class="repo-actions">
+              <a class="button primary" href="https://github.com/oliveirabalsa/lobrecs-agent">GitHub repo</a>
+              <a class="button secondary" href="https://github.com/oliveirabalsa/lobrecs-agent/issues">Contribution queue</a>
+              <a class="button secondary" href="https://github.com/oliveirabalsa/lobrecs-agent/pulls">Pull requests</a>
+            </div>
+          </div>
+          <div class="detail-grid compact">
+            <article>
+              <span class="feature-index">01</span>
+              <h3>Clone</h3>
+              <p><code>git clone https://github.com/oliveirabalsa/lobrecs-agent.git</code></p>
+            </article>
+            <article>
+              <span class="feature-index">02</span>
+              <h3>Install</h3>
+              <p><code>npm install</code> prepares Electron, native modules, and the renderer toolchain.</p>
+            </article>
+            <article>
+              <span class="feature-index">03</span>
+              <h3>Run locally</h3>
+              <p><code>npm run dev</code> opens the desktop app with the local repository workflow enabled.</p>
+            </article>
+            <article>
+              <span class="feature-index">04</span>
+              <h3>Verify</h3>
+              <p><code>npm test</code> runs the Vitest suite before a pull request or release candidate.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <section id="download" class="download" aria-labelledby="download-title">
         <div>
           <p class="eyebrow">Desktop app</p>
           <h2 id="download-title">Built for people who want agent speed without losing local control.</h2>
+          <p>Download packaged builds from GitHub releases or run the project from source when contributing.</p>
         </div>
-        <a class="button primary" href="https://github.com/oliveirabalsa/lobrecs-agent/releases">Get releases</a>
+        <div class="download-actions">
+          <a class="button primary" href="https://github.com/oliveirabalsa/lobrecs-agent/releases">Get releases</a>
+          <a class="button secondary" href="https://github.com/oliveirabalsa/lobrecs-agent">View source</a>
+        </div>
       </section>
     </main>
 
