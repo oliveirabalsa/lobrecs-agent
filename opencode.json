@@ -15,5 +15,8 @@
       ],
       "enabled": true
     }
-  }
+  },
+  "instructions": [
+    ".opencode/instructions/lobrecs-clean-review.md"
+  ]
 }
