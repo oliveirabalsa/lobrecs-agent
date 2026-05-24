@@ -324,6 +324,45 @@ const migrations: Migration[] = [
       ALTER TABLE sessions ADD COLUMN spawned_agent_role TEXT;
     `,
   },
+  {
+    version: 14,
+    up: `
+      CREATE TABLE IF NOT EXISTS review_issues (
+        id             TEXT PRIMARY KEY,
+        project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        provider       TEXT NOT NULL,
+        source_id      TEXT NOT NULL,
+        source_url     TEXT,
+        spec_run_id    TEXT REFERENCES spec_runs(id) ON DELETE SET NULL,
+        session_id     TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        thread_id      TEXT,
+        fingerprint    TEXT,
+        branch         TEXT,
+        severity       TEXT NOT NULL,
+        category       TEXT NOT NULL,
+        title          TEXT NOT NULL,
+        detail         TEXT NOT NULL,
+        file_path      TEXT,
+        line           INTEGER,
+        recommendation TEXT,
+        status         TEXT NOT NULL DEFAULT 'open',
+        fix_session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL,
+        resolved_at    INTEGER,
+        UNIQUE(project_id, provider, source_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_review_issues_project
+        ON review_issues(project_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_review_issues_session
+        ON review_issues(session_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_review_issues_thread
+        ON review_issues(thread_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_review_issues_spec_run
+        ON review_issues(spec_run_id, updated_at DESC);
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {

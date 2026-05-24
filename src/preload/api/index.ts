@@ -11,6 +11,7 @@ import { createMemoryApi, type MemoryApi } from './memory'
 import { createNotificationsApi, type NotificationsApi } from './notifications'
 import { createProjectsApi, type ProjectsApi } from './projects'
 import { createRouterApi, type RouterApi } from './routing'
+import { createReviewsApi, type ReviewsApi } from './reviews'
 import { createRunsApi, type RunsApi } from './runs'
 import { createSettingsApi, type SettingsApi } from './settings'
 import { createSessionsApi, type SessionsApi } from './sessions'
@@ -27,6 +28,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   agent: AgentApi
   swarm: SwarmApi
   router: RouterApi
+  reviews: ReviewsApi
   feedback: FeedbackApi
   cost: CostApi
   context: RepositoryContextApi
@@ -52,6 +54,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     agent: createAgentApi(ipcRenderer),
     swarm: createSwarmApi(ipcRenderer),
     router: createRouterApi(ipcRenderer),
+    reviews: createReviewsApi(ipcRenderer),
     feedback: createFeedbackApi(ipcRenderer),
     cost: createCostApi(ipcRenderer),
     context: createRepositoryContextApi(ipcRenderer),

@@ -3,7 +3,7 @@ import type { EditorInfo } from '../../../../shared/types'
 import { Pill } from '../../../components/ui'
 import { OpenInEditorMenu } from './OpenInEditorMenu'
 
-export type RightPanelMode = 'diff' | 'terminal' | 'swarm' | 'context'
+export type RightPanelMode = 'diff' | 'terminal' | 'swarm' | 'context' | 'reviews'
 
 interface WorkspaceTopBarProps {
   title: string
@@ -13,6 +13,7 @@ interface WorkspaceTopBarProps {
   hasDiff: boolean
   hasSwarmGraph: boolean
   hasContext: boolean
+  hasReviews: boolean
   canRerun: boolean
   onRerun?: () => void | Promise<void>
   onToggleRightPanel: (mode: RightPanelMode) => void
@@ -42,6 +43,7 @@ export function WorkspaceTopBar({
   hasDiff,
   hasSwarmGraph,
   hasContext,
+  hasReviews,
   canRerun,
   onRerun,
   onToggleRightPanel,
@@ -93,6 +95,7 @@ export function WorkspaceTopBar({
   const termActive = rightPanelOpen && rightPanelMode === 'terminal'
   const swarmActive = rightPanelOpen && rightPanelMode === 'swarm'
   const contextActive = rightPanelOpen && rightPanelMode === 'context'
+  const reviewsActive = rightPanelOpen && rightPanelMode === 'reviews'
   const leftInsetClass = reserveTrafficLightInset
     ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
     : 'pl-2 md:pl-4'
@@ -253,6 +256,14 @@ export function WorkspaceTopBar({
           active={contextActive}
         >
           <ContextIcon />
+        </IconButton>
+        <IconButton
+          aria-label={reviewsActive ? 'Hide review inbox' : 'Show review inbox'}
+          onClick={() => onToggleRightPanel('reviews')}
+          disabled={!hasReviews}
+          active={reviewsActive}
+        >
+          <ReviewInboxIcon />
         </IconButton>
         <IconButton
           aria-label={termActive ? 'Hide terminal panel' : 'Show terminal panel'}
@@ -423,6 +434,27 @@ function ContextIcon() {
       <path d="m20 20-3.5-3.5" />
       <path d="M8 9h6" />
       <path d="M8 12h4" />
+    </svg>
+  )
+}
+
+function ReviewInboxIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 4h16v16H4z" />
+      <path d="M8 9h8" />
+      <path d="M8 14h5" />
+      <path d="m15 14 1.5 1.5L20 12" />
     </svg>
   )
 }

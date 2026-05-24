@@ -6,6 +6,7 @@ import { buildGitGraphData } from '../application/gitGraphService'
 import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
 import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit } from '../infrastructure/runGit'
+import { reviewIssuesStore } from '../../../store'
 import type {
   GitCommitInput,
   GitDiffRequest,
@@ -79,9 +80,11 @@ export function registerGitHandlers(context: MainIpcContext): void {
     workflowService.analyzeCommitPlan(projectId),
   )
 
-  ipcMain.handle('git:review-current-diff', async (_event, projectId: string, threadId?: string) =>
-    workflowService.reviewCurrentDiff(projectId, threadId),
-  )
+  ipcMain.handle('git:review-current-diff', async (_event, projectId: string, threadId?: string) => {
+    const result = await workflowService.reviewCurrentDiff(projectId, threadId)
+    reviewIssuesStore.saveDiffReviewIssues({ result, threadId })
+    return result
+  })
 
   ipcMain.handle(
     'git:execute-commit-plan',

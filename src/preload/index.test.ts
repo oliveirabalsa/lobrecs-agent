@@ -48,6 +48,7 @@ describe('preload api shape', () => {
       'agent',
       'swarm',
       'router',
+      'reviews',
       'feedback',
       'cost',
       'context',
@@ -259,6 +260,26 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.router.preview('Refactor safely', 'project-1'),
         expected: ['router:preview', 'Refactor safely', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.reviews.list({ projectId: 'project-1', status: 'active' }),
+        expected: ['reviews:list', { projectId: 'project-1', status: 'active' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.reviews.update('issue-1', {
+            status: 'resolved',
+            fixSessionId: 'session-1',
+          }),
+        expected: [
+          'reviews:update',
+          'issue-1',
+          {
+            status: 'resolved',
+            fixSessionId: 'session-1',
+          },
+        ],
       },
       {
         call: (agentforge) => agentforge.feedback.save('session-1', 'success', 'Looks good'),

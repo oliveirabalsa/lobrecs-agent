@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import type {
   AgentId,
   AgentApprovalMode,
+  AgentThinkingLevel,
   ApprovalRequest,
   DiffProposal,
   EditorInfo,
@@ -16,6 +17,7 @@ import { ContextExplorer } from '../../context'
 import { CostDashboard } from '../../costs'
 import { GitGraphPanel } from '../../git-graph'
 import { MemoryManager } from '../../memory'
+import { ReviewInboxPanel } from '../../reviews'
 import {
   TerminalPanel,
   type ActiveSessionMeta,
@@ -101,6 +103,10 @@ interface WorkspaceViewProps {
     modelOverride?: string,
     approvalMode?: AgentApprovalMode,
   ) => void | Promise<void>
+  onDelegateTask: (
+    goal: string,
+    options?: { approvalMode?: AgentApprovalMode; thinking?: AgentThinkingLevel },
+  ) => void | Promise<void>
   onForceSteerQueuedMessage: (messageId: string) => void | Promise<void>
   onRemoveQueueItem: (messageId: string) => void | Promise<void>
   onClearQueue: () => void | Promise<void>
@@ -148,7 +154,9 @@ function readPanelMode(threadId: string | null, fallback: RightPanelMode = 'diff
   const key = rightPanelModeKey(threadId)
   const value = ls?.getItem(key)
   if (value === null || value === undefined) return fallback
-  if (value === 'terminal' || value === 'swarm' || value === 'context') return value
+  if (value === 'terminal' || value === 'swarm' || value === 'context' || value === 'reviews') {
+    return value
+  }
   return 'diff'
 }
 
@@ -184,6 +192,7 @@ export function WorkspaceView({
   onOpenSidebar,
   pendingQueue,
   onEnqueue,
+  onDelegateTask,
   onForceSteerQueuedMessage,
   onRemoveQueueItem,
   onClearQueue,
@@ -759,6 +768,7 @@ export function WorkspaceView({
               hasDiff={diffProposals.length > 0}
               hasSwarmGraph={Boolean(activeThreadId)}
               hasContext={Boolean(selectedProject)}
+              hasReviews={Boolean(selectedProject)}
               canRerun={Boolean(activeSession?.prompt) && !busy}
               onRerun={onRerunSession}
               onToggleRightPanel={handleToggleRightPanel}
@@ -851,6 +861,11 @@ export function WorkspaceView({
                           onContextClick={openContextExplorer}
                           onOpenSwarm={() => onSwarmOpenChange(true)}
                           onEnqueue={activeSession?.threadId ? onEnqueue : undefined}
+                          onDelegateTask={
+                            activeSession?.threadId && activeSessionId
+                              ? onDelegateTask
+                              : undefined
+                          }
                         />
                       </div>
                     </div>
@@ -1101,6 +1116,11 @@ export function WorkspaceView({
                       active={rightPanelMode === 'context'}
                       onClick={() => setRightPanelModeState('context')}
                     />
+                    <RightPanelTab
+                      label="Reviews"
+                      active={rightPanelMode === 'reviews'}
+                      onClick={() => setRightPanelModeState('reviews')}
+                    />
                     <div className="flex-1" />
                     <button
                       type="button"
@@ -1149,6 +1169,12 @@ export function WorkspaceView({
                         project={selectedProject}
                         activeSessionId={activeSessionId}
                         onEditProjectContext={openProjectContextDialog}
+                      />
+                    ) : rightPanelMode === 'reviews' ? (
+                      <ReviewInboxPanel
+                        project={selectedProject}
+                        activeThreadId={activeThreadId}
+                        onSessionStarted={onSessionStarted}
                       />
                     ) : (
                       <TerminalPanel
