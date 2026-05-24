@@ -130,6 +130,45 @@ describe('ModelRouter', () => {
     expect(decision.model).toBe('gpt-5.4-mini')
   })
 
+  it('replaces unknown manual overrides with a known model from the live catalog', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: {
+        get(agentId) {
+          if (agentId !== 'codex') return { isInstalled: () => true }
+          return {
+            isInstalled: () => true,
+            listModels: async () => [
+              {
+                id: 'gpt-5.3-codex-spark',
+                label: 'GPT-5.3 Codex Spark',
+                agentId: 'codex',
+                tier: 'lightweight',
+                source: 'cli',
+              },
+              {
+                id: 'gpt-5.3-codex',
+                label: 'GPT-5.3 Codex',
+                agentId: 'codex',
+                tier: 'balanced',
+                source: 'cli',
+              },
+            ],
+          }
+        },
+      },
+    })
+
+    const decision = await router.route({
+      prompt: 'implement a managed swarm phase',
+      preferredAgentId: 'codex',
+      modelOverride: 'gpt-5.5-codex',
+    })
+
+    expect(decision.agentId).toBe('codex')
+    expect(decision.model).toBe('gpt-5.3-codex')
+    expect(decision.reasoning).toContain('not found')
+  })
+
   it('falls back to claude-code when the preferred agent is unavailable', async () => {
     const router = new ModelRouter({
       adapterRegistry: createRegistry({ codex: false, 'claude-code': true }),

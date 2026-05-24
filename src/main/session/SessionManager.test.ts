@@ -82,12 +82,12 @@ describe('SessionManager', () => {
       timestamp: 20,
     })
 
-    expect(broadcasts.map((event) => event.type)).toEqual([
+    expect(eventTypesExcludingStartup(broadcasts)).toEqual([
       'stdout',
       'activity',
       'session-complete',
     ])
-    expect(sessionsStore.listEvents(sessionId).map((event) => event.type)).toEqual([
+    expect(eventTypesExcludingStartup(sessionsStore.listEvents(sessionId))).toEqual([
       'stdout',
       'activity',
       'session-complete',
@@ -138,6 +138,41 @@ describe('SessionManager', () => {
     })
     await waitFor(() => sessionsStore.get(sessionId)?.status === 'done')
     expect(manager.isActive(sessionId)).toBe(false)
+  })
+
+  it('records startup phase diagnostics before agent output', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+      resolveContext: async ({ baseContext }) => `${baseContext}\nAPI_KEY=secret-value-12345`,
+    })
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'diagnose startup',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      context: 'AGENTS.md',
+    })
+    adapter.emit({ type: 'stdout', sessionId, payload: { text: 'first output' }, timestamp: 10 })
+
+    const startupTitles = broadcasts
+      .filter(isStartupDiagnostic)
+      .map((event) => (event.payload as { title: string }).title)
+
+    expect(startupTitles).toEqual([
+      'Preparing context',
+      'Context ready',
+      'Starting agent process',
+      'Agent process started',
+    ])
+    expect(adapter.dispatchedParams?.context).not.toContain('secret-value-12345')
+    expect(adapter.dispatchedParams?.context).toContain('[REDACTED_SECRET]')
   })
 
   it('deduplicates identical process warning activities while preserving stderr events', async () => {
@@ -196,7 +231,7 @@ describe('SessionManager', () => {
       timestamp: 10,
     })
     expect(sessionsStore.get(sessionId)?.status).toBe('awaiting-approval')
-    expect(sessionsStore.listEvents(sessionId).map((event) => event.type)).toEqual([
+    expect(eventTypesExcludingStartup(sessionsStore.listEvents(sessionId))).toEqual([
       'activity',
       'approval-request',
     ])
@@ -279,7 +314,7 @@ describe('SessionManager', () => {
         .listEvents(sessionId)
         .some((event) => event.payload && JSON.stringify(event.payload).includes('Skipping')),
     ).toBe(false)
-    expect(broadcasts.map((event) => event.type)).toEqual(['stdout', 'activity'])
+    expect(eventTypesExcludingStartup(broadcasts)).toEqual(['stdout', 'activity'])
   })
 
   it('pauses when an adapter emits a normalized user-question activity directly', async () => {
@@ -433,6 +468,47 @@ describe('SessionManager', () => {
     })
 
     await waitFor(() => sessionsStore.get(sessionId)?.status === 'done')
+  })
+
+  it('auto retries managed swarm sessions when a selected model is unsupported', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter('codex')
+    const manager = new SessionManager({
+      adapters: [adapter],
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'finish the managed swarm task',
+      agentId: 'codex',
+      model: 'gpt-5.5-codex',
+      modelFallbacks: ['gpt-5.3-codex', 'gpt-5.3-codex-spark'],
+      modelRecoveryMode: 'auto',
+      repoPath: project.repoPath,
+      spawnedAgent: { kind: 'swarm', role: 'implementer' },
+    })
+
+    adapter.emit({
+      type: 'error',
+      sessionId,
+      payload: {
+        message:
+          "The 'gpt-5.5-codex' model is not supported when using Codex with a ChatGPT account.",
+      },
+      timestamp: 10,
+    })
+
+    await waitFor(() => adapter.dispatches.length === 2)
+
+    expect(sessionsStore.get(sessionId)).toMatchObject({
+      status: 'running',
+      model: 'gpt-5.3-codex',
+    })
+    expect(adapter.dispatches[1]).toMatchObject({
+      sessionId,
+      model: 'gpt-5.3-codex',
+      modelFallbacks: ['gpt-5.3-codex-spark'],
+    })
   })
 
   it('pauses for model recovery when a process warning reports a session limit', async () => {
@@ -736,8 +812,9 @@ describe('SessionManager', () => {
     expect(adapter.cancel).toHaveBeenCalledTimes(1)
     expect(sessionsStore.get(sessionId)?.status).toBe('cancelled')
     expect(manager.isActive(sessionId)).toBe(false)
-    expect(broadcasts).toHaveLength(1)
-    expect(broadcasts[0]).toMatchObject({
+    const nonStartupBroadcasts = broadcasts.filter((event) => !isStartupDiagnostic(event))
+    expect(nonStartupBroadcasts).toHaveLength(1)
+    expect(nonStartupBroadcasts[0]).toMatchObject({
       type: 'session-complete',
       sessionId,
       payload: { status: 'cancelled' },
@@ -772,14 +849,15 @@ describe('SessionManager', () => {
     expect(sessionsStore.get(sessionId)?.status).toBe('cancelled')
     // Only the synthetic cancel event is recorded; the late real completion
     // is dropped because the session is already in a terminal state.
-    const recorded = sessionsStore.listEvents(sessionId)
+    const recorded = sessionsStore.listEvents(sessionId).filter((event) => !isStartupDiagnostic(event))
     expect(recorded).toHaveLength(1)
     expect(recorded[0]).toMatchObject({
       type: 'session-complete',
       payload: { status: 'cancelled' },
     })
-    expect(broadcasts).toHaveLength(1)
-    expect(broadcasts[0]).toMatchObject({
+    const nonStartupBroadcasts = broadcasts.filter((event) => !isStartupDiagnostic(event))
+    expect(nonStartupBroadcasts).toHaveLength(1)
+    expect(nonStartupBroadcasts[0]).toMatchObject({
       type: 'session-complete',
       payload: { status: 'cancelled' },
     })
@@ -805,7 +883,10 @@ describe('SessionManager', () => {
 
     const [session] = sessionsStore.list(project.id)
     expect(session.status).toBe('error')
-    expect(broadcasts[0]).toMatchObject({ type: 'error', sessionId: session.id })
+    expect(broadcasts.find((event) => event.type === 'error')).toMatchObject({
+      type: 'error',
+      sessionId: session.id,
+    })
   })
 
   it('notifies spawned automation failures that happen before the session becomes active', async () => {
@@ -980,6 +1061,87 @@ describe('SessionManager', () => {
     ).toBe(true)
   })
 
+  it('does not attribute another active thread local edits to a session that did not edit files', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new ScopedFakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      worktreeIsolation: false,
+      idleHeartbeatMs: false,
+    })
+
+    const first = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    const second = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'answer without edits',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated by first\n', 'utf-8')
+    adapter.emit({
+      type: 'activity',
+      sessionId: first.sessionId,
+      payload: {
+        kind: 'tool-call',
+        name: 'Edit',
+        input: { file_path: 'existing.ts' },
+        status: 'done',
+      },
+      timestamp: 10,
+    })
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: first.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+    await waitFor(() =>
+      sessionsStore.listEvents(first.sessionId).some((event) => event.type === 'diff'),
+    )
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId: second.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 30,
+    })
+
+    await waitFor(() =>
+      sessionsStore
+        .listEvents(second.sessionId)
+        .some((event) => event.type === 'session-complete'),
+    )
+
+    expect(
+      sessionsStore
+        .listEvents(first.sessionId)
+        .some((event) => event.type === 'diff'),
+    ).toBe(true)
+    expect(
+      sessionsStore
+        .listEvents(second.sessionId)
+        .some((event) => event.type === 'diff'),
+    ).toBe(false)
+    expect(
+      sessionsStore.listEvents(second.sessionId).some(
+        (event) =>
+          event.type === 'activity' &&
+          typeof event.payload === 'object' &&
+          event.payload !== null &&
+          (event.payload as { kind?: string }).kind === 'file-change',
+      ),
+    ).toBe(false)
+  })
+
   it('emits live local diff snapshots after file-edit activity', async () => {
     const repoPath = await createGitRepo(tempDirs)
     const project = createProject(repoPath)
@@ -1045,6 +1207,73 @@ describe('SessionManager', () => {
         .listEvents(sessionId)
         .some((event) => event.type === 'diff' && isLiveDiffPayload(event.payload)),
     ).toBe(false)
+  })
+
+  it('emits live local diffs only for the editing session when local repo sessions overlap', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new ScopedFakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+      idleHeartbeatMs: false,
+    })
+    const first = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    const second = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'answer without edits',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated by first\n', 'utf-8')
+    adapter.emit({
+      type: 'activity',
+      sessionId: first.sessionId,
+      payload: {
+        kind: 'tool-call',
+        name: 'functions.apply_patch',
+        input: JSON.stringify({
+          patch: [
+            '*** Begin Patch',
+            '*** Update File: existing.ts',
+            '@@',
+            '-original',
+            '+updated by first',
+            '*** End Patch',
+          ].join('\n'),
+        }),
+        status: 'done',
+      },
+      timestamp: 10,
+    })
+
+    await waitFor(() =>
+      broadcasts.some((event) => event.type === 'diff' && isLiveDiffPayload(event.payload)),
+    )
+
+    const liveDiffs = broadcasts.filter(
+      (event) => event.type === 'diff' && isLiveDiffPayload(event.payload),
+    )
+
+    expect(liveDiffs).toHaveLength(1)
+    expect(liveDiffs[0].sessionId).toBe(first.sessionId)
+    expect(liveDiffs[0].sessionId).not.toBe(second.sessionId)
+    expect(proposalsFromLiveDiffPayload(liveDiffs[0].payload)).toEqual([
+      expect.objectContaining({
+        filePath: path.join(repoPath, 'existing.ts'),
+        proposedContent: 'updated by first\n',
+      }),
+    ])
   })
 
   it('records a diagnostic activity when local completion produces no diff proposals', async () => {
@@ -2168,6 +2397,32 @@ class FakeAdapter implements AgentAdapter {
   }
 }
 
+class ScopedFakeAdapter extends FakeAdapter {
+  private readonly eventsBySession = new Map<string, EventEmitter>()
+
+  override async dispatch(
+    params: Parameters<AgentAdapter['dispatch']>[0],
+  ): Promise<AgentSession> {
+    this.dispatchedParams = params
+    this.dispatches.push(params)
+
+    const events = new EventEmitter()
+    this.eventsBySession.set(params.sessionId, events)
+
+    return {
+      sessionId: params.sessionId,
+      events,
+      approve: this.approve,
+      reject: this.reject,
+      cancel: this.cancel,
+    }
+  }
+
+  override emit(event: AgentEvent): void {
+    this.eventsBySession.get(event.sessionId)?.emit('event', event)
+  }
+}
+
 function createProject(repoPath = '/repo/session') {
   return projectsStore.create({
     name: 'Session project',
@@ -2175,6 +2430,24 @@ function createProject(repoPath = '/repo/session') {
     agentId: 'claude-code',
     modelTier: 'balanced',
   })
+}
+
+function eventTypesExcludingStartup(events: readonly AgentEvent[]): string[] {
+  return events.filter((event) => !isStartupDiagnostic(event)).map((event) => event.type)
+}
+
+function isStartupDiagnostic(event: AgentEvent): boolean {
+  if (event.type !== 'activity' || !event.payload || typeof event.payload !== 'object') {
+    return false
+  }
+
+  const title = (event.payload as { title?: unknown }).title
+  return (
+    title === 'Preparing context' ||
+    title === 'Context ready' ||
+    title === 'Starting agent process' ||
+    title === 'Agent process started'
+  )
 }
 
 function isLiveDiffPayload(payload: unknown): boolean {

@@ -25,11 +25,17 @@ import { applyDiffContent } from '../modules/diffs/application/applyDiff'
 import { promptEvidenceStore, sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
 import { buildPlanExecutionPrompt, buildPlanModeContext } from './planModePrompt'
+import { buildBoundedPromptContext, truncateForContext } from '../modules/context/application/contextBudget'
+import { redactSensitiveText } from '../modules/context/domain/secretRedaction'
 import {
   buildLocalDiffProposals,
   captureLocalChangeBaseline,
   type LocalChangeBaseline,
 } from './localDiff'
+import {
+  filterProposalsToTouchedFiles,
+  noteTouchedFilesFromActivity,
+} from './fileTouchTracking'
 import { buildDiffProposals } from './worktreeDiff'
 import type { DiffProposal, ImageAttachment } from '../../shared/types'
 
@@ -163,6 +169,8 @@ type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
   threadId: string
   worktreePath: string | null
   localBaseline: LocalChangeBaseline | null
+  localTouchedFiles: Set<string>
+  sharedLocalRepo: boolean
   liveDiffTimer?: ReturnType<typeof setTimeout>
   liveDiffSignature?: string
   lastAgentEventAt: number
@@ -266,8 +274,11 @@ type DelegatedTaskRecord = {
 
 const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
 const THREAD_CONTEXT_SESSION_LIMIT = 6
-const THREAD_CONTEXT_PROMPT_CHARS = 2_000
-const THREAD_CONTEXT_ASSISTANT_CHARS = 4_000
+const THREAD_CONTEXT_RECENT_TURNS = 2
+const THREAD_CONTEXT_PROMPT_CHARS = 1_200
+const THREAD_CONTEXT_ASSISTANT_CHARS = 2_000
+const THREAD_CONTEXT_SUMMARY_CHARS = 350
+const MAX_ADAPTER_CONTEXT_CHARS = 24_000
 const LIVE_DIFF_DEBOUNCE_MS = 120
 
 export type SessionManagerOptions = {
@@ -365,12 +376,6 @@ export class SessionManager {
     let sessionCreated = false
 
     try {
-      const baseContext = await this.resolveDispatchContext(params)
-      const context = buildAdapterContext(
-        baseContext,
-        sessionsStore.listThreadTranscript(threadId, { limit: THREAD_CONTEXT_SESSION_LIMIT }),
-      )
-
       const session = sessionsStore.create({
         id: sessionId,
         projectId: params.projectId,
@@ -389,6 +394,28 @@ export class SessionManager {
       // bubbles this thread to the top of its project list.
       const linkedThread = threadsStore.linkSession(threadId, session.id)
       broadcastThreadUpdated(linkedThread)
+
+      this.emitSyntheticEvent(session.id, {
+        kind: 'step',
+        title: 'Preparing context',
+        detail: 'Selecting memory, repository snippets, and recent thread history.',
+        status: 'running',
+      })
+      const contextStartedAt = Date.now()
+      const baseContext = await this.resolveDispatchContext(params)
+      const context = buildAdapterContext(
+        baseContext,
+        sessionsStore.listThreadTranscript(threadId, {
+          limit: THREAD_CONTEXT_SESSION_LIMIT,
+          excludeSessionId: session.id,
+        }),
+      )
+      this.emitSyntheticEvent(session.id, {
+        kind: 'step',
+        title: 'Context ready',
+        detail: `${formatMs(Date.now() - contextStartedAt)} · ${context?.length ?? 0} chars`,
+        status: 'done',
+      })
 
       const adapter = this.resolveAdapter(params.agentId)
       if (!adapter) {
@@ -449,6 +476,13 @@ export class SessionManager {
         adapterContext,
       })
 
+      this.emitSyntheticEvent(session.id, {
+        kind: 'step',
+        title: 'Starting agent process',
+        detail: `${params.agentId} · ${params.model}`,
+        status: 'running',
+      })
+      const adapterStartedAt = Date.now()
       const agentSession = await adapter.dispatch({
         sessionId: session.id,
         prompt: params.prompt,
@@ -459,6 +493,12 @@ export class SessionManager {
         imageAttachments: params.imageAttachments,
         runtimeSettings: params.runtimeSettings,
       })
+      this.emitSyntheticEvent(session.id, {
+        kind: 'step',
+        title: 'Agent process started',
+        detail: formatMs(Date.now() - adapterStartedAt),
+        status: 'done',
+      })
 
       this.activeSessions.set(session.id, {
         approve: () => agentSession.approve(),
@@ -468,6 +508,8 @@ export class SessionManager {
         threadId,
         worktreePath,
         localBaseline,
+        localTouchedFiles: new Set(),
+        sharedLocalRepo: false,
         lastAgentEventAt: Date.now(),
         lastIdleHeartbeatAt: 0,
         qualityAttempt: params.qualityAttempt ?? 0,
@@ -483,6 +525,7 @@ export class SessionManager {
         adapterContext,
         modelRecoveryMode: params.modelRecoveryMode ?? 'prompt',
       })
+      this.markSharedLocalRepoSessions(session.id)
       this.scheduleIdleHeartbeat(session.id)
 
       agentSession.events.on('event', (event: AgentEvent) => {
@@ -922,6 +965,9 @@ export class SessionManager {
     this.noteAgentEvent(event.sessionId)
     this.mirrorDelegatedTaskEvent(event)
     if (event.type === 'activity') {
+      if (isAgentActivityPayload(event.payload)) {
+        this.noteTouchedFiles(event.sessionId, event.payload)
+      }
       this.maybeRunDelegateTask(event)
     }
 
@@ -1197,6 +1243,27 @@ export class SessionManager {
     this.scheduleIdleHeartbeat(sessionId)
   }
 
+  private markSharedLocalRepoSessions(sessionId: string): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active || active.worktreePath || !active.localBaseline) return
+
+    for (const [otherSessionId, other] of this.activeSessions) {
+      if (otherSessionId === sessionId) continue
+      if (other.worktreePath || !other.localBaseline) continue
+      if (other.repoPath !== active.repoPath) continue
+
+      active.sharedLocalRepo = true
+      other.sharedLocalRepo = true
+    }
+  }
+
+  private noteTouchedFiles(sessionId: string, activity: AgentActivity): void {
+    const active = this.activeSessions.get(sessionId)
+    if (!active?.localBaseline || active.worktreePath) return
+
+    noteTouchedFilesFromActivity(active.localTouchedFiles, active.repoPath, activity)
+  }
+
   private scheduleIdleHeartbeat(sessionId: string): void {
     if (this.idleHeartbeatMs === false) return
 
@@ -1257,6 +1324,7 @@ export class SessionManager {
     for (const activityEvent of deriveActivityEvents(event)) {
       if (this.hasSeenProcessWarning(activityEvent)) continue
 
+      this.noteTouchedFiles(activityEvent.sessionId, activityEvent.payload as AgentActivity)
       this.recordEvent(activityEvent)
       if (shouldTriggerLiveLocalDiff(activityEvent)) {
         shouldRefreshLiveDiff = true
@@ -1341,7 +1409,10 @@ export class SessionManager {
     if (!active?.localBaseline || active.planMode) return
 
     try {
-      const proposals = await buildLocalDiffProposals(active.repoPath, active.localBaseline)
+      const proposals = this.filterLocalDiffProposals(
+        active,
+        await buildLocalDiffProposals(active.repoPath, active.localBaseline),
+      )
       if (proposals.length === 0) return
 
       const signature = diffProposalSignature(proposals)
@@ -1478,7 +1549,10 @@ export class SessionManager {
       const proposals = active.worktreePath
         ? await buildDiffProposals(active.worktreePath, active.repoPath)
         : active.localBaseline
-          ? await buildLocalDiffProposals(active.repoPath, active.localBaseline)
+          ? this.filterLocalDiffProposals(
+              active,
+              await buildLocalDiffProposals(active.repoPath, active.localBaseline),
+            )
           : []
       if (proposals.length > 0) {
         const reviewedProposals = active.worktreePath
@@ -1538,6 +1612,19 @@ export class SessionManager {
         this.recordEvent(finalEvent)
       }
     }
+  }
+
+  private filterLocalDiffProposals(
+    active: ActiveSession,
+    proposals: readonly DiffProposal[],
+  ): DiffProposal[] {
+    if (!active.sharedLocalRepo) return [...proposals]
+
+    return filterProposalsToTouchedFiles(
+      proposals,
+      active.repoPath,
+      active.localTouchedFiles,
+    )
   }
 
   private emitTerminalNotifierEvent(
@@ -1901,6 +1988,11 @@ function isProviderLimitText(text: string): boolean {
     'selected model is at capacity',
     'model capacity',
     'capacity exceeded',
+    'model is not supported',
+    'model is unsupported',
+    'model_not_supported',
+    'unsupported model',
+    'not supported when using',
     'credits exhausted',
     'billing hard limit',
     'credit balance',
@@ -2232,6 +2324,15 @@ function isSessionStatus(value: string): value is SessionStatus {
   )
 }
 
+function isAgentActivityPayload(payload: unknown): payload is AgentActivity {
+  return Boolean(
+    payload &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      typeof (payload as { kind?: unknown }).kind === 'string',
+  )
+}
+
 function isProcessWarningPayload(payload: unknown): payload is {
   kind: 'step'
   title: 'Process warning'
@@ -2285,18 +2386,61 @@ function buildAdapterContext(
   baseContext: string | null | undefined,
   transcript: ThreadTranscriptTurn[],
 ): string | null | undefined {
-  const trimmedContext = baseContext?.trim()
+  const trimmedBaseContext = baseContext?.trim()
   const historyBlock = buildThreadHistoryBlock(transcript)
+  if (!historyBlock) {
+    return trimmedBaseContext
+      ? truncateForContext(redactSensitiveText(trimmedBaseContext), MAX_ADAPTER_CONTEXT_CHARS)
+      : null
+  }
 
-  if (!historyBlock) return baseContext
-  if (!trimmedContext) return historyBlock
-
-  return `${trimmedContext}\n\n${historyBlock}`
+  return buildBoundedPromptContext(
+    [
+      { title: 'Prepared project context:', content: baseContext, maxChars: 18_000 },
+      { title: 'Conversation context:', content: historyBlock, maxChars: 6_000 },
+    ],
+    { maxChars: MAX_ADAPTER_CONTEXT_CHARS },
+  )
 }
 
 function buildThreadHistoryBlock(transcript: ThreadTranscriptTurn[]): string | null {
-  const turns = transcript
-    .filter((turn) => turn.prompt.trim() || turn.assistantText?.trim())
+  const relevantTurns = transcript.filter(
+    (turn) => turn.prompt.trim() || turn.assistantText?.trim(),
+  )
+  if (relevantTurns.length === 0) return null
+
+  const summaryTurns = relevantTurns.slice(
+    0,
+    Math.max(0, relevantTurns.length - THREAD_CONTEXT_RECENT_TURNS),
+  )
+  const recentTurns = relevantTurns.slice(-THREAD_CONTEXT_RECENT_TURNS)
+  const sections: string[] = []
+
+  if (summaryTurns.length > 0) {
+    sections.push(
+      [
+        `Older conversation summary (${summaryTurns.length} turn${
+          summaryTurns.length === 1 ? '' : 's'
+        }):`,
+        ...summaryTurns.map(
+          (turn, index) =>
+            `${index + 1}. User: ${truncateForContext(
+              turn.prompt,
+              THREAD_CONTEXT_SUMMARY_CHARS,
+            )}${
+              turn.assistantText?.trim()
+                ? `\n   Assistant: ${truncateForContext(
+                    turn.assistantText,
+                    THREAD_CONTEXT_SUMMARY_CHARS,
+                  )}`
+                : ''
+            }`,
+        ),
+      ].join('\n'),
+    )
+  }
+
+  const recent = recentTurns
     .map((turn, index) => {
       const parts = [
         `Turn ${index + 1}`,
@@ -2312,14 +2456,14 @@ function buildThreadHistoryBlock(transcript: ThreadTranscriptTurn[]): string | n
       return parts.join('\n')
     })
 
-  if (turns.length === 0) return null
+  if (recent.length > 0) {
+    sections.push(['Recent conversation turns:', ...recent].join('\n\n'))
+  }
 
-  return `Conversation history (same thread, oldest to newest):\n${turns.join('\n\n')}`
+  return `Conversation history (same thread, oldest to newest):\n${sections.join('\n\n')}`
 }
 
-function truncateForContext(value: string, maxChars: number): string {
-  const trimmed = value.trim()
-  if (trimmed.length <= maxChars) return trimmed
-
-  return `${trimmed.slice(0, maxChars).trimEnd()}\n[truncated]`
+function formatMs(ms: number): string {
+  if (ms < 1_000) return `${ms}ms`
+  return `${(ms / 1_000).toFixed(1)}s`
 }

@@ -77,6 +77,7 @@ export class ModelRouter {
         throw new Error('Manual image-capable model required')
       }
 
+      const tier = modelTierFromModel(params.modelOverride)
       if (!(await this.isAgentAvailable(agentId))) {
         agentId = imageSupportRequired
           ? await this.firstAvailableImageAwareAgent(enabledAgents, modelTierFromModel(params.modelOverride), settings)
@@ -87,11 +88,15 @@ export class ModelRouter {
             ], fallbackAgentId)
       }
 
-      const tier = modelTierFromModel(params.modelOverride)
-      const model =
+      const resolvedModel =
         agentId === requestedAgentId
-          ? params.modelOverride
-          : await this.resolveModelForTier(agentId, tier, settings)
+          ? await this.resolveModelOverrideForAgent(agentId, params.modelOverride, tier)
+          : {
+              model: await this.resolveModelForTier(agentId, tier, settings),
+              exact: false,
+            }
+      const model = resolvedModel.model
+      const exactModelMatch = resolvedModel.exact
 
       if (imageSupportRequired && !this.supportsImages(agentId, model)) {
         throw new Error('Manual image-capable model required')
@@ -103,8 +108,10 @@ export class ModelRouter {
         tier,
         score: -1,
         reasoning:
-          model === params.modelOverride
+          exactModelMatch
             ? 'Manual override'
+            : agentId === requestedAgentId
+              ? 'Manual override not found in model catalog; routed to available model for requested tier'
             : 'Manual override agent unavailable; routed to available adapter',
       }
     }
@@ -308,6 +315,30 @@ export class ModelRouter {
     return getModelForTier(agentId, tier, settings)
   }
 
+  private async resolveModelOverrideForAgent(
+    agentId: SupportedAgentId,
+    requestedModel: string,
+    tier: ModelTier,
+  ): Promise<{ model: string; exact: boolean }> {
+    const adapter = this.adapterRegistry?.get(agentId)
+
+    if (adapter?.listModels) {
+      try {
+        const models = authoritativeCatalogModels(await adapter.listModels())
+        if (models.some((model) => model.id === requestedModel)) {
+          return { model: requestedModel, exact: true }
+        }
+
+        const model = pickModelForTier(models, tier)
+        if (model) return { model: model.id, exact: false }
+      } catch {
+        // Preserve manual override compatibility when local model discovery fails.
+      }
+    }
+
+    return { model: requestedModel, exact: true }
+  }
+
   private enabledAgents(settings: AppSettings): SupportedAgentId[] {
     const enabled = settings.agents.enabledAgentIds.filter((agentId) => {
       const runtime = settings.agents.runtimes[agentId]
@@ -344,6 +375,11 @@ export function modelTierFromModel(model: string): ModelTier {
   }
 
   return inferModelTier(model)
+}
+
+function authoritativeCatalogModels(models: AgentModel[]): AgentModel[] {
+  const discovered = models.filter((model) => model.source !== 'fallback')
+  return discovered.length > 0 ? discovered : models
 }
 
 function isSupportedAgentId(agentId?: AgentId | string): agentId is SupportedAgentId {

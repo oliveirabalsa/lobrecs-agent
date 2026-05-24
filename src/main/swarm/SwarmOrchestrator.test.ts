@@ -201,6 +201,16 @@ describe('SwarmOrchestrator', () => {
     expect(dispatched[0].prompt).toContain('Return only a JSON object')
     expect(dispatched[0].prompt).toContain('agentId must be one of')
 
+    const result = await spawnPromise
+
+    expect(result.strategy).toBe('managed')
+    expect(result.sessions).toHaveLength(1)
+    expect(result.sessions[0]).toMatchObject({
+      role: 'manager',
+      threadId: 'thread-1',
+      status: 'running',
+    })
+
     completions.get(dispatched[0].sessionId)?.resolve({
       status: 'done',
       output: JSON.stringify({
@@ -221,16 +231,18 @@ describe('SwarmOrchestrator', () => {
       }),
     })
 
-    const result = await spawnPromise
+    await waitFor(() => dispatched.length === 2)
 
-    expect(result.strategy).toBe('managed')
-    expect(result.sessions).toHaveLength(2)
-    expect(result.sessions.map((session) => session.role)).toEqual([
+    const swarmAfterPlan = orchestrator.get(result.swarmId)
+    expect(swarmAfterPlan?.sessions.map((session) => session.role)).toEqual([
       'manager',
       'planner',
     ])
-    expect(result.sessions.map((session) => session.threadId)).toEqual(['thread-1', 'thread-1'])
-    expect(result.sessions[0].status).toBe('done')
+    expect(swarmAfterPlan?.sessions.map((session) => session.threadId)).toEqual([
+      'thread-1',
+      'thread-1',
+    ])
+    expect(swarmAfterPlan?.sessions[0].status).toBe('done')
     expect(dispatched.map((call) => call.role)).toEqual(['manager', 'planner'])
     expect(routeInputs[1]).toMatchObject({
       preferredAgentId: 'claude-code',
@@ -296,6 +308,8 @@ describe('SwarmOrchestrator', () => {
     const spawnPromise = orchestrator.spawn(managedConfig())
 
     await waitFor(() => dispatched.length === 1)
+    const result = await spawnPromise
+    expect(result.sessions.map((session) => session.role)).toEqual(['manager'])
 
     completions.get(dispatched[0].sessionId)?.resolve({
       status: 'done',
@@ -331,9 +345,10 @@ describe('SwarmOrchestrator', () => {
       }),
     })
 
-    const result = await spawnPromise
+    await waitFor(() => dispatched.length === 4)
 
-    expect(result.sessions.map((session) => session.role)).toEqual([
+    const swarmAfterFirstPlan = orchestrator.get(result.swarmId)
+    expect(swarmAfterFirstPlan?.sessions.map((session) => session.role)).toEqual([
       'manager',
       'implementer api',
       'implementer ui',
@@ -423,33 +438,35 @@ describe('SwarmOrchestrator', () => {
     ])
   })
 
-  it('rejects invalid manager JSON before spawning workers', async () => {
+  it('marks invalid manager JSON as failed before spawning workers', async () => {
     const { orchestrator, dispatched, completions } = createManagedHarness()
     const spawnPromise = orchestrator.spawn(managedConfig())
 
     await waitFor(() => dispatched.length === 1)
+    const result = await spawnPromise
+
     completions.get(dispatched[0].sessionId)?.resolve({
       status: 'done',
       output: 'I would use a planner and implementer.',
     })
 
-    await expect(spawnPromise).rejects.toThrow('Manager plan must be valid JSON')
+    await waitFor(() => orchestrator.get(result.swarmId)?.sessions[0].status === 'error')
     expect(dispatched).toHaveLength(1)
   })
 
-  it('rejects empty manager plans before spawning workers', async () => {
+  it('marks empty manager plans as failed before spawning workers', async () => {
     const { orchestrator, dispatched, completions } = createManagedHarness()
     const spawnPromise = orchestrator.spawn(managedConfig())
 
     await waitFor(() => dispatched.length === 1)
+    const result = await spawnPromise
+
     completions.get(dispatched[0].sessionId)?.resolve({
       status: 'done',
       output: JSON.stringify({ strategy: 'parallel', agents: [] }),
     })
 
-    await expect(spawnPromise).rejects.toThrow(
-      'Manager plan agents must contain at least one agent',
-    )
+    await waitFor(() => orchestrator.get(result.swarmId)?.sessions[0].status === 'error')
     expect(dispatched).toHaveLength(1)
   })
 
@@ -458,12 +475,14 @@ describe('SwarmOrchestrator', () => {
     const spawnPromise = orchestrator.spawn(managedConfig())
 
     await waitFor(() => dispatched.length === 1)
+    const result = await spawnPromise
+
     completions.get(dispatched[0].sessionId)?.resolve({
       status: 'error',
       output: 'manager process failed',
     })
 
-    await expect(spawnPromise).rejects.toThrow('Manager agent failed before producing a plan')
+    await waitFor(() => orchestrator.get(result.swarmId)?.sessions[0].status === 'error')
     expect(dispatched).toHaveLength(1)
   })
 

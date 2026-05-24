@@ -379,7 +379,7 @@ export class SwarmOrchestrator {
     settings: AppSettings,
   ): Promise<SpawnedSession[]> {
     const supportedAgentIds = enabledSwarmAgentIds(settings)
-    const firstPlan = await this.runManagedDecision({
+    const managerSession = await this.spawnManagerDecisionSession({
       config,
       repoPath,
       swarmId,
@@ -388,45 +388,32 @@ export class SwarmOrchestrator {
       supportedAgentIds,
     })
 
-    const firstPhase = await this.startManagedPhase({
+    this.swarms.get(swarmId)?.sessions.push(managerSession)
+
+    void this.continueManagedFromDecision({
       config,
-      plan: firstPlan,
       repoPath,
       swarmId,
       threadId,
-      imageAttachments: config.imageAttachments,
+      settings,
+      supportedAgentIds,
+      managerSession,
+      completedPhaseOutputs: [],
+      decisionRound: 0,
     })
-
-    if (firstPhase) {
-      void this.continueManagedOrchestration({
-        config,
-        repoPath,
-        swarmId,
-        threadId,
-        settings,
-        supportedAgentIds,
-        activePhase: firstPhase,
-        completedPhaseOutputs: [],
-        decisionRound: 1,
+      .catch(() => {
+        const swarm = this.swarms.get(swarmId)
+        const lastSession = swarm?.sessions.at(-1)
+        if (lastSession) lastSession.status = 'error'
       })
-        .catch(() => {
-          const swarm = this.swarms.get(swarmId)
-          const lastSession = swarm?.sessions.at(-1)
-          if (lastSession && lastSession.status === 'running') {
-            lastSession.status = 'error'
-          }
-        })
-        .finally(() => {
-          this.notifyComplete(swarmId, config.projectId)
-        })
-    } else {
-      queueMicrotask(() => this.notifyComplete(swarmId, config.projectId))
-    }
+      .finally(() => {
+        this.notifyComplete(swarmId, config.projectId)
+      })
 
-    return this.swarms.get(swarmId)?.sessions ?? []
+    return [managerSession]
   }
 
-  private async runManagedDecision(input: {
+  private async spawnManagerDecisionSession(input: {
     config: SwarmConfig
     repoPath: string
     swarmId: string
@@ -434,9 +421,9 @@ export class SwarmOrchestrator {
     settings: AppSettings
     supportedAgentIds: SupportedAgentId[]
     previousOutput?: string
-  }): Promise<ManagerPlan> {
+  }): Promise<SpawnedSession> {
     const managerAgentId = selectManagerAgent(input.supportedAgentIds)
-    const managerSession = await this.spawnAgent({
+    return this.spawnAgent({
       agentConfig: {
         role: MANAGER_AGENT_ROLE,
         agentId: managerAgentId,
@@ -456,8 +443,15 @@ export class SwarmOrchestrator {
       contextLabel: input.previousOutput ? 'Completed swarm work so far' : undefined,
       imageAttachments: input.config.imageAttachments,
     })
+  }
 
-    this.swarms.get(input.swarmId)?.sessions.push(managerSession)
+  private async resolveManagedDecision(input: {
+    swarmId: string
+    managerSession: SpawnedSession
+    settings: AppSettings
+    supportedAgentIds: SupportedAgentId[]
+  }): Promise<ManagerPlan> {
+    const managerSession = input.managerSession
 
     const managerCompletion = await this.waitForCompletion(managerSession)
     managerSession.status = managerCompletion.status
@@ -473,6 +467,70 @@ export class SwarmOrchestrator {
     })
 
     return selectNextManagedPhase(plan)
+  }
+
+  private async runManagedDecision(input: {
+    config: SwarmConfig
+    repoPath: string
+    swarmId: string
+    threadId: string
+    settings: AppSettings
+    supportedAgentIds: SupportedAgentId[]
+    previousOutput?: string
+  }): Promise<ManagerPlan> {
+    const managerSession = await this.spawnManagerDecisionSession(input)
+    this.swarms.get(input.swarmId)?.sessions.push(managerSession)
+
+    return this.resolveManagedDecision({
+      swarmId: input.swarmId,
+      managerSession,
+      supportedAgentIds: input.supportedAgentIds,
+      settings: input.settings,
+    })
+  }
+
+  private async continueManagedFromDecision(input: {
+    config: SwarmConfig
+    repoPath: string
+    swarmId: string
+    threadId: string
+    settings: AppSettings
+    supportedAgentIds: SupportedAgentId[]
+    managerSession: SpawnedSession
+    completedPhaseOutputs: string[]
+    decisionRound: number
+  }): Promise<void> {
+    const firstPlan = await this.resolveManagedDecision({
+      swarmId: input.swarmId,
+      managerSession: input.managerSession,
+      supportedAgentIds: input.supportedAgentIds,
+      settings: input.settings,
+    })
+
+    if (!this.swarms.has(input.swarmId)) return
+
+    const firstPhase = await this.startManagedPhase({
+      config: input.config,
+      plan: firstPlan,
+      repoPath: input.repoPath,
+      swarmId: input.swarmId,
+      threadId: input.threadId,
+      imageAttachments: input.config.imageAttachments,
+    })
+
+    if (!firstPhase) return
+
+    await this.continueManagedOrchestration({
+      config: input.config,
+      repoPath: input.repoPath,
+      swarmId: input.swarmId,
+      threadId: input.threadId,
+      settings: input.settings,
+      supportedAgentIds: input.supportedAgentIds,
+      activePhase: firstPhase,
+      completedPhaseOutputs: input.completedPhaseOutputs,
+      decisionRound: input.decisionRound + 1,
+    })
   }
 
   private async startManagedPhase(input: {
