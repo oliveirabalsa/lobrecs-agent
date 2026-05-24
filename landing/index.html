@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Lobrecs Agent is a desktop control room for Codex, Claude Code, OpenCode, local swarms, repository context, and review-ready diffs."
+    />
+    <meta property="og:title" content="Lobrecs Agent" />
+    <meta
+      property="og:description"
+      content="A local-first AI coding agent harness with swarms, context, terminal output, and review-ready diffs."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/assets/lobrecs-agent-logo.png" />
+    <link rel="icon" type="image/png" href="/assets/lobrecs-agent-logo.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Lobrecs Agent</title>
+  </head>
+  <body>
+    <div class="scanline" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Lobrecs Agent home">
+        <img src="/assets/lobrecs-agent-logo.png" alt="" />
+        <span>Lobrecs Agent</span>
+      </a>
+      <nav aria-label="Primary">
+        <a href="#control-room">Control room</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#download">Deploy</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Local-first AI coding harness</p>
+          <h1 id="hero-title">AI coding agent control room.</h1>
+          <p class="hero-text">
+            Run Codex, Claude Code, OpenCode, local repository context, swarm
+            orchestration, terminal output, and diff review from one red desktop
+            console.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/oliveirabalsa/lobrecs-agent">View repository</a>
+            <a class="button secondary" href="#control-room">See the system</a>
+          </div>
+        </div>
+
+        <div class="console-wrap" aria-label="Animated Lobrecs Agent workflow preview">
+          <div class="logo-orbit" aria-hidden="true">
+            <img src="/assets/lobrecs-agent-logo.png" alt="" />
+            <span></span>
+          </div>
+          <div class="console">
+            <div class="console-top">
+              <span></span><span></span><span></span>
+              <strong>agent.lobrecs.tech</strong>
+            </div>
+            <div class="console-body">
+              <p><span>$</span> lobrecs-agent run --repo ./product</p>
+              <p class="dim">context.scan: 2,184 files indexed</p>
+              <p class="dim">router.pick: codex high reasoning</p>
+              <p class="hot">swarm.dispatch: planner -> implementer -> reviewer</p>
+              <p class="dim">terminal.capture: tests, diffs, failures</p>
+              <p class="ok">quality.gate: patch applied, review ready</p>
+            </div>
+            <div class="pipeline" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Product highlights">
+        <article>
+          <strong>3</strong>
+          <span>agent CLIs routed by task complexity</span>
+        </article>
+        <article>
+          <strong>100%</strong>
+          <span>local sessions by default</span>
+        </article>
+        <article>
+          <strong>0</strong>
+          <span>API keys stored in app data</span>
+        </article>
+      </section>
+
+      <section id="control-room" class="control-room" aria-labelledby="control-title">
+        <div class="section-kicker">Control room</div>
+        <h2 id="control-title">A desktop IDE for agent work that has to be inspectable.</h2>
+        <div class="feature-grid">
+          <article>
+            <span class="feature-index">01</span>
+            <h3>Session timeline</h3>
+            <p>Turn-based messages, commands, approvals, edited files, and completion evidence stay together.</p>
+          </article>
+          <article>
+            <span class="feature-index">02</span>
+            <h3>Repository context</h3>
+            <p>Project memory and semantic code context enrich prompts without turning private work into cloud state.</p>
+          </article>
+          <article>
+            <span class="feature-index">03</span>
+            <h3>Swarm orchestration</h3>
+            <p>Planner, implementer, reviewer, and debugger flows can run against one repository without losing thread state.</p>
+          </article>
+          <article>
+            <span class="feature-index">04</span>
+            <h3>Review-ready diffs</h3>
+            <p>Completed patches are applied by the main process and surfaced in the renderer as evidence for review.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="workflow" class="workflow" aria-labelledby="workflow-title">
+        <div>
+          <div class="section-kicker">Workflow</div>
+          <h2 id="workflow-title">From prompt to verified patch without hiding the machine.</h2>
+        </div>
+        <ol class="steps">
+          <li>
+            <span>01</span>
+            <div>
+              <h3>Select the repo</h3>
+              <p>Point Lobrecs Agent at a local checkout and keep execution on the machine.</p>
+            </div>
+          </li>
+          <li>
+            <span>02</span>
+            <div>
+              <h3>Dispatch the right agent</h3>
+              <p>Route easy, medium, and complex tasks to the model and CLI that fits the job.</p>
+            </div>
+          </li>
+          <li>
+            <span>03</span>
+            <div>
+              <h3>Watch the evidence</h3>
+              <p>Commands, terminal output, approvals, and file edits become visible artifacts.</p>
+            </div>
+          </li>
+          <li>
+            <span>04</span>
+            <div>
+              <h3>Review and ship</h3>
+              <p>Use the diff, quality gates, and PR helpers to move from completed work to delivery.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section id="download" class="download" aria-labelledby="download-title">
+        <div>
+          <p class="eyebrow">Desktop app</p>
+          <h2 id="download-title">Built for people who want agent speed without losing local control.</h2>
+        </div>
+        <a class="button primary" href="https://github.com/oliveirabalsa/lobrecs-agent/releases">Get releases</a>
+      </section>
+    </main>
+
+    <footer>
+      <span>Lobrecs Agent</span>
+      <span>Local execution. Visible work. Red console energy.</span>
+    </footer>
+    <script src="/main.js" type="module"></script>
+  </body>
+</html>
