@@ -14,12 +14,14 @@ const privateKeyBase64 = Buffer.from(privateKey).toString('base64')
 
 describe('createMacBuilderArgs', () => {
   it('uses unsigned local mac packaging args by default', () => {
-    expect(createMacBuilderArgs()).toEqual(['--mac', '--config.npmRebuild=false'])
+    expect(createMacBuilderArgs()).toEqual(['--mac', '--arm64', '--x64', '--config.npmRebuild=false'])
   })
 
   it('forces signing and notarization for publish builds', () => {
     expect(createMacBuilderArgs(true)).toEqual([
       '--mac',
+      '--arm64',
+      '--x64',
       '--config.npmRebuild=false',
       '--publish',
       'always',
@@ -37,6 +39,8 @@ describe('createMacBuilderArgs', () => {
   it('keeps unsigned local builds local', () => {
     expect(createMacBuilderArgs(false, { allowUnsignedPublish: true })).toEqual([
       '--mac',
+      '--arm64',
+      '--x64',
       '--config.npmRebuild=false',
     ])
   })

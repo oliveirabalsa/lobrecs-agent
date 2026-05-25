@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const DEFAULT_BUILDER_ARGS = ['--mac', '--config.npmRebuild=false']
+const DEFAULT_BUILDER_ARGS = ['--mac', '--arm64', '--x64', '--config.npmRebuild=false']
 const PUBLISH_BUILDER_ARGS = [
   '--publish',
   'always',

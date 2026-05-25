@@ -16,9 +16,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macOS
+          - platform: macOS-arm64
             os: macos-latest
-            builder-target: --mac
+            builder-target: --mac --arm64
+          - platform: macOS-x64
+            os: macos-13
+            builder-target: --mac --x64
           - platform: Windows
             os: windows-latest
             builder-target: --win
@@ -44,21 +47,21 @@ jobs:
         run: npm ci
 
       - name: Test
-        if: matrix.platform != 'Windows'
+        if: "!startsWith(matrix.platform, 'Windows')"
         run: npm test
 
       - name: Build renderer and main
         run: npm run build
 
       - name: Package and publish Lobrecs Agent (macOS)
-        if: matrix.platform == 'macOS'
+        if: startsWith(matrix.platform, 'macOS')
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --mac --publish always
+        run: npx electron-builder ${{ matrix.builder-target }} --publish always
 
       - name: Package and publish Lobrecs Agent (Windows / Linux)
-        if: matrix.platform != 'macOS'
+        if: "!startsWith(matrix.platform, 'macOS')"
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: npx electron-builder ${{ matrix.builder-target }} --publish always
