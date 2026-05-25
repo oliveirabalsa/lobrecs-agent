@@ -19,6 +19,16 @@ describe('parseManagerPlan — requireApprovalAfter gating', () => {
     expect(prompt).toContain('Do not decide implementer count until planner output is available')
   })
 
+  it('includes SDD instructions for spec-driven development', () => {
+    const prompt = buildManagerPrompt(INPUT)
+
+    expect(prompt).toContain('Spec-Driven Development (SDD)')
+    expect(prompt).toContain('Spec Contract')
+    expect(prompt).toContain('acceptanceCriteria')
+    expect(prompt).toContain('Implement strictly against the Spec Contract')
+    expect(prompt).toContain('Verify the implementation against the Spec Contract')
+  })
+
   it('allows the manager to mark orchestration complete without workers', () => {
     const plan = parseManagerPlan(JSON.stringify({ status: 'complete', agents: [] }), INPUT)
 

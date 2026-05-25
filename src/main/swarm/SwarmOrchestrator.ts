@@ -28,6 +28,14 @@ import { extractSessionOutput } from '../store/sessionOutput'
 import type { PlanPromptOutcome } from './planPrompt'
 import { askStepApproval } from './stepApprovalPrompt'
 import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
+import {
+  extractSpecContract,
+  buildSpecContext,
+  PLANNER_SDD_INSTRUCTION,
+  IMPLEMENTER_SPEC_INSTRUCTION,
+  VERIFIER_SPEC_INSTRUCTION,
+  type SpecContract,
+} from '../modules/swarms/domain/specContract'
 
 const DEFAULT_REVIEW_LOOP_MAX_ITERATIONS = 3
 const REVIEW_LOOP_HARD_CAP = 10
@@ -541,6 +549,7 @@ export class SwarmOrchestrator {
     threadId: string
     previousOutput?: string
     imageAttachments?: ImageAttachment[]
+    specContract?: SpecContract
   }): Promise<ActiveManagedPhase | null> {
     if (input.plan.status === 'complete') return null
 
@@ -557,6 +566,7 @@ export class SwarmOrchestrator {
         previousOutput: input.previousOutput ?? '',
         contextLabel: 'Manager context for this phase',
         autoAgentSelection: true,
+        specContract: input.specContract,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(...sessions)
@@ -578,6 +588,7 @@ export class SwarmOrchestrator {
       contextLabel: input.previousOutput ? 'Manager context for this phase' : undefined,
       imageAttachments: input.imageAttachments,
       autoAgentSelection: true,
+      specContract: input.specContract,
     })
 
     this.swarms.get(input.swarmId)?.sessions.push(firstSession)
@@ -594,10 +605,12 @@ export class SwarmOrchestrator {
     activePhase: ActiveManagedPhase
     completedPhaseOutputs: string[]
     decisionRound: number
+    specContract?: SpecContract
   }): Promise<void> {
     let activePhase: ActiveManagedPhase | null = input.activePhase
     const completedPhaseOutputs = [...input.completedPhaseOutputs]
     let decisionRound = input.decisionRound
+    let specContract: SpecContract | undefined = input.specContract
 
     while (activePhase) {
       if (!this.swarms.has(input.swarmId)) return
@@ -605,11 +618,19 @@ export class SwarmOrchestrator {
       const completedSessions = await this.completeManagedPhase({
         ...input,
         activePhase,
+        specContract,
       })
       if (!completedSessions) return
 
       const phaseOutput = buildManagedPhaseOutput(completedSessions)
       if (phaseOutput) completedPhaseOutputs.push(phaseOutput)
+
+      if (!specContract) {
+        const plannerSession = completedSessions.find((s) => isPlanningRole(s.role))
+        if (plannerSession?.output) {
+          specContract = extractSpecContract(plannerSession.output) ?? undefined
+        }
+      }
 
       if (decisionRound >= MANAGED_ORCHESTRATION_HARD_CAP) return
       decisionRound += 1
@@ -635,6 +656,7 @@ export class SwarmOrchestrator {
         threadId: input.threadId,
         previousOutput: orchestrationContext,
         imageAttachments: input.config.imageAttachments,
+        specContract,
       })
     }
   }
@@ -645,6 +667,7 @@ export class SwarmOrchestrator {
     repoPath: string
     config: SwarmConfig
     activePhase: ActiveManagedPhase
+    specContract?: SpecContract
   }): Promise<SpawnedSession[] | null> {
     if (input.activePhase.strategy === 'parallel') {
       for (const session of input.activePhase.sessions) {
@@ -686,6 +709,7 @@ export class SwarmOrchestrator {
         contextLabel: 'Manager context for this phase',
         imageAttachments: input.config.imageAttachments,
         autoAgentSelection: true,
+        specContract: input.specContract,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
@@ -710,6 +734,7 @@ export class SwarmOrchestrator {
     previousOutput: string
     contextLabel: string
     autoAgentSelection?: boolean
+    specContract?: SpecContract
   }): Promise<SpawnedSession[]> {
     return Promise.all(
       input.config.agents.map((agentConfig) =>
@@ -725,6 +750,7 @@ export class SwarmOrchestrator {
           contextLabel: input.contextLabel,
           imageAttachments: input.config.imageAttachments,
           autoAgentSelection: input.autoAgentSelection,
+          specContract: input.specContract,
         }),
       ),
     )
@@ -815,6 +841,7 @@ export class SwarmOrchestrator {
     let previousSession = input.previousSession
     let previousOutput = previousSession.output ?? ''
     let previousAgentConfig = input.previousAgentConfig
+    let specContract: SpecContract | undefined
 
     for (const agentConfig of input.remainingAgents) {
       if (!this.swarms.has(input.swarmId)) return
@@ -824,6 +851,10 @@ export class SwarmOrchestrator {
       if (completion.output?.trim()) previousOutput = completion.output
       if (completion.status !== 'done') return
       if (!this.swarms.has(input.swarmId)) return
+
+      if (!specContract && isPlanningRole(previousAgentConfig.role) && previousOutput) {
+        specContract = extractSpecContract(previousOutput) ?? undefined
+      }
 
       let effectiveAgentConfig = agentConfig
       if (previousAgentConfig.requireApprovalAfter) {
@@ -876,6 +907,7 @@ export class SwarmOrchestrator {
         swarmId: input.swarmId,
         threadId: input.threadId,
         previousOutput,
+        specContract,
       })
 
       this.swarms.get(input.swarmId)?.sessions.push(nextSession)
@@ -939,6 +971,7 @@ export class SwarmOrchestrator {
     extraInstruction?: string
     imageAttachments?: ImageAttachment[]
     autoAgentSelection?: boolean
+    specContract?: SpecContract
   }): Promise<SpawnedSession> {
     const dependencies = this.requireDependencies()
     const provisionalSessionId = randomUUID()
@@ -946,7 +979,11 @@ export class SwarmOrchestrator {
       input.basePrompt,
       input.agentConfig,
       input.previousOutput,
-      { contextLabel: input.contextLabel, extraInstruction: input.extraInstruction },
+      {
+        contextLabel: input.contextLabel,
+        extraInstruction: input.extraInstruction,
+        specContract: input.specContract,
+      },
     )
 
     const decision = await dependencies.routeModel({
@@ -1128,7 +1165,7 @@ function buildAgentPrompt(
   basePrompt: string,
   agentConfig: SwarmAgentConfig,
   previousOutput?: string,
-  options?: { contextLabel?: string; extraInstruction?: string },
+  options?: { contextLabel?: string; extraInstruction?: string; specContract?: SpecContract },
 ): string {
   const lines = [`[Role: ${agentConfig.role}]`, basePrompt.trim()]
 
@@ -1143,6 +1180,18 @@ function buildAgentPrompt(
 
   if (options?.extraInstruction?.trim()) {
     lines.push('', options.extraInstruction.trim())
+  }
+
+  const role = agentConfig.role
+  if (isPlanningRole(role)) {
+    lines.push(PLANNER_SDD_INSTRUCTION)
+  } else if (options?.specContract) {
+    lines.push('', buildSpecContext(options.specContract))
+    if (isImplementationRole(role)) {
+      lines.push(IMPLEMENTER_SPEC_INSTRUCTION)
+    } else if (isVerificationRole(role)) {
+      lines.push(VERIFIER_SPEC_INSTRUCTION)
+    }
   }
 
   return lines.join('\n')
