@@ -1167,7 +1167,21 @@ function buildAgentPrompt(
   previousOutput?: string,
   options?: { contextLabel?: string; extraInstruction?: string; specContract?: SpecContract },
 ): string {
-  const lines = [`[Role: ${agentConfig.role}]`, basePrompt.trim()]
+  const role = agentConfig.role
+  const lines = [`[Role: ${role}]`]
+
+  if (isPlanningRole(role)) {
+    lines.push(PLANNER_SDD_INSTRUCTION)
+  } else if (options?.specContract) {
+    lines.push('', buildSpecContext(options.specContract))
+    if (isImplementationRole(role)) {
+      lines.push(IMPLEMENTER_SPEC_INSTRUCTION)
+    } else if (isVerificationRole(role)) {
+      lines.push(VERIFIER_SPEC_INSTRUCTION)
+    }
+  }
+
+  lines.push('', basePrompt.trim())
 
   if (previousOutput?.trim()) {
     const label = options?.contextLabel ?? 'Context from previous step'
@@ -1180,18 +1194,6 @@ function buildAgentPrompt(
 
   if (options?.extraInstruction?.trim()) {
     lines.push('', options.extraInstruction.trim())
-  }
-
-  const role = agentConfig.role
-  if (isPlanningRole(role)) {
-    lines.push(PLANNER_SDD_INSTRUCTION)
-  } else if (options?.specContract) {
-    lines.push('', buildSpecContext(options.specContract))
-    if (isImplementationRole(role)) {
-      lines.push(IMPLEMENTER_SPEC_INSTRUCTION)
-    } else if (isVerificationRole(role)) {
-      lines.push(VERIFIER_SPEC_INSTRUCTION)
-    }
   }
 
   return lines.join('\n')

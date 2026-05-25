@@ -1,12 +1,5 @@
-import { DiffEditor } from '@monaco-editor/react'
 import { memo, useMemo, useState } from 'react'
 import type { DiffProposal } from '../../../../../shared/types'
-import { Button } from '../../../../components/ui'
-import {
-  DRACULA_THEME_NAME,
-  languageFromPath,
-  registerDraculaTheme,
-} from '../../../../lib/monaco'
 import { filePathsReferToSameFile } from '../../lib/diffProposalMatching'
 import { AnimatedDiffStat } from './AnimatedDiffStat'
 import { FileDiffModal } from './FileDiffModal'
@@ -35,21 +28,12 @@ export interface EditedFileEntry {
   proposal?: DiffProposal
 }
 
-const COLLAPSED_FILE_ROW_COUNT = 3
+const COLLAPSED_FILE_ROW_COUNT = 5
 
 type OrderedEditedFileEntry = EditedFileEntry & {
   lastEditedIndex: number
 }
 
-/**
- * EditedFilesCard — Codex-style "Edited N files" card.
- *
- * Header: file-edit icon + count + diff summary (+N -M) on the left;
- * Review control on the right.
- * Body: per-file rows (path truncated from left, +N -M, expand chevron).
- * Expanded row shows a simplified inline preview of the proposed content
- * (no Monaco — that lives in the right panel via the "View full diff" CTA).
- */
 export function EditedFilesCard({
   proposals,
   fallbackFiles,
@@ -68,40 +52,47 @@ export function EditedFilesCard({
   const visibleEntries = visibleEditedFileEntries(entries, showAllRows)
   const hiddenCount = Math.max(0, count - visibleEntries.length)
 
-  // The file whose diff is shown full-screen. One modal serves every row.
   const [modalEntry, setModalEntry] = useState<EditedFileEntry | null>(null)
 
   if (count === 0) return null
 
   return (
     <>
-      <article className="overflow-hidden rounded-card border border-hairline bg-card">
-        <header className="flex items-center justify-between gap-3 border-b border-hairline px-3 py-2.5">
+      <section className="flex flex-col gap-0.5">
+        <header className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="inline-flex shrink-0 text-secondary" aria-hidden="true">
+            <span className="inline-flex shrink-0 text-muted" aria-hidden="true">
               {iconFileEdit}
             </span>
-            <div className="text-sm font-medium text-primary">
+            <span className="text-xs font-medium text-secondary">
               Edited {count} file{count === 1 ? '' : 's'}
-            </div>
-            {hasVisibleStats ? (
+            </span>
+          </div>
+          {onReview && hasVisibleStats ? (
+            <button
+              type="button"
+              onClick={() => onReview()}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+            >
+              Review
               <AnimatedDiffStat
                 additions={totalAdditions}
                 deletions={totalDeletions}
-                className="text-xs"
+                className="text-[11px]"
               />
-            ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {onReview ? (
-              <Button variant="primary" size="sm" onClick={() => onReview()}>
-                Review
-              </Button>
-            ) : null}
-          </div>
+            </button>
+          ) : onReview ? (
+            <button
+              type="button"
+              onClick={() => onReview()}
+              className="rounded-md px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+            >
+              Review
+            </button>
+          ) : null}
         </header>
 
-        <ul className="divide-y divide-hairline">
+        <ul className="flex flex-col">
           {visibleEntries.map((entry) => (
             <FileRow
               key={entry.filePath}
@@ -115,10 +106,9 @@ export function EditedFilesCard({
               <button
                 type="button"
                 onClick={() => setShowAllRows(true)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+                className="flex w-full items-center gap-2 py-0.5 pl-5 text-left text-[11px] font-medium text-muted transition-colors hover:text-secondary"
               >
-                <span aria-hidden="true">{iconChevronDown}</span>
-                Show {hiddenCount} more file{hiddenCount === 1 ? '' : 's'}
+                {hiddenCount} more file{hiddenCount === 1 ? '' : 's'}…
               </button>
             </li>
           ) : showAllRows && count > COLLAPSED_FILE_ROW_COUNT ? (
@@ -126,20 +116,14 @@ export function EditedFilesCard({
               <button
                 type="button"
                 onClick={() => setShowAllRows(false)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
+                className="flex w-full items-center gap-2 py-0.5 pl-5 text-left text-[11px] font-medium text-muted transition-colors hover:text-secondary"
               >
-                <span
-                  aria-hidden="true"
-                  style={{ display: 'inline-block', transform: 'rotate(180deg)' }}
-                >
-                  {iconChevronDown}
-                </span>
-                Show fewer files
+                Show fewer
               </button>
             </li>
           ) : null}
         </ul>
-      </article>
+      </section>
 
       <FileDiffModal
         proposal={modalEntry?.proposal ?? null}
@@ -237,14 +221,12 @@ export interface FileRowProps {
 
 const FileRow = memo(function FileRow({
   entry,
-  onReview,
   onOpenDiff,
 }: FileRowProps) {
-  const [expanded, setExpanded] = useState(false)
   const { filePath, additions, deletions, proposal } = entry
   const hasVisibleStats = additions + deletions > 0
 
-  const handlePathClick = () => {
+  const handleClick = () => {
     if (resolveRowClick(entry) === 'modal') {
       onOpenDiff(entry)
     } else {
@@ -253,72 +235,27 @@ const FileRow = memo(function FileRow({
   }
 
   return (
-    <li className="flex flex-col">
-      <div className="group flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="shrink-0 text-secondary transition-colors hover:text-primary"
-          aria-expanded={expanded}
-          aria-label={expanded ? 'Collapse' : 'Expand'}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              display: 'inline-block',
-              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-              transition: 'transform 120ms ease-out',
-            }}
-          >
-            {iconChevronRight}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={handlePathClick}
-          className="min-w-0 flex-1 truncate text-left font-mono text-xs text-secondary transition-colors hover:text-primary"
+    <li>
+      <button
+        type="button"
+        onClick={handleClick}
+        className="group flex w-full items-center gap-2 py-0.5 pl-5 text-left transition-colors hover:bg-white/[.03]"
+        title={proposal ? `View diff — ${filePath}` : filePath}
+      >
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-[12px] leading-5 text-secondary transition-colors group-hover:text-primary"
           dir="rtl"
-          title={proposal ? `View diff — ${filePath}` : filePath}
         >
           {filePath}
-        </button>
+        </span>
         {hasVisibleStats ? (
-          <AnimatedDiffStat
-            additions={additions}
-            deletions={deletions}
-            className="shrink-0 text-xs"
-          />
+          <span className="shrink-0 font-mono text-[11px] tabular-nums">
+            <span className="text-accent-add">+{additions}</span>
+            <span className="mx-0.5 text-muted">-</span>
+            <span className="text-accent-del">{deletions}</span>
+          </span>
         ) : null}
-        <button
-          type="button"
-          onClick={() => void window.agentforge.system.openInEditor(filePath)}
-          className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
-          title="Open in editor"
-        >
-          {iconExternalLink}
-        </button>
-      </div>
-
-      {expanded ? (
-        <div className="border-t border-hairline bg-canvas/40 px-3 py-2">
-          {proposal ? (
-            <InlineDiffPreview proposal={proposal} />
-          ) : (
-            <div className="text-xs text-muted">No diff content available.</div>
-          )}
-          <div className="mt-2 flex items-center justify-end gap-2">
-            {onReview ? (
-              <button
-                type="button"
-                onClick={() => onReview(filePath)}
-                className="rounded px-2 py-1 text-xs text-secondary hover:bg-white/5 hover:text-primary"
-              >
-                View full diff
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
+      </button>
     </li>
   )
 }, areFileRowPropsEqual)
@@ -328,7 +265,6 @@ export function areFileRowPropsEqual(
   next: FileRowProps,
 ): boolean {
   return (
-    previous.onReview === next.onReview &&
     previous.onOpenDiff === next.onOpenDiff &&
     editedFileEntriesAreEqual(previous.entry, next.entry)
   )
@@ -363,33 +299,6 @@ function diffProposalsAreEqual(
     previous.deletions === next.deletions &&
     previous.baseHash === next.baseHash &&
     previous.status === next.status
-  )
-}
-
-function InlineDiffPreview({ proposal }: { proposal: DiffProposal }) {
-  return (
-    <div className="h-72 min-w-0 overflow-hidden rounded border border-hairline bg-card">
-      <DiffEditor
-        key={proposal.filePath}
-        height="100%"
-        theme={DRACULA_THEME_NAME}
-        beforeMount={registerDraculaTheme}
-        original={proposal.originalContent || ''}
-        modified={proposal.proposedContent || ''}
-        language={languageFromPath(proposal.filePath)}
-        options={{
-          readOnly: true,
-          originalEditable: false,
-          renderSideBySide: false,
-          minimap: { enabled: false },
-          fontSize: 11,
-          lineHeight: 17,
-          scrollBeyondLastLine: false,
-          automaticLayout: true,
-          wordWrap: 'on',
-        }}
-      />
-    </div>
   )
 }
 
@@ -436,8 +345,8 @@ function statsWithFallback(
   proposalStats: { additions: number; deletions: number },
   fallback?: EditedFileEntry,
 ): { additions: number; deletions: number } {
-  if (!fallback) return proposalStats
-  if (hasLineChanges(fallback)) return fallback
+  if (hasLineChanges(proposalStats)) return proposalStats
+  if (fallback && hasLineChanges(fallback)) return fallback
   return proposalStats
 }
 
@@ -490,22 +399,3 @@ const iconFileEdit = (
   </svg>
 )
 
-const iconChevronRight = (
-  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
-    <path d="m6 4 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
-
-const iconChevronDown = (
-  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
-    <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
-
-const iconExternalLink = (
-  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path d="M6.5 3.5H3a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1h8.5a1 1 0 0 0 1-1V10" strokeLinecap="round" />
-    <path d="M9.5 2.5h4v4" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M13.5 2.5 8 8" strokeLinecap="round" />
-  </svg>
-)

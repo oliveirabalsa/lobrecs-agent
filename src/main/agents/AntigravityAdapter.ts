@@ -114,10 +114,15 @@ export class AntigravityAdapter implements AgentAdapter {
         } satisfies AgentEvent)
       })
 
+      let readlineDone = !child.stdout
+      let stdoutRL: ReturnType<typeof createInterface> | undefined
       if (child.stdout) {
-        const rl = createInterface({ input: child.stdout })
-        rl.on('line', (line) => {
+        stdoutRL = createInterface({ input: child.stdout })
+        stdoutRL.on('line', (line) => {
           emitEvent(parseAntigravityLine(line, params.sessionId, parserState))
+        })
+        stdoutRL.on('close', () => {
+          readlineDone = true
         })
       }
 
@@ -134,6 +139,9 @@ export class AntigravityAdapter implements AgentAdapter {
         void (async () => {
           await transcriptWatcher.drain()
           transcriptWatcher.stop()
+          if (!readlineDone && stdoutRL) {
+            await new Promise<void>((resolve) => stdoutRL!.once('close', resolve))
+          }
           if (completed) return
 
           emitEvent({

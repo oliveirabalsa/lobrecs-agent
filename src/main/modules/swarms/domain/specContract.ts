@@ -31,7 +31,9 @@ export interface SpecContract {
 
 export const PLANNER_SDD_INSTRUCTION = [
   '',
-  'Spec-Driven Development: produce a Spec Contract using this format:',
+  '=== MANDATORY OUTPUT FORMAT — Spec-Driven Development ===',
+  'Your response MUST contain the following three sections. Downstream agents',
+  'cannot proceed without the Spec Contract JSON block. Do not skip it.',
   '',
   '## Approach',
   '[Description of the implementation approach and key decisions]',
@@ -63,28 +65,33 @@ export const PLANNER_SDD_INSTRUCTION = [
   '- File manifest must list every file that will change.',
   '- Test scenarios must reference acceptance criteria by ID.',
   '- Keep the spec focused — do not pad with vague or untestable criteria.',
+  '=== END MANDATORY OUTPUT FORMAT ===',
 ].join('\n')
 
 export const IMPLEMENTER_SPEC_INSTRUCTION = [
   '',
-  'You have received a Spec Contract from the planner phase. You MUST:',
+  '=== BINDING SPEC CONTRACT — Read before starting ===',
+  'A Spec Contract was produced by the planner phase (shown above). You MUST:',
   '1. Implement all interfaces listed in the spec with the specified signatures.',
   '2. Create, modify, or delete all files in the file manifest.',
   '3. Satisfy every acceptance criterion — each one is a hard requirement.',
   '4. Do not add features, refactors, or changes not described in the spec.',
   '5. Write or run tests covering all test scenarios.',
   '6. If you cannot satisfy a criterion, document why explicitly.',
+  '=== END BINDING SPEC CONTRACT ===',
 ].join('\n')
 
 export const VERIFIER_SPEC_INSTRUCTION = [
   '',
-  'A Spec Contract was produced by the planner phase. Verify the implementation against it:',
+  '=== BINDING SPEC CONTRACT — Verification checklist ===',
+  'A Spec Contract was produced by the planner phase (shown above). Verify the implementation against it:',
   '1. Check every acceptance criterion — mark each as PASS or FAIL with evidence.',
   '2. Verify all interfaces match the spec signatures (names, params, return types).',
   '3. Confirm all files in the manifest were changed as specified.',
   '4. Validate all test scenarios pass or are covered by existing tests.',
   '5. Report any deviations as spec violations with severity (blocking / warning).',
   '6. Summarize with a compliance score: number of criteria passed / total.',
+  '=== END BINDING SPEC CONTRACT ===',
 ].join('\n')
 
 export function extractSpecContract(output: string): SpecContract | null {

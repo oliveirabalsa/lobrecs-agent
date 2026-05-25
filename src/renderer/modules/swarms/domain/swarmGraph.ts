@@ -175,6 +175,10 @@ function textFromActivity(activity: AgentActivity): string {
       return 'Plan ready for review'
     case 'user-question':
       return activity.title
+    case 'todo-list': {
+      const completedCount = activity.items.filter((item) => item.completed).length
+      return `${completedCount}/${activity.items.length} to-dos complete`
+    }
     case 'swarm-step-approval':
       return `Continue to ${activity.nextRole}?`
     case 'model-recovery':
@@ -227,6 +231,9 @@ function summarizeActivities(events: readonly AgentEvent[]) {
       case 'user-question':
       case 'swarm-step-approval':
         counts.approvalCount += 1
+        break
+      case 'todo-list':
+        counts.messageCount += 1
         break
       case 'delegation':
         counts.messageCount += 1

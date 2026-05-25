@@ -7,21 +7,22 @@ import {
 import type { DiffProposal } from '../../../../../shared/types'
 
 describe('visibleEditedFileEntries', () => {
-  it('shows the first three already-ordered edited files by default', () => {
-    expect(visibleEditedFileEntries(['a.ts', 'b.ts', 'c.ts', 'd.ts'], false)).toEqual([
-      'a.ts',
-      'b.ts',
-      'c.ts',
-    ])
+  it('shows the first five already-ordered edited files by default', () => {
+    expect(
+      visibleEditedFileEntries(
+        ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts'],
+        false,
+      ),
+    ).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'])
   })
 
   it('shows every edited file after expansion', () => {
-    expect(visibleEditedFileEntries(['a.ts', 'b.ts', 'c.ts', 'd.ts'], true)).toEqual([
-      'a.ts',
-      'b.ts',
-      'c.ts',
-      'd.ts',
-    ])
+    expect(
+      visibleEditedFileEntries(
+        ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts'],
+        true,
+      ),
+    ).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts'])
   })
 })
 
@@ -58,8 +59,8 @@ describe('buildEditedFileEntries', () => {
       },
       {
         filePath: '/Users/leo/project/src/app.ts',
-        additions: 3,
-        deletions: 0,
+        additions: 10,
+        deletions: 1,
         proposal,
       },
     ])
@@ -193,14 +194,14 @@ describe('buildEditedFileEntries', () => {
     ).toEqual([
       {
         filePath: '/Users/leo/project/src/newer.ts',
-        additions: 2,
-        deletions: 0,
+        additions: 10,
+        deletions: 1,
         proposal: newerProposal,
       },
       {
         filePath: '/Users/leo/project/src/older.ts',
-        additions: 1,
-        deletions: 0,
+        additions: 10,
+        deletions: 1,
         proposal: olderProposal,
       },
     ])

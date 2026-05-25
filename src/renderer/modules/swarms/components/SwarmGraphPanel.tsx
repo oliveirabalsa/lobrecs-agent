@@ -680,6 +680,14 @@ function activityPreviewFromActivity(
       return { label: 'Plan ready', detail: `${activity.agentId} / ${activity.model}`, tone: 'warn' }
     case 'user-question':
       return { label: activity.title, detail: `${activity.questions.length} questions`, tone: 'warn' }
+    case 'todo-list': {
+      const completedCount = activity.items.filter((item) => item.completed).length
+      return {
+        label: 'To-dos',
+        detail: `${completedCount}/${activity.items.length} complete`,
+        tone: 'info',
+      }
+    }
     case 'swarm-step-approval':
       return {
         label: 'Step approval',

@@ -98,4 +98,42 @@ describe('buildSwarmGraph', () => {
     expect(graph.nodes[0]?.status).toBe('awaiting-approval')
     expect(graph.activeCount).toBe(1)
   })
+
+  it('summarizes todo-list activity output without breaking graph rendering', () => {
+    const sessions: Session[] = [
+      {
+        ...baseSession,
+        id: 'session-1',
+        prompt: '[Role: implementer]\nBuild it',
+        status: 'running',
+        createdAt: 1_000,
+      } as Session,
+    ]
+    const events = new Map<string, AgentEvent[]>([
+      [
+        'session-1',
+        [
+          {
+            type: 'activity',
+            sessionId: 'session-1',
+            timestamp: 1_200,
+            payload: {
+              kind: 'todo-list',
+              items: [
+                { id: 'todo-1', text: 'Ship the UI', completed: true },
+                { id: 'todo-2', text: 'Add tests', completed: false },
+              ],
+            },
+          },
+        ],
+      ],
+    ])
+
+    const graph = buildSwarmGraph(sessions, events)
+
+    expect(graph.nodes[0]).toMatchObject({
+      outputPreview: '1/2 to-dos complete',
+      messageCount: 1,
+    })
+  })
 })

@@ -199,6 +199,16 @@ export type AgentActivity =
       summary?: string
       error?: string
     }
+  | {
+      kind: 'todo-list'
+      items: TodoItem[]
+    }
+
+export interface TodoItem {
+  id: string
+  text: string
+  completed: boolean
+}
 
 export interface AgentEvent {
   type:

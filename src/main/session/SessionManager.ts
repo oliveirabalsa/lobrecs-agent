@@ -292,6 +292,7 @@ export type SessionManagerOptions = {
   delegateTaskRunner?: DelegateTaskRunner
   notifier?: NotifierCallback
   idleHeartbeatMs?: number | false
+  maxStallMs?: number | false
 }
 
 export class SessionManager {
@@ -316,6 +317,7 @@ export class SessionManager {
   private delegateTaskRunner?: DelegateTaskRunner
   private notifier?: NotifierCallback
   private readonly idleHeartbeatMs: number | false
+  private readonly maxStallMs: number | false
 
   constructor(options: SessionManagerOptions = {}) {
     this.adapterResolver = options.adapterResolver
@@ -327,6 +329,7 @@ export class SessionManager {
     this.delegateTaskRunner = options.delegateTaskRunner
     this.notifier = options.notifier
     this.idleHeartbeatMs = options.idleHeartbeatMs ?? 45_000
+    this.maxStallMs = options.maxStallMs ?? 300_000
 
     for (const adapter of options.adapters ?? []) {
       this.registerAdapter(adapter)
@@ -1293,8 +1296,26 @@ export class SessionManager {
       return
     }
 
+    const stallDuration = now - active.lastAgentEventAt
+    if (this.maxStallMs !== false && stallDuration >= this.maxStallMs) {
+      const stallSeconds = Math.round(stallDuration / 1000)
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Agent process stalled',
+          detail: `No output for ${stallSeconds}s — force-completing the session.`,
+          status: 'error',
+        },
+        timestamp: now,
+      })
+      this.cancel(sessionId)
+      return
+    }
+
     active.lastIdleHeartbeatAt = now
-    const idleSeconds = Math.max(1, Math.round((now - active.lastAgentEventAt) / 1000))
+    const idleSeconds = Math.max(1, Math.round(stallDuration / 1000))
     this.recordEvent({
       type: 'activity',
       sessionId,

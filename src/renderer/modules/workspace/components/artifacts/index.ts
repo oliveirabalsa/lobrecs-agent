@@ -69,3 +69,6 @@ export type { DiffReviewCardProps, DiffReviewFixSelection } from './DiffReviewCa
 
 export { DelegationCard } from './DelegationCard'
 export type { DelegationActivity, DelegationCardProps } from './DelegationCard'
+
+export { TodoCard } from './TodoCard'
+export type { TodoListActivity, TodoCardProps } from './TodoCard'

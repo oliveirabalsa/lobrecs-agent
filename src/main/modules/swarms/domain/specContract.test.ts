@@ -177,19 +177,21 @@ describe('buildSpecContext', () => {
 })
 
 describe('SDD instruction constants', () => {
-  it('planner instruction includes spec format', () => {
+  it('planner instruction includes spec format and mandatory framing', () => {
+    expect(PLANNER_SDD_INSTRUCTION).toContain('MANDATORY OUTPUT FORMAT')
     expect(PLANNER_SDD_INSTRUCTION).toContain('acceptanceCriteria')
     expect(PLANNER_SDD_INSTRUCTION).toContain('interfaces')
     expect(PLANNER_SDD_INSTRUCTION).toContain('fileManifest')
     expect(PLANNER_SDD_INSTRUCTION).toContain('testScenarios')
   })
 
-  it('implementer instruction references the spec contract', () => {
-    expect(IMPLEMENTER_SPEC_INSTRUCTION).toContain('Spec Contract')
+  it('implementer instruction references the binding spec contract', () => {
+    expect(IMPLEMENTER_SPEC_INSTRUCTION).toContain('BINDING SPEC CONTRACT')
     expect(IMPLEMENTER_SPEC_INSTRUCTION).toContain('acceptance criterion')
   })
 
-  it('verifier instruction includes PASS/FAIL reporting', () => {
+  it('verifier instruction includes binding framing and PASS/FAIL reporting', () => {
+    expect(VERIFIER_SPEC_INSTRUCTION).toContain('BINDING SPEC CONTRACT')
     expect(VERIFIER_SPEC_INSTRUCTION).toContain('PASS or FAIL')
     expect(VERIFIER_SPEC_INSTRUCTION).toContain('compliance score')
   })

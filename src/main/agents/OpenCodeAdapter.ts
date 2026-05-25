@@ -73,11 +73,16 @@ export class OpenCodeAdapter implements AgentAdapter {
       stdin: 'ignore',
     })
 
+    let readlineDone = !child.stdout
+    let stdoutRL: ReturnType<typeof createInterface> | undefined
     if (child.stdout) {
-      const rl = createInterface({ input: child.stdout })
-      rl.on('line', (line) => {
+      stdoutRL = createInterface({ input: child.stdout })
+      stdoutRL.on('line', (line) => {
         if (!line.trim()) return
         emitEvent(parseOpenCodeLine(line, params.sessionId, parserState))
+      })
+      stdoutRL.on('close', () => {
+        readlineDone = true
       })
     }
 
@@ -91,14 +96,20 @@ export class OpenCodeAdapter implements AgentAdapter {
     })
 
     child.on('exit', (code, signal) => {
-      if (completed) return
-
-      emitEvent({
-        type: 'session-complete',
-        sessionId: params.sessionId,
-        payload: completionPayload(code, signal, parserState),
-        timestamp: Date.now(),
-      } satisfies AgentEvent)
+      const emitFallbackComplete = (): void => {
+        if (completed) return
+        emitEvent({
+          type: 'session-complete',
+          sessionId: params.sessionId,
+          payload: completionPayload(code, signal, parserState),
+          timestamp: Date.now(),
+        } satisfies AgentEvent)
+      }
+      if (readlineDone) {
+        emitFallbackComplete()
+      } else {
+        stdoutRL!.once('close', emitFallbackComplete)
+      }
     })
 
     return {

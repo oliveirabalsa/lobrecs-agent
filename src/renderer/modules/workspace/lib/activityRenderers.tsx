@@ -20,6 +20,7 @@ import {
   PlanReviewCard,
   RanCommandsPill,
   SwarmStepApprovalCard,
+  TodoCard,
   UserQuestionPromptCard,
 } from '../components/artifacts'
 import type { UserQuestionActivity } from '../components/artifacts'
@@ -277,6 +278,9 @@ export function renderStreamItem(
           onSessionStarted={ctx.onSessionStarted}
         />
       )
+
+    case 'todo-list':
+      return <TodoCard key={key} activity={item} />
 
     case 'delegation':
       return <DelegationCard key={key} delegation={item} />
