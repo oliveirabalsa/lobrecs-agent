@@ -1,29 +1,37 @@
 import type {
   GitCommitAnalysisResult,
+  GitBranchActionInput,
   GitCommandResult,
   GitCommitInput,
+  GitCommitDetailRequest,
   GitCommitPlanExecutionInput,
   GitCommitPlanExecutionResult,
   GitDiffRequest,
   GitDiffReviewResult,
+  GitFileActionInput,
+  GitFileDiffRequest,
   GitFileSelection,
+  GitOperationResult,
   GitPendingChanges,
+  GitRepositorySnapshot,
   GitRemoteInfo,
+  GitSnapshotRequest,
+  GitStashActionInput,
+  GitStashDetailRequest,
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
   CreatePullRequestResult,
   GeneratePullRequestDraftInput,
   GeneratePullRequestDraftResult,
 } from '../../shared/contracts/git'
-import type { GitGraphData, GitGraphRequest } from '../../shared/contracts/gitGraph'
 import type { IpcInvoker } from './ipc'
 
 export interface GitApi {
   diff(request: GitDiffRequest): Promise<GitCommandResult>
   stage(request: GitFileSelection): Promise<GitCommandResult>
   revert(request: GitFileSelection): Promise<GitCommandResult>
-  commit(input: GitCommitInput): Promise<GitCommandResult>
-  push(projectId: string): Promise<GitCommandResult>
+  commit(input: GitCommitInput): Promise<GitOperationResult>
+  push(projectId: string): Promise<GitOperationResult>
   getPendingChanges(projectId: string): Promise<GitPendingChanges>
   analyzeCommitPlan(projectId: string): Promise<GitCommitAnalysisResult>
   reviewCurrentDiff(projectId: string, threadId?: string): Promise<GitDiffReviewResult>
@@ -35,11 +43,24 @@ export interface GitApi {
   createPrFromDraft(input: CreatePullRequestFromDraftInput): Promise<CreatePullRequestResult>
   createPr(input: CreatePullRequestInput): Promise<CreatePullRequestResult>
   createBranch(projectId: string, branchName: string): Promise<GitCommandResult>
-  checkoutBranch(projectId: string, branchName: string): Promise<GitCommandResult>
+  checkoutBranch(projectId: string, branchName: string): Promise<GitOperationResult>
   listBranches(projectId: string): Promise<string[]>
-  pull(projectId: string): Promise<GitCommandResult>
-  fetch(projectId: string): Promise<GitCommandResult>
-  getGraphData(request: GitGraphRequest): Promise<GitGraphData>
+  pull(projectId: string): Promise<GitOperationResult>
+  fetch(projectId: string): Promise<GitOperationResult>
+  getSnapshot(request: GitSnapshotRequest): Promise<GitRepositorySnapshot>
+  getFileDiff(request: GitFileDiffRequest): Promise<GitOperationResult>
+  getCommitDetail(request: GitCommitDetailRequest): Promise<GitOperationResult>
+  getStashDetail(request: GitStashDetailRequest): Promise<GitOperationResult>
+  stageFile(input: GitFileActionInput): Promise<GitOperationResult>
+  unstageFile(input: GitFileActionInput): Promise<GitOperationResult>
+  stageAll(projectId: string): Promise<GitOperationResult>
+  unstageAll(projectId: string): Promise<GitOperationResult>
+  deleteBranch(input: GitBranchActionInput): Promise<GitOperationResult>
+  discardFile(input: GitFileActionInput): Promise<GitOperationResult>
+  checkoutBranchAction(input: GitBranchActionInput): Promise<GitOperationResult>
+  applyStash(input: GitStashActionInput): Promise<GitOperationResult>
+  popStash(input: GitStashActionInput): Promise<GitOperationResult>
+  dropStash(input: GitStashActionInput): Promise<GitOperationResult>
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
@@ -65,6 +86,19 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     listBranches: (projectId) => ipcRenderer.invoke('git:list-branches', projectId),
     pull: (projectId) => ipcRenderer.invoke('git:pull', projectId),
     fetch: (projectId) => ipcRenderer.invoke('git:fetch', projectId),
-    getGraphData: (request) => ipcRenderer.invoke('git:get-graph-data', request),
+    getSnapshot: (request) => ipcRenderer.invoke('git:get-snapshot', request),
+    getFileDiff: (request) => ipcRenderer.invoke('git:get-file-diff', request),
+    getCommitDetail: (request) => ipcRenderer.invoke('git:get-commit-detail', request),
+    getStashDetail: (request) => ipcRenderer.invoke('git:get-stash-detail', request),
+    stageFile: (input) => ipcRenderer.invoke('git:stage-file', input),
+    unstageFile: (input) => ipcRenderer.invoke('git:unstage-file', input),
+    stageAll: (projectId) => ipcRenderer.invoke('git:stage-all', projectId),
+    unstageAll: (projectId) => ipcRenderer.invoke('git:unstage-all', projectId),
+    deleteBranch: (input) => ipcRenderer.invoke('git:delete-branch', input),
+    discardFile: (input) => ipcRenderer.invoke('git:discard-file', input),
+    checkoutBranchAction: (input) => ipcRenderer.invoke('git:checkout-branch-action', input),
+    applyStash: (input) => ipcRenderer.invoke('git:apply-stash', input),
+    popStash: (input) => ipcRenderer.invoke('git:pop-stash', input),
+    dropStash: (input) => ipcRenderer.invoke('git:drop-stash', input),
   }
 }

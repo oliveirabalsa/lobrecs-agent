@@ -468,6 +468,93 @@ describe('preload api shape', () => {
         expected: ['git:pull', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.git.getSnapshot({ projectId: 'project-1' }),
+        expected: ['git:get-snapshot', { projectId: 'project-1' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.getFileDiff({ projectId: 'project-1', path: 'src/main.ts' }),
+        expected: ['git:get-file-diff', { projectId: 'project-1', path: 'src/main.ts' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.getCommitDetail({ projectId: 'project-1', sha: 'abc1234' }),
+        expected: ['git:get-commit-detail', { projectId: 'project-1', sha: 'abc1234' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.getStashDetail({ projectId: 'project-1', ref: 'stash@{0}' }),
+        expected: ['git:get-stash-detail', { projectId: 'project-1', ref: 'stash@{0}' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.stageFile({ projectId: 'project-1', path: 'src/main.ts' }),
+        expected: ['git:stage-file', { projectId: 'project-1', path: 'src/main.ts' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.unstageFile({ projectId: 'project-1', path: 'src/main.ts' }),
+        expected: ['git:unstage-file', { projectId: 'project-1', path: 'src/main.ts' }],
+      },
+      {
+        call: (agentforge) => agentforge.git.stageAll('project-1'),
+        expected: ['git:stage-all', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.git.unstageAll('project-1'),
+        expected: ['git:unstage-all', 'project-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.deleteBranch({ projectId: 'project-1', branchName: 'old-branch' }),
+        expected: ['git:delete-branch', { projectId: 'project-1', branchName: 'old-branch' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.discardFile({ projectId: 'project-1', path: 'src/main.ts' }),
+        expected: ['git:discard-file', { projectId: 'project-1', path: 'src/main.ts' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.checkoutBranchAction({
+            projectId: 'project-1',
+            branchName: 'feat/git-menu',
+          }),
+        expected: [
+          'git:checkout-branch-action',
+          { projectId: 'project-1', branchName: 'feat/git-menu' },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.applyStash({ projectId: 'project-1', ref: 'stash@{0}' }),
+        expected: ['git:apply-stash', { projectId: 'project-1', ref: 'stash@{0}' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.popStash({
+            projectId: 'project-1',
+            ref: 'stash@{0}',
+            confirmed: true,
+          }),
+        expected: [
+          'git:pop-stash',
+          { projectId: 'project-1', ref: 'stash@{0}', confirmed: true },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.dropStash({
+            projectId: 'project-1',
+            ref: 'stash@{0}',
+            confirmed: true,
+          }),
+        expected: [
+          'git:drop-stash',
+          { projectId: 'project-1', ref: 'stash@{0}', confirmed: true },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.git.getPendingChanges('project-1'),
         expected: ['git:get-pending-changes', 'project-1'],
       },

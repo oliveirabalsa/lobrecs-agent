@@ -195,3 +195,141 @@ export interface GitPrTemplateRequest {
   projectId: string
   provider: GitProviderType
 }
+
+export type GitTuiPanelId = 'status' | 'files' | 'branches' | 'commits' | 'stash'
+
+export type GitFileStage = 'staged' | 'unstaged' | 'untracked'
+
+export type GitWorkspaceFileStatus =
+  | GitFileChangeStatus
+  | 'unchanged'
+  | 'conflicted'
+  | 'unknown'
+
+export interface GitBranchState {
+  currentBranch?: string
+  upstreamBranch?: string
+  headSha?: string
+  detached: boolean
+  ahead: number
+  behind: number
+}
+
+export interface GitFileEntry {
+  id: string
+  path: string
+  previousPath?: string
+  status: GitWorkspaceFileStatus
+  staged: boolean
+  stagedStatus: GitWorkspaceFileStatus
+  unstagedStatus: GitWorkspaceFileStatus
+  stage: GitFileStage
+  conflict: boolean
+}
+
+export interface GitBranchEntry {
+  name: string
+  current: boolean
+  upstream?: string
+  headSha?: string
+  lastCommitDate?: string
+  lastCommitSubject?: string
+  ahead: number
+  behind: number
+}
+
+export interface GitCommitEntry {
+  sha: string
+  hash: string
+  shortSha: string
+  shortHash: string
+  subject: string
+  summary: string
+  author: string
+  date: string
+  refs: string[]
+  graph: string
+}
+
+export interface GitStashEntry {
+  ref: string
+  id: string
+  index: number
+  sha: string
+  message: string
+  relativeDate: string
+  date: string
+}
+
+export interface GitRemoteEntry {
+  name: string
+  url: string
+  direction: 'fetch' | 'push'
+}
+
+export interface GitOperationState {
+  status: 'idle' | 'running' | 'success' | 'error'
+  kind?: string
+  running?: boolean
+  message?: string
+  stdout?: string
+  stderr?: string
+}
+
+export interface GitRepositorySnapshot {
+  projectId: string
+  repoPath: string
+  branch: GitBranchState
+  files: GitFileEntry[]
+  branches: GitBranchEntry[]
+  commits: GitCommitEntry[]
+  stash: GitStashEntry[]
+  remotes: GitRemoteEntry[]
+  capturedAt: string
+  operation?: GitOperationState
+}
+
+export interface GitSnapshotRequest {
+  projectId: string
+  commitLimit?: number
+}
+
+export interface GitFileDiffRequest {
+  projectId: string
+  path?: string
+}
+
+export interface GitCommitDetailRequest {
+  projectId: string
+  sha?: string
+  hash?: string
+}
+
+export interface GitStashDetailRequest {
+  projectId: string
+  ref?: string
+  stashId?: string
+}
+
+export interface GitFileActionInput {
+  projectId: string
+  path: string
+}
+
+export interface GitBranchActionInput {
+  projectId: string
+  branchName: string
+}
+
+export interface GitStashActionInput {
+  projectId: string
+  ref?: string
+  stashId?: string
+  confirmed?: boolean
+}
+
+export interface GitOperationResult extends GitCommandResult {
+  ok: boolean
+  message: string
+  requiresConfirmation?: boolean
+}

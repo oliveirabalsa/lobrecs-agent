@@ -2,17 +2,22 @@ import { ipcMain } from 'electron'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
-import { buildGitGraphData } from '../application/gitGraphService'
+import { GitWorkspaceService, validateBranchName } from '../application/gitWorkspaceService'
 import { PullRequestWorkflowService } from '../application/pullRequestWorkflowService'
-import { pushCurrentBranch } from '../infrastructure/pushCurrentBranch'
 import { runGit } from '../infrastructure/runGit'
 import { reviewIssuesStore } from '../../../store'
 import type {
+  GitBranchActionInput,
   GitCommitInput,
+  GitCommitDetailRequest,
   GitDiffRequest,
+  GitFileActionInput,
+  GitFileDiffRequest,
   GitFileSelection,
   GitCommitPlanExecutionInput,
-  GitGraphRequest,
+  GitSnapshotRequest,
+  GitStashActionInput,
+  GitStashDetailRequest,
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
   GeneratePullRequestDraftInput,
@@ -21,6 +26,7 @@ import type {
 export function registerGitHandlers(context: MainIpcContext): void {
   const workflowService = new GitCommitWorkflowService(context)
   const prWorkflowService = new PullRequestWorkflowService(context)
+  const gitWorkspaceService = new GitWorkspaceService()
 
   ipcMain.handle('git:diff', async (_event, request: GitDiffRequest) => {
     const project = requireProject(request.projectId)
@@ -50,15 +56,12 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:commit', async (_event, input: GitCommitInput) => {
     const project = requireProject(input.projectId)
-    return runGit(['commit', '-m', input.message], project.repoPath)
+    return gitWorkspaceService.commit(project.repoPath, input)
   })
 
   ipcMain.handle('git:push', async (_event, projectId: string) => {
     const project = requireProject(projectId)
-    const branch = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], project.repoPath)
-    if (branch.exitCode !== 0) return branch
-
-    return pushCurrentBranch(project.repoPath, branch.stdout.trim())
+    return gitWorkspaceService.push(project.repoPath)
   })
 
   ipcMain.handle('git:get-pending-changes', async (_event, projectId: string) => {
@@ -132,8 +135,10 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:checkout-branch', async (_event, projectId: string, branchName: string) => {
     const project = requireProject(projectId)
-    const name = await validateBranchName(branchName, project.repoPath)
-    return runGit(['switch', name], project.repoPath)
+    return gitWorkspaceService.checkoutBranch(project.repoPath, {
+      projectId,
+      branchName,
+    })
   })
 
   ipcMain.handle('git:list-branches', async (_event, projectId: string) => {
@@ -148,28 +153,81 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:pull', async (_event, projectId: string) => {
     const project = requireProject(projectId)
-    return runGit(['pull'], project.repoPath)
+    return gitWorkspaceService.pull(project.repoPath)
   })
 
   ipcMain.handle('git:fetch', async (_event, projectId: string) => {
     const project = requireProject(projectId)
-    return runGit(['fetch'], project.repoPath)
+    return gitWorkspaceService.fetch(project.repoPath)
   })
 
-  ipcMain.handle('git:get-graph-data', async (_event, request: GitGraphRequest) => {
+  ipcMain.handle('git:get-snapshot', async (_event, request: GitSnapshotRequest) => {
     const project = requireProject(request.projectId)
-    return buildGitGraphData(request.projectId, project.repoPath, context.worktreeManager)
+    return gitWorkspaceService.getSnapshot(project.repoPath, request)
   })
-}
 
-async function validateBranchName(branchName: string, repoPath: string): Promise<string> {
-  const name = branchName.trim()
-  if (!name) {
-    throw new Error('Branch name is required.')
-  }
+  ipcMain.handle('git:get-file-diff', async (_event, request: GitFileDiffRequest) => {
+    const project = requireProject(request.projectId)
+    return gitWorkspaceService.getFileDiff(project.repoPath, request)
+  })
 
-  const result = await runGit(['check-ref-format', '--branch', name], repoPath)
-  if (result.exitCode === 0) return name
+  ipcMain.handle('git:get-commit-detail', async (_event, request: GitCommitDetailRequest) => {
+    const project = requireProject(request.projectId)
+    return gitWorkspaceService.getCommitDetail(project.repoPath, request)
+  })
 
-  throw new Error(result.stderr.trim() || result.stdout.trim() || 'Invalid branch name.')
+  ipcMain.handle('git:get-stash-detail', async (_event, request: GitStashDetailRequest) => {
+    const project = requireProject(request.projectId)
+    return gitWorkspaceService.getStashDetail(project.repoPath, request)
+  })
+
+  ipcMain.handle('git:stage-file', async (_event, input: GitFileActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.stageFile(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:unstage-file', async (_event, input: GitFileActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.unstageFile(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:stage-all', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    return gitWorkspaceService.stageAll(project.repoPath)
+  })
+
+  ipcMain.handle('git:unstage-all', async (_event, projectId: string) => {
+    const project = requireProject(projectId)
+    return gitWorkspaceService.unstageAll(project.repoPath)
+  })
+
+  ipcMain.handle('git:delete-branch', async (_event, input: GitBranchActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.deleteBranch(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:discard-file', async (_event, input: GitFileActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.discardFile(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:checkout-branch-action', async (_event, input: GitBranchActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.checkoutBranch(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:apply-stash', async (_event, input: GitStashActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.applyStash(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:pop-stash', async (_event, input: GitStashActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.popStash(project.repoPath, input)
+  })
+
+  ipcMain.handle('git:drop-stash', async (_event, input: GitStashActionInput) => {
+    const project = requireProject(input.projectId)
+    return gitWorkspaceService.dropStash(project.repoPath, input)
+  })
 }
