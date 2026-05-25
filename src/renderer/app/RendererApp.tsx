@@ -185,8 +185,8 @@ export function RendererApp() {
     setShellView('workspace')
   }, [workspace])
 
-  const handleOpenGitGraph = useCallback(() => {
-    workspace.setMainView('git-graph')
+  const handleOpenGit = useCallback(() => {
+    workspace.setMainView('git')
     setMobileSidebarOpen(false)
     setShellView('workspace')
   }, [workspace])
@@ -335,12 +335,12 @@ export function RendererApp() {
           onPlugins={handleOpenExtensions}
           onCliTools={handleOpenCliTools}
           onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
-          onOpenGitGraph={workspace.selectedProject ? handleOpenGitGraph : undefined}
+          onOpenGit={workspace.selectedProject ? handleOpenGit : undefined}
           onOpenUsage={handleOpenUsage}
           onOpenSettings={handleOpenSettings}
           settingsActive={shellView === 'settings'}
           cliToolsActive={shellView === 'cli-tools'}
-          gitGraphActive={shellView === 'workspace' && workspace.mainView === 'git-graph'}
+          gitActive={shellView === 'workspace' && workspace.mainView === 'git'}
           usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
         />
         <ResizeHandle side="right" onPointerDown={startSidebarResize} />
@@ -391,12 +391,12 @@ export function RendererApp() {
               onPlugins={handleOpenExtensions}
               onCliTools={handleOpenCliTools}
               onAutomations={workspace.selectedProject ? handleOpenAutomations : undefined}
-              onOpenGitGraph={workspace.selectedProject ? handleOpenGitGraph : undefined}
+              onOpenGit={workspace.selectedProject ? handleOpenGit : undefined}
               onOpenUsage={handleOpenUsage}
               onOpenSettings={handleOpenSettings}
               settingsActive={shellView === 'settings'}
               cliToolsActive={shellView === 'cli-tools'}
-              gitGraphActive={shellView === 'workspace' && workspace.mainView === 'git-graph'}
+              gitActive={shellView === 'workspace' && workspace.mainView === 'git'}
               usageActive={shellView === 'workspace' && workspace.mainView === 'costs'}
             />
           </div>

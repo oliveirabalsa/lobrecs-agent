@@ -16,7 +16,7 @@ import { isSessionStatus } from '../../sessions/domain/sessionStatus'
 import { useTabs, type Tab } from '../../sessions/state/tabs'
 import type { ActiveSessionMeta, StartedSessionSummary } from '../../sessions/types'
 
-export type MainView = 'workspace' | 'costs' | 'automations' | 'memory' | 'git-graph'
+export type MainView = 'workspace' | 'costs' | 'automations' | 'memory' | 'git'
 
 const ACTIVE_THREAD_KEY_PREFIX = 'activeThread:'
 const BLOCKING_SESSION_STATUSES = new Set<SessionStatus>([

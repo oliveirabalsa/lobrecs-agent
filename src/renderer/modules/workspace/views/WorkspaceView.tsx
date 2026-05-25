@@ -15,7 +15,7 @@ import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
 import { ContextExplorer } from '../../context'
 import { CostDashboard } from '../../costs'
-import { GitGraphPanel } from '../../git-graph'
+import { GitTuiPanel } from '../../git'
 import { MemoryManager } from '../../memory'
 import { ReviewInboxPanel } from '../../reviews'
 import {
@@ -1087,11 +1087,9 @@ export function WorkspaceView({
                   <CostDashboard project={selectedProject} />
                 ) : mainView === 'automations' ? (
                   <AutomationManager project={selectedProject} />
-                ) : mainView === 'git-graph' ? (
-                  <GitGraphPanel
+                ) : mainView === 'git' ? (
+                  <GitTuiPanel
                     project={selectedProject}
-                    onOpenSession={handleOpenSessionFromGraph}
-                    onOpenBranchManager={handleOpenBranchManagerFromGraph}
                   />
                 ) : (
                   <MemoryManager project={selectedProject} />
