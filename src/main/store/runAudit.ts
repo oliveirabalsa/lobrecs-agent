@@ -3,6 +3,7 @@ import type {
   RunAuditPhase,
   RunAuditRecord,
   RunAuditStopReason,
+  VisualEvidenceRecord,
 } from '../../shared/types'
 import { getDb } from './db'
 
@@ -22,6 +23,7 @@ type RunAuditRow = {
   repair_session_id: string | null
   stop_reason: RunAuditStopReason | null
   final_status: 'passed' | 'failed' | 'pending' | null
+  visual_evidence: string | null
   created_at: number
 }
 
@@ -40,6 +42,7 @@ export interface CreateRunAuditInput {
   repairSessionId?: string
   stopReason?: RunAuditStopReason
   finalStatus?: 'passed' | 'failed' | 'pending'
+  visualEvidence?: VisualEvidenceRecord
 }
 
 function rowToRecord(row: RunAuditRow): RunAuditRecord {
@@ -59,8 +62,14 @@ function rowToRecord(row: RunAuditRow): RunAuditRecord {
     repairSessionId: row.repair_session_id ?? undefined,
     stopReason: row.stop_reason ?? undefined,
     finalStatus: row.final_status ?? undefined,
+    visualEvidence: parseVisualEvidence(row.visual_evidence),
     createdAt: row.created_at,
   }
+}
+
+function parseVisualEvidence(value: string | null): VisualEvidenceRecord | undefined {
+  if (!value) return undefined
+  return JSON.parse(value) as VisualEvidenceRecord
 }
 
 export const runAuditStore = {
@@ -74,9 +83,10 @@ export const runAuditStore = {
           INSERT INTO run_audit_records (
             id, spec_run_id, session_id, thread_id, attempt, phase,
             recipe_id, recipe_label, command, exit_code, output_tail,
-            changed_files, repair_session_id, stop_reason, final_status, created_at
+            changed_files, repair_session_id, stop_reason, final_status, visual_evidence,
+            created_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -95,6 +105,7 @@ export const runAuditStore = {
         input.repairSessionId ?? null,
         input.stopReason ?? null,
         input.finalStatus ?? null,
+        input.visualEvidence ? JSON.stringify(input.visualEvidence) : null,
         now,
       )
 

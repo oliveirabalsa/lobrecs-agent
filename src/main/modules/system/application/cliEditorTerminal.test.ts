@@ -241,7 +241,7 @@ describe('CliEditorTerminalService', () => {
     expect(detectEditors).not.toHaveBeenCalled()
     expect(spawnPty).toHaveBeenCalledWith(
       '/bin/zsh',
-      ['-i', '-l'],
+      ['-i'],
       expect.objectContaining({
         cwd: path.resolve('/tmp/repo'),
         env: expect.objectContaining({ SHELL: '/bin/zsh' }),

@@ -39,7 +39,7 @@ describe('modelDiscovery', () => {
     })
   })
 
-  it('parses all OpenCode model lines with provider labels', () => {
+  it('parses OpenCode models and filters to only minimax-coding-plan provider', () => {
     const models = parseOpenCodeModels(
       [
         'opencode/minimax-m2.5-free',
@@ -48,30 +48,25 @@ describe('modelDiscovery', () => {
         'minimax-coding-plan/MiniMax-M2',
         'minimax-coding-plan/MiniMax-M2.5',
         'minimax-coding-plan/MiniMax-M2.7',
+        'other-provider/model-1',
       ].join('\n'),
     )
 
+    // Should only include minimax-coding-plan models and other non-minimax providers
     expect(models.map((model) => model.id)).toEqual([
-      'opencode/minimax-m2.5-free',
-      'minimax/MiniMax-M2.7',
-      'minimax-cn-coding-plan/MiniMax-M2.7',
       'minimax-coding-plan/MiniMax-M2',
       'minimax-coding-plan/MiniMax-M2.5',
       'minimax-coding-plan/MiniMax-M2.7',
+      'other-provider/model-1',
     ])
 
     expect(models[0]).toMatchObject({
-      label: 'minimax-m2.5-free',
-      agentId: 'opencode',
-    })
-
-    expect(models[3]).toMatchObject({
       label: 'MiniMax-M2 (MiniMax Token Plan)',
       agentId: 'opencode',
     })
 
     expect(models[2]).toMatchObject({
-      label: 'MiniMax-M2.7 (MiniMax CN)',
+      label: 'MiniMax-M2.7 (MiniMax Token Plan)',
       agentId: 'opencode',
     })
   })
@@ -121,6 +116,15 @@ describe('modelDiscovery', () => {
       'gemini-3.0-pro',
       'gemini-3.1-pro',
       'gemini-3.5-flash',
+    ])
+  })
+
+  it('provides safe Cursor fallback models without credential discovery', () => {
+    expect(fallbackModelsForAgent('cursor').map((model) => model.id)).toEqual([
+      'auto',
+      'gpt-5',
+      'sonnet-4',
+      'sonnet-4-thinking',
     ])
   })
 

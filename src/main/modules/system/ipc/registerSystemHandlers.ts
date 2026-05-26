@@ -1,10 +1,13 @@
-import { app, dialog, ipcMain, shell, type WebContents } from 'electron'
+import { app, clipboard, dialog, ipcMain, nativeImage, shell, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { listAgentModelCatalogs } from '../../agents/application/listAgentModelCatalogs'
+import { getAgentProfileDoctorReport } from '../../agents/application/agentProfileService'
 import { isSupportedAgentId } from '../../agents/domain/isSupportedAgentId'
+import { projectsStore } from '../../../store'
 import { readMarkdownDocument } from '../application/markdownDocument'
+import { DoctorService } from '../application/doctor'
 import {
   CLI_EDITOR_TERMINAL_DATA_CHANNEL,
   CLI_EDITOR_TERMINAL_EXIT_CHANNEL,
@@ -12,8 +15,18 @@ import {
 } from '../application/cliEditorTerminal'
 import { cliEditorTerminalService } from '../application/cliEditorTerminalService'
 import { detectEditors } from '../application/detectEditors'
+import {
+  createImageSaveBuffer,
+  imageSaveRequiresConversion,
+  readImagePreviewSource,
+  toImageSaveFileName,
+} from '../application/imagePreviewFile'
 import { launchEditor } from '../application/launchEditor'
 import { listManagedCliRuntimes, runManagedCliAction } from '../application/managedCliRuntimes'
+import {
+  assertInsideProjectOrTrustedRoots,
+  assertKnownProjectRoot,
+} from '../application/trustedPaths'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import type {
   AdapterCapability,
@@ -24,14 +37,23 @@ import type {
   CliEditorTerminalWriteInput,
   EditorInfo,
   ImageAttachment,
+  ImagePreviewSourceInput,
   ManagedCliActionResult,
   ManagedCliStatus,
   MarkdownDocument,
   OpenInEditorInput,
-  ReadMarkdownDocumentInput,
   RunManagedCliActionInput,
   SaveImageAttachmentInput,
   SupportedAgentId,
+} from '../../../../shared/types'
+import {
+  validateCliEditorTerminalResizeInput,
+  validateCliEditorTerminalStartInput,
+  validateCliEditorTerminalWriteInput,
+  validateOpenEditorPath,
+  validateOpenInEditorInput,
+  validateReadMarkdownDocumentInput,
+  validateSessionId,
 } from '../../../../shared/types'
 
 const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
@@ -42,24 +64,69 @@ const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
 }
 
 export function registerSystemHandlers(context: MainIpcContext): void {
-  ipcMain.handle('system:open-editor', async (_event, filePath: string) => {
+  ipcMain.handle('system:open-editor', async (_event, rawFilePath: unknown) => {
+    const filePath = assertInsideProjectOrTrustedRoots(
+      validateOpenEditorPath(rawFilePath),
+      projectsStore.list(),
+      'Files can only be opened from saved project roots or trusted generated output.',
+    )
     await shell.openPath(filePath)
   })
   ipcMain.handle(
     'system:read-markdown-document',
-    async (_event, input: ReadMarkdownDocumentInput): Promise<MarkdownDocument> =>
-      readMarkdownDocument(input),
+    async (_event, rawInput: unknown): Promise<MarkdownDocument> =>
+      readMarkdownDocument(validateReadMarkdownDocumentInput(rawInput)),
   )
   ipcMain.handle('system:select-directory', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return result.canceled ? null : result.filePaths[0]
   })
+  ipcMain.handle('system:select-background-image', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] },
+      ],
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+  ipcMain.handle(
+    'system:load-background-image',
+    async (_event, filePath: string): Promise<string | null> => {
+      if (!filePath) return null
+      try {
+        const buffer = await readFile(filePath)
+        const ext = path.extname(filePath).toLowerCase().slice(1)
+        const mime =
+          ext === 'svg' ? 'image/svg+xml'
+            : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+            : ext === 'png' ? 'image/png'
+            : ext === 'webp' ? 'image/webp'
+            : ext === 'gif' ? 'image/gif'
+            : ext === 'bmp' ? 'image/bmp'
+            : 'application/octet-stream'
+        return `data:${mime};base64,${buffer.toString('base64')}`
+      } catch {
+        return null
+      }
+    },
+  )
   ipcMain.handle('system:check-agent', async (_event, agentId: AgentId) => {
     if (!isSupportedAgentId(agentId)) return false
     return context.adapters.get(agentId)?.isInstalled() ?? false
   })
   ipcMain.handle('system:list-agent-models', async () => listAgentModelCatalogs(context))
   ipcMain.handle('system:list-capabilities', async () => listCapabilities(context))
+  ipcMain.handle('system:agent-profile-doctor', async (_event, projectId: string) => {
+    const [capabilities, modelCatalogs] = await Promise.all([
+      listCapabilities(context),
+      listAgentModelCatalogs(context),
+    ])
+    return getAgentProfileDoctorReport({ projectId, capabilities, modelCatalogs })
+  })
+  ipcMain.handle('system:run-doctor', async (_event, projectId?: string) => {
+    return new DoctorService(context).runDoctor(projectId)
+  })
   ipcMain.handle('system:list-verification-recipes', async (_event, projectId?: string) =>
     context.settingsService.getEffective(projectId).settings.verification.recipes,
   )
@@ -78,35 +145,83 @@ export function registerSystemHandlers(context: MainIpcContext): void {
       context.settingsService.getGlobal().agents.imageAttachments.maxSizeMb,
     ),
   )
+  ipcMain.handle(
+    'system:copy-image-to-clipboard',
+    async (_event, input: ImagePreviewSourceInput) => {
+      const source = await readImagePreviewSource(input.source)
+      const image = source.filePath
+        ? nativeImage.createFromPath(source.filePath)
+        : nativeImage.createFromDataURL(source.source)
+
+      if (image.isEmpty()) {
+        throw new Error('Unable to copy this image preview.')
+      }
+
+      clipboard.writeImage(image)
+    },
+  )
+  ipcMain.handle('system:save-image-file', async (_event, input: ImagePreviewSourceInput) => {
+    const source = await readImagePreviewSource(input.source)
+    const result = await dialog.showSaveDialog({
+      defaultPath: toImageSaveFileName(input.suggestedName, source.mimeType),
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+      ],
+    })
+
+    if (result.canceled || !result.filePath) {
+      return null
+    }
+
+    const image = imageSaveRequiresConversion(result.filePath)
+      ? source.filePath
+        ? nativeImage.createFromPath(source.filePath)
+        : nativeImage.createFromDataURL(source.source)
+      : undefined
+
+    if (image?.isEmpty()) {
+      throw new Error('Unable to save this image preview.')
+    }
+
+    const buffer = createImageSaveBuffer(source, result.filePath, image)
+    await writeFile(result.filePath, buffer)
+    return result.filePath
+  })
   ipcMain.handle('system:list-editors', async (): Promise<EditorInfo[]> => {
     const editors = await detectEditors()
     return editors.map(({ id, name, kind }) => ({ id, name, kind }))
   })
-  ipcMain.handle('system:open-in-editor', async (_event, input: OpenInEditorInput) => {
+  ipcMain.handle('system:open-in-editor', async (_event, rawInput: unknown) => {
+    const input: OpenInEditorInput = validateOpenInEditorInput(rawInput)
+    assertKnownProjectRoot(input.repoPath, projectsStore.list())
     await launchEditor(input)
   })
   ipcMain.handle(
     'system:start-cli-editor-terminal',
-    async (event, input: CliEditorTerminalStartInput): Promise<CliEditorTerminalSession> => {
+    async (event, rawInput: unknown): Promise<CliEditorTerminalSession> => {
+      const input: CliEditorTerminalStartInput = validateCliEditorTerminalStartInput(rawInput)
+      assertKnownProjectRoot(input.repoPath, projectsStore.list())
       return cliEditorTerminalService.start(input, createCliEditorTerminalEmitter(event.sender))
     },
   )
   ipcMain.handle(
     'system:write-cli-editor-terminal',
-    async (_event, input: CliEditorTerminalWriteInput): Promise<void> => {
+    async (_event, rawInput: unknown): Promise<void> => {
+      const input: CliEditorTerminalWriteInput = validateCliEditorTerminalWriteInput(rawInput)
       cliEditorTerminalService.write(input)
     },
   )
   ipcMain.handle(
     'system:resize-cli-editor-terminal',
-    async (_event, input: CliEditorTerminalResizeInput): Promise<void> => {
+    async (_event, rawInput: unknown): Promise<void> => {
+      const input: CliEditorTerminalResizeInput = validateCliEditorTerminalResizeInput(rawInput)
       cliEditorTerminalService.resize(input)
     },
   )
   ipcMain.handle(
     'system:stop-cli-editor-terminal',
-    async (_event, sessionId: string): Promise<void> => {
-      cliEditorTerminalService.stop(sessionId)
+    async (_event, rawSessionId: unknown): Promise<void> => {
+      cliEditorTerminalService.stop(validateSessionId(rawSessionId))
     },
   )
 }
@@ -186,7 +301,7 @@ function safeBaseName(name?: string): string | undefined {
   return normalized || undefined
 }
 
-async function listCapabilities(context: MainIpcContext): Promise<AdapterCapability[]> {
+export async function listCapabilities(context: MainIpcContext): Promise<AdapterCapability[]> {
   return Promise.all(
     [...context.adapters.entries()].map(async ([agentId, adapter]) => ({
       agentId,
@@ -197,7 +312,7 @@ async function listCapabilities(context: MainIpcContext): Promise<AdapterCapabil
   )
 }
 
-function capabilityFlags(
+export function capabilityFlags(
   agentId: SupportedAgentId,
 ): Omit<AdapterCapability, 'agentId' | 'name' | 'installed'> {
   if (agentId === 'codex') {
@@ -230,6 +345,18 @@ function capabilityFlags(
       supportsResume: false,
       supportsFileAttachments: false,
       supportsCustomAgents: true,
+      supportsMcp: true,
+      supportsApprovalMode: true,
+      supportsModelListing: false,
+    }
+  }
+
+  if (agentId === 'cursor') {
+    return {
+      supportsStreamingJson: true,
+      supportsResume: false,
+      supportsFileAttachments: false,
+      supportsCustomAgents: false,
       supportsMcp: true,
       supportsApprovalMode: true,
       supportsModelListing: false,

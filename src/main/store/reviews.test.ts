@@ -122,6 +122,152 @@ describe('reviewIssuesStore', () => {
     })
     expect(reviewIssuesStore.list({ projectId: 'project-1' }).counts.fixing).toBe(1)
   })
+
+  describe('savePrReviewIssues', () => {
+    it('persists PR findings stamped with github provider and PR metadata', () => {
+      const issues = reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            {
+              id: 'finding-1',
+              severity: 'high',
+              category: 'bug',
+              title: 'Missing null guard',
+              detail: 'Dereferences possibly-undefined user.',
+              filePath: 'src/handler.ts',
+              line: 88,
+            },
+          ],
+        }),
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        headSha: 'abc123',
+        threadId: 'thread-1',
+      })
+
+      expect(issues).toHaveLength(1)
+      expect(issues[0]).toMatchObject({
+        provider: 'github',
+        providerRef: '42',
+        sourceUrl: 'https://github.com/owner/repo/pull/42',
+        fingerprint: 'abc123',
+        sourceId: 'gh:42:abc123:finding-1',
+        status: 'open',
+        threadId: 'thread-1',
+      })
+    })
+
+    it('upserts the same PR + same head sha without creating duplicates', () => {
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+          ],
+        }),
+        prNumber: 5,
+        headSha: 'sha-a',
+      })
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            {
+              id: 'finding-1',
+              severity: 'high',
+              category: 'bug',
+              title: 'A updated',
+              detail: 'd2',
+            },
+          ],
+        }),
+        prNumber: 5,
+        headSha: 'sha-a',
+      })
+
+      const snapshot = reviewIssuesStore.list({ projectId: 'project-1', status: 'all' })
+      expect(snapshot.issues).toHaveLength(1)
+      expect(snapshot.issues[0]).toMatchObject({
+        title: 'A updated',
+        severity: 'high',
+        providerRef: '5',
+      })
+    })
+
+    it('creates a new row for the same PR after a force-push (different head sha)', () => {
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+          ],
+        }),
+        prNumber: 9,
+        headSha: 'sha-old',
+      })
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+          ],
+        }),
+        prNumber: 9,
+        headSha: 'sha-new',
+      })
+
+      const snapshot = reviewIssuesStore.list({ projectId: 'project-1', status: 'all' })
+      expect(snapshot.issues).toHaveLength(2)
+      expect(snapshot.issues.map((i) => i.fingerprint).sort()).toEqual(['sha-new', 'sha-old'])
+    })
+
+    it('filters by prNumber so the inbox can scope to a single PR', () => {
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+          ],
+        }),
+        prNumber: 1,
+        headSha: 'sha-1',
+      })
+      reviewIssuesStore.savePrReviewIssues({
+        result: diffReviewResult({
+          findings: [
+            { id: 'finding-1', severity: 'low', category: 'bug', title: 'B', detail: 'd' },
+          ],
+        }),
+        prNumber: 2,
+        headSha: 'sha-2',
+      })
+
+      const snapshot = reviewIssuesStore.list({ projectId: 'project-1', prNumber: 2 })
+      expect(snapshot.issues).toHaveLength(1)
+      expect(snapshot.issues[0]?.title).toBe('B')
+    })
+
+    it('rejects invalid pr numbers and missing head sha', () => {
+      expect(() =>
+        reviewIssuesStore.savePrReviewIssues({
+          result: diffReviewResult({
+            findings: [
+              { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+            ],
+          }),
+          prNumber: 0,
+          headSha: 'sha',
+        }),
+      ).toThrow('Invalid pull request number')
+
+      expect(() =>
+        reviewIssuesStore.savePrReviewIssues({
+          result: diffReviewResult({
+            findings: [
+              { id: 'finding-1', severity: 'low', category: 'bug', title: 'A', detail: 'd' },
+            ],
+          }),
+          prNumber: 1,
+          headSha: '',
+        }),
+      ).toThrow('head sha')
+    })
+  })
 })
 
 function seedProject(projectId: string): void {

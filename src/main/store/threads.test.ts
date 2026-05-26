@@ -179,6 +179,7 @@ describe('threadsStore', () => {
     threadsStore.linkSession(archivedThread.id, archivedSession.id)
     threadsStore.archive(archivedThread.id)
     addAssistantMessage(betaSession.id, 'The diff result is ready to review')
+    completeSession(betaSession.id)
 
     expect(threadsStore.search({ query: 'palette' }).map((result) => result.thread.id)).toEqual([
       alphaThread.id,
@@ -216,7 +217,7 @@ function createSession(projectId: string, threadId: string, prompt: string) {
     agentId: 'claude-code',
     model: 'claude-sonnet-4-6',
     prompt,
-    status: 'done',
+    status: 'running',
   })
 }
 
@@ -227,4 +228,8 @@ function addAssistantMessage(sessionId: string, text: string): void {
     payload: { kind: 'message', role: 'assistant', text },
     timestamp: Date.now(),
   })
+}
+
+function completeSession(sessionId: string): void {
+  sessionsStore.updateStatus(sessionId, 'done')
 }

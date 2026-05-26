@@ -16,7 +16,7 @@ describe('settings validation', () => {
   it('clamps risky limits and falls back to supported agents', () => {
     const settings = normalizeSettings({
       agents: {
-        defaultAgentId: 'cursor',
+        defaultAgentId: 'not-real',
         enabledAgentIds: [],
         imageAttachments: { maxCount: 100, maxSizeMb: 0 },
       },
@@ -80,7 +80,7 @@ describe('settings validation', () => {
     })
   })
 
-  it('merges Antigravity defaults into older agent settings', () => {
+  it('merges newer agent defaults into older agent settings', () => {
     const settings = normalizeSettings({
       agents: {
         enabledAgentIds: ['claude-code', 'codex', 'opencode'],
@@ -98,15 +98,28 @@ describe('settings validation', () => {
     })
 
     expect(settings.agents.enabledAgentIds).toContain('antigravity')
+    expect(settings.agents.enabledAgentIds).toContain('cursor')
     expect(settings.agents.runtimes.antigravity).toMatchObject({
       enabled: true,
       permissionMode: 'dangerous',
+    })
+    expect(settings.agents.runtimes.cursor).toMatchObject({
+      enabled: true,
+      command: '',
+      permissionMode: 'dangerous',
+      extraArgs: [],
     })
     expect(settings.agents.modelMap.antigravity).toMatchObject({
       lightweight: 'gemini-2.0-flash-lite',
       balanced: 'gemini-2.5-flash',
       advanced: 'gemini-3.1-pro',
       frontier: 'gemini-3.5-flash',
+    })
+    expect(settings.agents.modelMap.cursor).toEqual({
+      lightweight: 'auto',
+      balanced: 'auto',
+      advanced: 'auto',
+      frontier: 'auto',
     })
   })
 

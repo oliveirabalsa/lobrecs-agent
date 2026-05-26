@@ -34,8 +34,12 @@ type ManagedCliDefinition = {
   installSummary: string
   notes: string[]
   versionArgs: string[]
-  actions: Partial<Record<ManagedCliActionId, Omit<ManagedCliAction, 'available'>>>
+  actions: Partial<Record<ManagedCliActionId, ManagedCliActionDefinition>>
   commandFor(actionId: ManagedCliActionId, command: string): ManagedCliCommand | null
+}
+
+type ManagedCliActionDefinition = Omit<ManagedCliAction, 'available'> & {
+  requiresLatestVersionCheck?: boolean
 }
 
 const CLI_DEFINITIONS: readonly ManagedCliDefinition[] = [
@@ -226,6 +230,50 @@ const CLI_DEFINITIONS: readonly ManagedCliDefinition[] = [
       return null
     },
   },
+  {
+    agentId: 'cursor',
+    name: 'Cursor CLI',
+    envVar: 'CURSOR_AGENT_COMMAND',
+    fallbackCommand: 'cursor-agent',
+    docsUrl: 'https://docs.cursor.com/en/cli/installation',
+    installSummary:
+      'Install with the official Cursor CLI shell installer, then authenticate in Cursor CLI or environment.',
+    notes: [
+      'Cursor auth stays in Cursor CLI or CURSOR_API_KEY; Lobrecs does not persist keys.',
+      'The managed actions use fixed cursor-agent commands and never accept arbitrary shell text.',
+    ],
+    versionArgs: ['--version'],
+    actions: {
+      install: {
+        id: 'install',
+        label: 'Install',
+        description: 'Runs the official Cursor CLI installer.',
+        commandPreview: installScriptPreview('cursor'),
+        requiresInstalled: false,
+      },
+      upgrade: {
+        id: 'upgrade',
+        label: 'Update',
+        description: 'Updates Cursor CLI through the documented self-update command.',
+        commandPreview: 'cursor-agent update',
+        requiresInstalled: true,
+        requiresLatestVersionCheck: false,
+      },
+      doctor: {
+        id: 'doctor',
+        label: 'Help',
+        description: 'Prints Cursor CLI help so users can confirm local command support.',
+        commandPreview: 'cursor-agent --help',
+        requiresInstalled: true,
+      },
+    },
+    commandFor(actionId, command) {
+      if (actionId === 'install') return installScriptCommand('cursor')
+      if (actionId === 'upgrade') return directCommand(command, ['update'])
+      if (actionId === 'doctor') return directCommand(command, ['--help'])
+      return null
+    },
+  },
 ]
 
 export async function listManagedCliRuntimes(
@@ -257,7 +305,7 @@ export async function runManagedCliAction(
     throw new Error(`${definition.name} is not installed or is not available on PATH.`)
   }
 
-  if (input.actionId === 'upgrade') {
+  if (input.actionId === 'upgrade' && action.requiresLatestVersionCheck !== false) {
     const updateState = await checkRuntimeUpdate(definition, command)
     if (updateState.error) throw new Error(updateState.error)
     if (!updateState.updateAvailable) {
@@ -374,7 +422,7 @@ async function readLatestVersion(
 }
 
 function buildActionStatus(
-  action: Omit<ManagedCliAction, 'available'>,
+  action: ManagedCliActionDefinition,
   status: {
     installed: boolean
     version?: string
@@ -386,14 +434,18 @@ function buildActionStatus(
   const unavailableReason = actionUnavailableReason(action, status)
 
   return {
-    ...action,
+    id: action.id,
+    label: action.label,
+    description: action.description,
+    commandPreview: action.commandPreview,
+    requiresInstalled: action.requiresInstalled,
     available: !unavailableReason,
     unavailableReason,
   }
 }
 
 function actionUnavailableReason(
-  action: Omit<ManagedCliAction, 'available'>,
+  action: ManagedCliActionDefinition,
   status: {
     installed: boolean
     version?: string
@@ -411,6 +463,7 @@ function actionUnavailableReason(
   }
 
   if (action.id !== 'upgrade') return undefined
+  if (action.requiresLatestVersionCheck === false) return undefined
 
   if (!status.version) return 'Current version could not be checked.'
   if (!status.latestVersion) {
@@ -599,6 +652,9 @@ function installScriptCommand(
       'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     ])
   }
+  if (agentId === 'cursor') {
+    return directCommand('/bin/bash', ['-lc', 'curl https://cursor.com/install -fsS | bash'])
+  }
 
   throw new Error(`No installer is configured for ${agentId}`)
 }
@@ -615,6 +671,7 @@ function installScriptPreview(agentId: SupportedAgentId): string {
       ? 'irm https://antigravity.google/cli/install.ps1 | iex'
       : 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
   }
+  if (agentId === 'cursor') return 'curl https://cursor.com/install -fsS | bash'
   return ''
 }
 

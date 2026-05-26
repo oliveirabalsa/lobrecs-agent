@@ -1,6 +1,25 @@
-import { spawn } from 'node:child_process'
 import { ipcMain } from 'electron'
-import { buildProcessEnvironment } from '../../../process/environment'
+import {
+  hasRequiredCommandPrefix,
+  runVerificationCommand,
+} from '../../../process/verification'
+import {
+  getAgentProfile,
+  promptWithAgentProfile,
+} from '../../agents/application/agentProfileService'
+import {
+  runtimeSettingsWithApprovalMode,
+  runtimeSettingsWithThinkingLevel,
+} from '../../agents/domain/approvalMode'
+import {
+  validateRunId,
+  validateCaptureLocalWebVisualEvidenceInput,
+  validateSessionId,
+  validateSpecId,
+  validateStartSpecRunInput,
+  validateVerificationCommand,
+} from '../../../../shared/types'
+import { captureLocalWebVisualEvidence } from '../../quality/infrastructure/localWebVisualEvidenceService'
 import {
   projectsStore,
   promptEvidenceStore,
@@ -17,26 +36,29 @@ import type {
   StartSpecRunInput,
 } from '../../../../shared/types'
 
-const VERIFICATION_TIMEOUT_MS = 120_000
-const MAX_OUTPUT_CHARS = 120_000
-
 export function registerRunHandlers(context: MainIpcContext): void {
-  ipcMain.handle('runs:start', async (_event, input: StartSpecRunInput) => {
+  ipcMain.handle('runs:start', async (_event, rawInput: unknown) => {
+    const input: StartSpecRunInput = validateStartSpecRunInput(rawInput)
     const spec = specsStore.get(input.specId)
     if (!spec) throw new Error(`Spec not found: ${input.specId}`)
 
     const project = projectsStore.get(spec.projectId)
     if (!project) throw new Error(`Project not found: ${spec.projectId}`)
     const runMode = 'local'
+    const settings = context.settingsService.getEffective(project.id).settings
 
     const { run, attempts } = specRunsStore.start(spec.id, runMode)
     const prompt = formatSpecPrompt(spec)
 
-    for (const attempt of attempts) {
+    for (const [attemptIndex, attempt] of attempts.entries()) {
       try {
+        const profileId = spec.selectedAgentProfiles[attemptIndex]
+        const profile = await getAgentProfile(project.id, profileId)
+        const attemptPrompt = promptWithAgentProfile(prompt, profile)
         const route = await context.modelRouter.route({
-          prompt,
-          preferredAgentId: attempt.agentId,
+          prompt: attemptPrompt,
+          preferredAgentId: profile?.defaultAgentId ?? attempt.agentId,
+          modelOverride: profile?.defaultModel,
         })
         specRunsStore.updateAttempt(attempt.id, {
           model: route.model,
@@ -44,12 +66,21 @@ export function registerRunHandlers(context: MainIpcContext): void {
         })
         const { sessionId } = await context.sessionManager.dispatch({
           projectId: project.id,
-          prompt,
+          prompt: attemptPrompt,
           agentId: route.agentId,
           model: route.model,
           repoPath: project.repoPath,
           context: projectsStore.getContext(project.id),
           isolate: false,
+          runtimeSettings: runtimeSettingsWithApprovalMode(
+            runtimeSettingsWithThinkingLevel(
+              settings.agents.runtimes[route.agentId],
+              route.agentId,
+              profile?.thinking,
+            ),
+            profile?.approvalMode,
+            settings.execution.defaultApprovalMode,
+          ),
         })
         specRunsStore.updateAttempt(attempt.id, {
           sessionId,
@@ -72,7 +103,8 @@ export function registerRunHandlers(context: MainIpcContext): void {
     }
   })
 
-  ipcMain.handle('runs:cancel', async (_event, runId: string) => {
+  ipcMain.handle('runs:cancel', async (_event, rawRunId: unknown) => {
+    const runId = validateRunId(rawRunId)
     for (const attempt of specRunsStore.listAttempts(runId)) {
       if (attempt.sessionId && !isTerminalAttempt(attempt)) {
         context.sessionManager.cancel(attempt.sessionId)
@@ -82,7 +114,8 @@ export function registerRunHandlers(context: MainIpcContext): void {
     return specRunsStore.cancel(runId)
   })
 
-  ipcMain.handle('runs:compare', async (_event, specId: string) => {
+  ipcMain.handle('runs:compare', async (_event, rawSpecId: unknown) => {
+    const specId = validateSpecId(rawSpecId)
     const comparison = specRunsStore.compare(specId)
     for (const run of comparison.runs) {
       syncAttempts(run.id)
@@ -91,7 +124,9 @@ export function registerRunHandlers(context: MainIpcContext): void {
     return specRunsStore.compare(specId)
   })
 
-  ipcMain.handle('runs:verify', async (_event, runId: string, command: string) => {
+  ipcMain.handle('runs:verify', async (_event, rawRunId: unknown, rawCommand: unknown) => {
+    const runId = validateRunId(rawRunId)
+    const command = validateVerificationCommand(rawCommand)
     const run = specRunsStore.get(runId)
     if (!run) throw new Error(`Spec run not found: ${runId}`)
 
@@ -108,25 +143,60 @@ export function registerRunHandlers(context: MainIpcContext): void {
       throw new Error('Cannot verify before the agent run has completed')
     }
 
+    const settings = context.settingsService.getEffective(project.id).settings
+    if (
+      settings.verification.requireCommandPrefix &&
+      !hasRequiredCommandPrefix(command, settings.execution.commandPrefix)
+    ) {
+      throw new Error(
+        `Verification command must start with "${settings.execution.commandPrefix}".`,
+      )
+    }
+
     const verification = specRunsStore.createVerification(runId, command)
-    const result = await runVerificationCommand(command, project.repoPath)
+    const result = await runVerificationCommand(command, project.repoPath, {
+      timeoutMs: settings.verification.defaultTimeoutSeconds * 1_000,
+      maxOutputBytes: settings.verification.maxOutputBytes,
+    })
     const status = result.exitCode === 0 ? 'passed' : 'failed'
-    const output = truncateOutput(
-      [result.stdout, result.stderr].filter(Boolean).join('\n\n'),
-    )
+    const output = [result.stdout, result.stderr].filter(Boolean).join('\n\n')
 
     return specRunsStore.finishVerification(verification.id, status, output)
   })
 
-  ipcMain.handle('runs:listAuditRecords', async (_event, runId: string) => {
+  ipcMain.handle('runs:listAuditRecords', async (_event, rawRunId: unknown) => {
+    const runId = validateRunId(rawRunId)
     return runAuditStore.listForSpecRun(runId)
   })
 
-  ipcMain.handle('runs:listSessionAuditRecords', async (_event, sessionId: string) => {
+  ipcMain.handle('runs:listSessionAuditRecords', async (_event, rawSessionId: unknown) => {
+    const sessionId = validateSessionId(rawSessionId)
     return runAuditStore.listForSession(sessionId)
   })
 
-  ipcMain.handle('runs:getPromptEvidence', async (_event, sessionId: string) => {
+  ipcMain.handle(
+    'runs:captureVisualEvidence',
+    async (_event, rawSessionId: unknown, rawInput: unknown) => {
+      const sessionId = validateSessionId(rawSessionId)
+      const input = validateCaptureLocalWebVisualEvidenceInput(rawInput)
+      const session = sessionsStore.get(sessionId)
+      if (!session) throw new Error(`Session not found: ${sessionId}`)
+
+      const visualEvidence = await captureLocalWebVisualEvidence(input)
+      return runAuditStore.create({
+        sessionId,
+        threadId: session.threadId,
+        specRunId: specRunsStore.findSpecRunIdBySessionId(sessionId) ?? undefined,
+        attempt: 0,
+        phase: visualEvidence.status === 'captured' ? 'visual-captured' : 'visual-failed',
+        finalStatus: visualEvidence.status === 'captured' ? 'passed' : 'failed',
+        visualEvidence,
+      })
+    },
+  )
+
+  ipcMain.handle('runs:getPromptEvidence', async (_event, rawSessionId: unknown) => {
+    const sessionId = validateSessionId(rawSessionId)
     return promptEvidenceStore.getForSession(sessionId)
   })
 }
@@ -202,59 +272,4 @@ function formatSpecPrompt(spec: NonNullable<ReturnType<typeof specsStore.get>>):
     'Target files:',
     targets || '- Agent may inspect the repo and choose the relevant files.',
   ].join('\n')
-}
-
-function runVerificationCommand(
-  command: string,
-  cwd: string,
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    const child = spawn('zsh', ['-lc', command], {
-      cwd,
-      env: buildProcessEnvironment(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-
-    const timeout = setTimeout(() => {
-      settled = true
-      child.kill('SIGTERM')
-      resolve({
-        exitCode: 124,
-        stdout,
-        stderr: `${stderr}\nVerification timed out after ${VERIFICATION_TIMEOUT_MS / 1000}s.`,
-      })
-    }, VERIFICATION_TIMEOUT_MS)
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout = truncateOutput(stdout + chunk.toString())
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr = truncateOutput(stderr + chunk.toString())
-    })
-    child.on('error', (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve({ exitCode: 1, stdout, stderr: error.message })
-    })
-    child.on('exit', (code, signal) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve({
-        exitCode: code ?? (signal ? 1 : 0),
-        stdout,
-        stderr,
-      })
-    })
-  })
-}
-
-function truncateOutput(output: string): string {
-  if (output.length <= MAX_OUTPUT_CHARS) return output
-
-  return `${output.slice(0, MAX_OUTPUT_CHARS)}\n[output truncated]`
 }

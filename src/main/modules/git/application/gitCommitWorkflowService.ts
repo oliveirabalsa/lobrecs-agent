@@ -5,6 +5,7 @@ import { getModelForTier } from '../../../router/ModelRouter'
 import { deriveActivityEvents } from '../../../session/activity'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
+import { reviewIssuesStore } from '../../../store'
 import {
   normalizeSuggestedCommitPlan,
   validateCommitSuggestions,
@@ -156,8 +157,7 @@ export class GitCommitWorkflowService {
       },
     )
     const review = normalizeDiffReview(responseText, snapshot.changedFiles)
-
-    return {
+    const result: GitDiffReviewResult = {
       projectId,
       fingerprint: snapshot.fingerprint,
       branch: snapshot.branch,
@@ -170,6 +170,22 @@ export class GitCommitWorkflowService {
         agentId: selection.agentId,
         model: selection.model,
       },
+    }
+
+    reviewIssuesStore.saveDiffReviewIssues({
+      result,
+      threadId: _threadId,
+    })
+
+    return result
+  }
+
+  async getWorkingTreeFingerprint(projectId: string): Promise<{ branch: string; fingerprint: string }> {
+    const project = requireProject(projectId)
+    const snapshot = await collectWorkingTreeSnapshot(project.repoPath)
+    return {
+      branch: snapshot.branch,
+      fingerprint: snapshot.fingerprint,
     }
   }
 }

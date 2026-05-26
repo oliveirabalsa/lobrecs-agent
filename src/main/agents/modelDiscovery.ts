@@ -27,6 +27,7 @@ const FALLBACK_MODELS_BY_AGENT: Partial<Record<SupportedAgentId, readonly string
     'gemini-3.1-pro',
     'gemini-3.5-flash',
   ],
+  cursor: ['auto', 'gpt-5', 'sonnet-4', 'sonnet-4-thinking'],
 }
 
 const CLAUDE_THINKING_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -102,6 +103,16 @@ export function parseOpenCodeModels(output: string): AgentModel[] {
     .split(/\r?\n/)
     .map((line) => line.replace(ANSI_PATTERN, '').trim())
     .filter((line) => line.includes('/') && !line.includes(' '))
+    .filter((id) => {
+      // Filter out non-token-plan MiniMax providers
+      // Keep: minimax-coding-plan/*, exclude: opencode/minimax*, minimax/*, minimax-cn-coding-plan/*
+      if (id.startsWith('opencode/minimax') ||
+          id.startsWith('minimax/') ||
+          id.startsWith('minimax-cn-coding-plan/')) {
+        return false
+      }
+      return true
+    })
 
   return dedupeModels(
     ids.map((id) => createAgentModel('opencode', id, 'cli', {
@@ -199,6 +210,7 @@ function defaultThinkingLevelForAgent(
 }
 
 function labelForModelId(id: string): string {
+  if (id === 'auto') return 'Auto'
   if (id === 'opus') return 'opus (latest Opus, currently 4.7)'
   if (id === 'sonnet') return 'sonnet (latest Sonnet)'
   if (id === 'haiku') return 'haiku (latest Haiku)'

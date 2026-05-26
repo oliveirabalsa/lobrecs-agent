@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { automationsStore } from './automations'
 import { closeDb, setDbForTests } from './db'
 import { projectsStore } from './projects'
+import { sessionsStore } from './sessions'
 
 describe('automationsStore', () => {
   beforeEach(() => {
@@ -42,6 +43,12 @@ describe('automationsStore', () => {
     expect(automationsStore.listEnabled().map((automation) => automation.id)).toEqual([
       enabled.id,
     ])
+    expect(enabled).toMatchObject({
+      status: 'scheduled',
+      reviewState: 'reviewed',
+      hasUnreadRuns: false,
+      unreadRunCount: 0,
+    })
   })
 
   it('updates fields and marks a run timestamp', () => {
@@ -70,6 +77,63 @@ describe('automationsStore', () => {
       enabled: false,
     })
     expect(marked.lastRunAt).toBe(9_000)
+  })
+
+  it('persists automation run history and triage review state', () => {
+    const project = createProject()
+    const automation = automationsStore.create({
+      projectId: project.id,
+      name: 'Daily triage',
+      prompt: 'check work',
+      schedule: '0 9 * * *',
+      agentId: 'claude-code',
+      enabled: true,
+      nextRunAt: 10_000,
+    })
+    sessionsStore.create({
+      id: 'session-1',
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'sonnet',
+      prompt: 'automation run',
+    })
+
+    const run = automationsStore.createRun({
+      automationId: automation.id,
+      projectId: project.id,
+      sessionId: 'session-1',
+      trigger: 'schedule',
+      status: 'failed',
+      error: 'verification failed',
+      createdAt: 11_000,
+      startedAt: 11_000,
+      completedAt: 12_000,
+    })
+    const reconciled = automationsStore.reconcileTriageState(automation.id)
+
+    expect(automationsStore.listRuns(project.id)).toMatchObject([
+      {
+        id: run.id,
+        automationId: automation.id,
+        sessionId: 'session-1',
+        status: 'failed',
+        unread: true,
+        reviewState: 'unread',
+        error: 'verification failed',
+      },
+    ])
+    expect(reconciled).toMatchObject({
+      reviewState: 'unread',
+      hasUnreadRuns: true,
+      unreadRunCount: 1,
+    })
+
+    automationsStore.markRunReviewed(run.id)
+    expect(automationsStore.reconcileTriageState(automation.id)).toMatchObject({
+      reviewState: 'reviewed',
+      hasUnreadRuns: false,
+      unreadRunCount: 0,
+    })
   })
 })
 

@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { adapterRegistry } from '../agents'
 import { registerIpcHandlers } from '../ipc'
+import { automationSchedulerService } from '../modules/automations/application/automationSchedulerService'
 import { cliEditorTerminalService } from '../modules/system/application/cliEditorTerminalService'
 import { appUpdateService } from '../modules/updates'
 import { processPool } from '../process/ProcessPool'
@@ -23,6 +24,7 @@ export function bootstrapMainProcess(): void {
     setDockIcon()
     setApplicationMenu()
     registerIpcHandlers()
+    automationSchedulerService.start()
     cancelInterruptedSessions()
     backfillThreadsFromSessions()
     await clearStaleDownloadedUpdates()
@@ -45,6 +47,7 @@ export function bootstrapMainProcess(): void {
 
   app.on('will-quit', () => {
     processPool.killAll()
+    automationSchedulerService.stop()
     cliEditorTerminalService.stopAll()
     unregisterAppShortcuts()
   })

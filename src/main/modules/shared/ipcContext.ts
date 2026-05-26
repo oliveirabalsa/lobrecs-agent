@@ -8,6 +8,7 @@ import type { SessionManager } from '../../session'
 import type { SettingsService } from '../settings'
 import type { SwarmOrchestrator } from '../../swarm/SwarmOrchestrator'
 import type { SupportedAgentId } from '../../../shared/types'
+import type { ExtensionMarketplaceService } from '../extensions'
 
 export interface MainIpcContext {
   adapters: ReadonlyMap<SupportedAgentId, AgentAdapter>
@@ -17,6 +18,7 @@ export interface MainIpcContext {
   repositoryContext: RepositoryContextService
   sessionManager: SessionManager
   settingsService: SettingsService
+  extensionMarketplaceService: ExtensionMarketplaceService
   swarmOrchestrator: SwarmOrchestrator
   worktreeManager: WorktreeManager
 }

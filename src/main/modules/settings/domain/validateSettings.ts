@@ -5,6 +5,9 @@ import {
   type AgentPermissionMode,
   type AppSettings,
   type AppSettingsPatch,
+  type ChatBackgroundPosition,
+  type ChatBackgroundRepeat,
+  type ChatBackgroundSize,
   type ModelTier,
   type ProjectSettingsOverrides,
   type SupportedAgentId,
@@ -17,9 +20,11 @@ import { DEFAULT_APP_SETTINGS } from './defaultSettings'
 
 const LEGACY_GEMINI_AGENT_ID = 'gemini'
 const ANTIGRAVITY_AGENT_ID = 'antigravity'
-const LEGACY_DEFAULT_AGENT_IDS = SUPPORTED_AGENT_IDS.filter(
-  (agentId) => agentId !== ANTIGRAVITY_AGENT_ID,
-)
+const LEGACY_DEFAULT_AGENT_IDS: readonly SupportedAgentId[] = [
+  'claude-code',
+  'codex',
+  'opencode',
+]
 const MODEL_TIERS: readonly ModelTier[] = [
   'lightweight',
   'balanced',
@@ -122,6 +127,10 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
     },
     execution: {
       worktreeIsolation: booleanOr(cloned.execution.worktreeIsolation, false),
+      experimentalWorktreeHandoff: booleanOr(
+        cloned.execution.experimentalWorktreeHandoff,
+        false,
+      ),
       autoApplyCompletedDiffs: booleanOr(cloned.execution.autoApplyCompletedDiffs, true),
       defaultApprovalMode: permissionModeOr(
         cloned.execution.defaultApprovalMode,
@@ -195,6 +204,7 @@ export function sanitizeSettingsShape(settings: AppSettings): AppSettings {
       terminalDefaultHeight: clampInteger(cloned.ui.terminalDefaultHeight, 160, 640, 260),
       showCostBadges: booleanOr(cloned.ui.showCostBadges, true),
       showTokenCounts: booleanOr(cloned.ui.showTokenCounts, true),
+      chatBackground: normalizeChatBackground(cloned.ui.chatBackground),
     },
     editor: {
       defaultEditorId: stringOr(cloned.editor.defaultEditorId, ''),
@@ -385,7 +395,8 @@ function normalizeEnabledAgents(values: unknown): SupportedAgentId[] {
 
   const isLegacyDefault =
     LEGACY_DEFAULT_AGENT_IDS.every((agentId) => enabled.includes(agentId)) &&
-    !enabled.includes('antigravity')
+    !enabled.includes('antigravity') &&
+    !enabled.includes('cursor')
 
   return isLegacyDefault
     ? [...new Set([...enabled, ...DEFAULT_APP_SETTINGS.agents.enabledAgentIds])]
@@ -467,6 +478,42 @@ function clampNumber(
 ): number {
   const number = typeof value === 'number' && Number.isFinite(value) ? value : fallback
   return Math.min(max, Math.max(min, number))
+}
+
+const CHAT_BG_SIZES: readonly ChatBackgroundSize[] = ['cover', 'contain', 'auto', 'stretch']
+const CHAT_BG_POSITIONS: readonly ChatBackgroundPosition[] = [
+  'center', 'top', 'bottom', 'left', 'right',
+  'top-left', 'top-right', 'bottom-left', 'bottom-right',
+]
+const CHAT_BG_REPEATS: readonly ChatBackgroundRepeat[] = [
+  'no-repeat', 'repeat', 'repeat-x', 'repeat-y',
+]
+
+function normalizeChatBackground(
+  value: unknown,
+): AppSettings['ui']['chatBackground'] {
+  const defaults = DEFAULT_APP_SETTINGS.ui.chatBackground
+  const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  return {
+    enabled: booleanOr(record.enabled, defaults.enabled),
+    imagePath: stringOr(record.imagePath, defaults.imagePath),
+    opacity: clampInteger(record.opacity, 0, 100, defaults.opacity),
+    blur: clampInteger(record.blur, 0, 40, defaults.blur),
+    size: enumOr(record.size, CHAT_BG_SIZES, defaults.size),
+    position: enumOr(record.position, CHAT_BG_POSITIONS, defaults.position),
+    repeat: enumOr(record.repeat, CHAT_BG_REPEATS, defaults.repeat),
+    fixed: booleanOr(record.fixed, defaults.fixed),
+  }
+}
+
+function enumOr<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  return typeof value === 'string' && allowed.includes(value as T)
+    ? (value as T)
+    : fallback
 }
 
 function objectLike(value: unknown): Record<string, unknown> {

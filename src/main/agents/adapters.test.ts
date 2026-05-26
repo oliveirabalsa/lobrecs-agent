@@ -2,6 +2,12 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ClaudeCodeAdapter } from './ClaudeCodeAdapter'
 import { CodexAdapter } from './CodexAdapter'
+import {
+  CursorAdapter,
+  parseCursorCliModels,
+  parseCursorModelsResponse,
+  parseCursorStatusOutput,
+} from './CursorAdapter'
 import { AntigravityAdapter } from './AntigravityAdapter'
 import { OpenCodeAdapter } from './OpenCodeAdapter'
 import { adapterRegistry } from './index'
@@ -11,6 +17,7 @@ import type { AgentEvent } from '../../shared/types'
 
 const claudeMock = fileURLToPath(new URL('./__mocks__/claude-mock.cjs', import.meta.url))
 const codexMock = fileURLToPath(new URL('./__mocks__/codex-mock.cjs', import.meta.url))
+const cursorMock = fileURLToPath(new URL('./__mocks__/cursor-agent-mock.cjs', import.meta.url))
 const antigravityMock = fileURLToPath(new URL('./__mocks__/antigravity-mock.cjs', import.meta.url))
 const opencodeMock = fileURLToPath(new URL('./__mocks__/opencode-mock.cjs', import.meta.url))
 
@@ -24,6 +31,11 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_MOCK_USER_QUESTION
     delete process.env.CODEX_COMMAND
     delete process.env.CODEX_MOCK_CAPACITY_MODEL
+    delete process.env.CURSOR_AGENT_COMMAND
+    delete process.env.CURSOR_API_KEY
+    delete process.env.CURSOR_MOCK_MODE
+    delete process.env.CURSOR_MOCK_STATUS_WITHOUT_EMAIL
+    delete process.env.CURSOR_MOCK_SLOW
     delete process.env.ANTIGRAVITY_COMMAND
     delete process.env.ANTIGRAVITY_MOCK_MODE
     delete process.env.OPENCODE_COMMAND
@@ -37,6 +49,7 @@ describe('agent adapters', () => {
     expect(adapterRegistry.get('codex')).toBeInstanceOf(CodexAdapter)
     expect(adapterRegistry.get('opencode')).toBeInstanceOf(OpenCodeAdapter)
     expect(adapterRegistry.get('antigravity')).toBeInstanceOf(AntigravityAdapter)
+    expect(adapterRegistry.get('cursor')).toBeInstanceOf(CursorAdapter)
   })
 
   // All tests below spawn Unix shebang scripts — EFTYPE on Windows; skip there.
@@ -302,6 +315,205 @@ describe('agent adapters', () => {
     expect(payloadField(error, 'message')).toContain('Selected model is at capacity')
     expect(events.some((event) => event.type === 'approval-request')).toBe(false)
     expect(events.some((event) => event.type === 'session-complete')).toBe(false)
+  })
+
+  it('lists Cursor CLI models and dispatches stream-json output', async () => {
+    process.env.CURSOR_AGENT_COMMAND = cursorMock
+    delete process.env.CURSOR_API_KEY
+    const adapter = new CursorAdapter()
+
+    expect(await adapter.isInstalled()).toBe(true)
+    expect(await adapter.listModels()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ agentId: 'cursor', id: 'auto' }),
+        expect.objectContaining({
+          agentId: 'cursor',
+          id: 'composer-2-fast',
+          label: 'Composer 2 Fast',
+          source: 'cli',
+        }),
+        expect.objectContaining({
+          agentId: 'cursor',
+          id: 'claude-opus-4-7-thinking-high',
+          label: 'Opus 4.7 1M High Thinking',
+          source: 'cli',
+        }),
+      ]),
+    )
+    await expect(adapter.getAccountInfo()).resolves.toMatchObject({
+      status: 'authenticated',
+      label: 'leo@example.com',
+      detail: 'Endpoint: https://api.cursor.com',
+    })
+
+    const session = await adapter.dispatch({
+      sessionId: 'cursor-session',
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'gpt-5',
+      context: 'Always use rtk.',
+      runtimeSettings: {
+        enabled: true,
+        command: cursorMock,
+        permissionMode: 'dangerous',
+        extraArgs: ['--some-fixed-flag'],
+      },
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = argvFromEvent(argvEvent)
+
+    expect(argv).toEqual(
+      expect.arrayContaining([
+        '--print',
+        '--output-format',
+        'stream-json',
+        '--model',
+        'gpt-5',
+        '--force',
+        '--some-fixed-flag',
+      ]),
+    )
+    expect(argv.at(-1)).toContain('Repository instructions:\nAlways use rtk.')
+    expect(events.some((event) => payloadText(event) === 'Hello from Cursor mock')).toBe(true)
+    expect(events.some((event) => event.type === 'stderr')).toBe(true)
+    expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+  })
+
+  it('parses Cursor model and account discovery without leaking credentials', () => {
+    expect(
+      parseCursorCliModels(
+        [
+          'Available models',
+          '',
+          'auto - Auto',
+          'composer-2.5-fast - Composer 2.5 Fast (current, default)',
+          'gpt-5.3-codex-xhigh - Codex 5.3 Extra High',
+          '',
+          'Tip: use --model <id> (or /model <id> in interactive mode) to switch.',
+        ].join('\n'),
+      ).map((model) => [model.id, model.label, model.source]),
+    ).toEqual([
+      ['auto', 'Auto', 'cli'],
+      ['composer-2.5-fast', 'Composer 2.5 Fast (current, default)', 'cli'],
+      ['gpt-5.3-codex-xhigh', 'Codex 5.3 Extra High', 'cli'],
+    ])
+
+    expect(
+      parseCursorModelsResponse({
+        models: ['claude-4-sonnet-thinking', 'o3', 'claude-4-opus-thinking'],
+      }).map((model) => model.id),
+    ).toEqual(['auto', 'claude-4-sonnet-thinking', 'o3', 'claude-4-opus-thinking'])
+
+    expect(parseCursorStatusOutput('\u001b[32mAuthenticated\u001b[0m\nEmail: user@example.com')).toEqual({
+      status: 'authenticated',
+      label: 'user@example.com',
+    })
+    expect(parseCursorStatusOutput('✓ Logged in as user@example.com')).toEqual({
+      status: 'authenticated',
+      label: 'user@example.com',
+    })
+    expect(
+      parseCursorStatusOutput(
+        [
+          'About Cursor CLI',
+          'CLI Version         2026.05.24-dda726e',
+          'Subscription Tier   Free',
+          'User Email          user@example.com',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      status: 'authenticated',
+      label: 'user@example.com',
+    })
+    expect(parseCursorStatusOutput('Not authenticated')).toMatchObject({
+      status: 'unauthenticated',
+      label: 'Not logged in',
+    })
+  })
+
+  it('reads Cursor about output when status is authenticated without an email', async () => {
+    process.env.CURSOR_AGENT_COMMAND = cursorMock
+    process.env.CURSOR_MOCK_STATUS_WITHOUT_EMAIL = '1'
+    const adapter = new CursorAdapter()
+
+    await expect(adapter.getAccountInfo()).resolves.toMatchObject({
+      status: 'authenticated',
+      label: 'leo@example.com',
+    })
+  })
+
+  it.each([
+    ['dangerous' as const, ['--force']],
+    ['bypass-permissions' as const, ['--force']],
+    ['ask-for-approval' as const, []],
+    ['read-only' as const, []],
+  ])('maps Cursor %s permission mode to CLI flags', async (permissionMode, expected) => {
+    const adapter = new CursorAdapter()
+
+    const session = await adapter.dispatch({
+      sessionId: `cursor-${permissionMode}-session`,
+      prompt: 'Summarize this repo',
+      repoPath: process.cwd(),
+      model: 'auto',
+      runtimeSettings: {
+        enabled: true,
+        command: cursorMock,
+        permissionMode,
+        extraArgs: [],
+      },
+    })
+    const events = await collectEvents(session)
+    const argvEvent = events.find((event) => Array.isArray(payloadField(event, 'argv')))
+    const argv = argvFromEvent(argvEvent)
+
+    expect(argv).toEqual(expect.arrayContaining(['--print', '--output-format', 'stream-json']))
+    expect(argv).not.toContain('--model')
+    if (expected.length > 0) {
+      expect(argv).toEqual(expect.arrayContaining(expected))
+    } else {
+      expect(argv).not.toContain('--force')
+    }
+  })
+
+  it('completes Cursor plain stdout on process exit and cancels delayed runs', async () => {
+    process.env.CURSOR_MOCK_MODE = 'plain'
+    const adapter = new CursorAdapter()
+    const plainSession = await adapter.dispatch({
+      sessionId: 'cursor-plain-session',
+      prompt: 'Print one line',
+      repoPath: process.cwd(),
+      model: 'auto',
+      runtimeSettings: {
+        enabled: true,
+        command: cursorMock,
+        permissionMode: 'ask-for-approval',
+        extraArgs: [],
+      },
+    })
+    const plainEvents = await collectEvents(plainSession)
+
+    expect(plainEvents.some((event) => payloadField(event, 'text') === 'plain cursor output\n')).toBe(true)
+
+    delete process.env.CURSOR_MOCK_MODE
+    process.env.CURSOR_MOCK_SLOW = '1'
+    const slowSession = await adapter.dispatch({
+      sessionId: 'cursor-slow-session',
+      prompt: 'Wait',
+      repoPath: process.cwd(),
+      model: 'auto',
+      runtimeSettings: {
+        enabled: true,
+        command: cursorMock,
+        permissionMode: 'ask-for-approval',
+        extraArgs: [],
+      },
+    })
+    slowSession.cancel()
+    const slowEvents = await collectEvents(slowSession)
+    const complete = slowEvents.find((event) => event.type === 'session-complete')
+
+    expect(payloadField(complete, 'signal')).toBe('SIGTERM')
   })
 
   it('dispatches OpenCode with run model args', async () => {

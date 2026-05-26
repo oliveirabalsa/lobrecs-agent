@@ -25,6 +25,11 @@ export function createMainWindow(): BrowserWindow {
       preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
+      // Sandbox stays disabled for now because the preload bridge still owns
+      // Electron IPC subscriptions for xterm terminal streams, Monaco-backed
+      // review flows, clipboard/image helpers, and local editor launch
+      // round-trips. Re-enable only after those bridges are audited under
+      // Electron's sandbox constraints.
       sandbox: false,
     },
   })

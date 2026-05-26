@@ -1,6 +1,9 @@
-import { spawn } from 'node:child_process'
 import path from 'node:path'
-import { buildProcessEnvironment } from '../../../process/environment'
+import {
+  hasRequiredCommandPrefix,
+  runVerificationCommand,
+  truncateOutput,
+} from '../../../process/verification'
 import type {
   AgentActivity,
   AppSettings,
@@ -78,6 +81,21 @@ export interface QualityGateDependencies {
    * for the same root cause.
    */
   isRepairInFlight?: () => boolean
+  observeQualityGate?: (input: {
+    projectId: string
+    projectPath: string
+    sessionId: string
+    phase: RunAuditPhase
+    recipeId?: string
+    command?: string
+    exitCode?: number
+  }) => Promise<void>
+  gateRetry?: (input: {
+    projectId: string
+    projectPath: string
+    sessionId: string
+    reason: string
+  }) => Promise<{ allow: boolean; reason?: string }>
 }
 
 interface VerificationFailure {
@@ -105,6 +123,7 @@ export async function runQualityGate(
 
   const recipes = selectAutoRecipes(settings)
   if (recipes.length === 0) return
+  void observeQualityGate(dependencies, input, { phase: 'recipe-started' })
 
   input.emitActivity({
     kind: 'step',
@@ -128,6 +147,7 @@ export async function runQualityGate(
       finalStatus: 'passed',
       changedFiles: changedPaths,
     })
+    void observeQualityGate(dependencies, input, { phase: 'gate-passed' })
     return
   }
 
@@ -156,6 +176,12 @@ export async function runQualityGate(
       outputTail: failure.output,
       changedFiles: changedPaths,
     })
+    void observeQualityGate(dependencies, input, {
+      phase: 'gate-stopped',
+      recipeId: failure.recipe.id,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+    })
     return
   }
 
@@ -177,41 +203,114 @@ export async function runQualityGate(
       outputTail: failure.output,
       changedFiles: changedPaths,
     })
+    void observeQualityGate(dependencies, input, {
+      phase: 'gate-stopped',
+      recipeId: failure.recipe.id,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+    })
     return
   }
 
-  // TODO(user): Implement the "another QA repair is already running" guard.
-  //
-  // Context: multiple agent sessions run in parallel against the same project.
-  // Verification runs the whole-app build, so every session sees the same
-  // failure and each one would otherwise spawn its own repair agent for one
-  // shared root cause. We want at most one QA-repair session in flight at a
-  // time.
-  //
-  // Available dependency:
-  //   dependencies.isRepairInFlight?.() -> boolean
-  //
-  // Recommended behavior (5-7 lines):
-  //   1. Call dependencies.isRepairInFlight?.() — note it's optional, so guard
-  //      against undefined (treat as "no repair running").
-  //   2. If a repair IS in flight: emit an `error`-status activity explaining
-  //      we skipped dispatching because another repair is already working on
-  //      the same problem.
-  //   3. Record an audit with `phase: 'gate-stopped'` and the new
-  //      `stopReason: 'repair-in-flight'`, plus the usual recipe/exit/output
-  //      fields from `failure` so the timeline still shows what failed.
-  //   4. `return` early so dispatchRepair is never called.
-  //
-  // Trade-offs worth weighing while you write this:
-  //   - Activity status: 'error' vs 'done' vs a softer 'step' — affects how
-  //     loud this looks in the UI.
-  //   - Should the message name the in-flight repair? We don't have its
-  //     sessionId here; mentioning it would require plumbing more state.
-  //   - finalStatus: 'failed' or 'pending'? 'pending' reads as "we'll come
-  //     back to it"; 'failed' reads as "this gate gave up". Pick the one that
-  //     matches how you want the run timeline to behave.
+  if (dependencies.isRepairInFlight?.()) {
+    input.emitActivity({
+      kind: 'step',
+      title: 'Self-healing skipped',
+      detail: 'Another repair session is already running for this project; waiting for it to complete.',
+      status: 'error',
+    })
+    emitAudit(dependencies, input, {
+      phase: 'gate-stopped',
+      stopReason: 'repair-in-flight',
+      finalStatus: 'failed',
+      recipeId: failure.recipe.id,
+      recipeLabel: failure.recipe.label,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+      outputTail: failure.output,
+      changedFiles: changedPaths,
+    })
+    void observeQualityGate(dependencies, input, {
+      phase: 'gate-stopped',
+      recipeId: failure.recipe.id,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+    })
+    return
+  }
+
+  const retryGate = await shouldAllowRepairRetry(dependencies, input, failure)
+  if (!retryGate.allow) {
+    input.emitActivity({
+      kind: 'step',
+      title: 'Self-healing blocked',
+      detail: retryGate.reason ?? 'An extension retry gate blocked the repair retry.',
+      status: 'error',
+    })
+    emitAudit(dependencies, input, {
+      phase: 'gate-stopped',
+      stopReason: 'extension-gated',
+      finalStatus: 'failed',
+      recipeId: failure.recipe.id,
+      recipeLabel: failure.recipe.label,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+      outputTail: failure.output,
+      changedFiles: changedPaths,
+    })
+    void observeQualityGate(dependencies, input, {
+      phase: 'gate-stopped',
+      recipeId: failure.recipe.id,
+      command: failure.recipe.command,
+      exitCode: failure.exitCode,
+    })
+    return
+  }
 
   await dispatchRepair(input, dependencies, settings, changedFiles, failure)
+}
+
+async function observeQualityGate(
+  dependencies: QualityGateDependencies,
+  input: QualityGateInput,
+  event: {
+    phase: RunAuditPhase
+    recipeId?: string
+    command?: string
+    exitCode?: number
+  },
+): Promise<void> {
+  try {
+    await dependencies.observeQualityGate?.({
+      projectId: input.projectId,
+      projectPath: input.repoPath,
+      sessionId: input.sessionId,
+      ...event,
+    })
+  } catch {
+    // Observation hooks must not alter the built-in quality gate result.
+  }
+}
+
+async function shouldAllowRepairRetry(
+  dependencies: QualityGateDependencies,
+  input: QualityGateInput,
+  failure: VerificationFailure,
+): Promise<{ allow: boolean; reason?: string }> {
+  if (!dependencies.gateRetry) return { allow: true }
+  try {
+    return await dependencies.gateRetry({
+      projectId: input.projectId,
+      projectPath: input.repoPath,
+      sessionId: input.sessionId,
+      reason: `${failure.recipe.label} failed with exit code ${failure.exitCode}.`,
+    })
+  } catch (error) {
+    return {
+      allow: false,
+      reason: `Extension retry gate failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+    }
+  }
 }
 
 function isRepeatFailure(
@@ -287,6 +386,12 @@ async function runRecipes(
         outputTail: output,
         changedFiles: changedPaths,
       })
+      void observeQualityGate(dependencies, input, {
+        phase: 'recipe-failed',
+        recipeId: recipe.id,
+        command: recipe.command,
+        exitCode: result.exitCode,
+      })
       return { recipe, output, exitCode: result.exitCode }
     }
 
@@ -297,6 +402,12 @@ async function runRecipes(
       command: recipe.command,
       exitCode: result.exitCode,
       changedFiles: changedPaths,
+    })
+    void observeQualityGate(dependencies, input, {
+      phase: 'recipe-passed',
+      recipeId: recipe.id,
+      command: recipe.command,
+      exitCode: result.exitCode,
     })
   }
 
@@ -311,7 +422,7 @@ async function runRecipe(
 ): Promise<QualityGateCommandResult> {
   if (
     settings.verification.requireCommandPrefix &&
-    !hasRequiredPrefix(recipe.command, settings.execution.commandPrefix)
+    !hasRequiredCommandPrefix(recipe.command, settings.execution.commandPrefix)
   ) {
     return {
       exitCode: 1,
@@ -320,7 +431,7 @@ async function runRecipe(
     }
   }
 
-  const runner = dependencies.runCommand ?? runShellCommand
+  const runner = dependencies.runCommand ?? runVerificationCommand
   return runner(recipe.command, cwd, {
     timeoutMs: settings.verification.defaultTimeoutSeconds * 1_000,
     maxOutputBytes: settings.verification.maxOutputBytes,
@@ -363,6 +474,12 @@ async function dispatchRepair(
     outputTail: failure.output,
     changedFiles: changedFiles.map((proposal) => proposal.filePath),
     repairSessionId: repair.sessionId,
+  })
+  void observeQualityGate(dependencies, input, {
+    phase: 'repair-dispatched',
+    recipeId: failure.recipe.id,
+    command: failure.recipe.command,
+    exitCode: failure.exitCode,
   })
 }
 
@@ -458,69 +575,4 @@ function summarizeFailure(failure: VerificationFailure): string {
   const output = failure.output.trim()
   if (!output) return `${failure.recipe.label} failed without output.`
   return `${failure.recipe.label} failed:\n${output.slice(0, 4_000)}`
-}
-
-function hasRequiredPrefix(command: string, prefix: string): boolean {
-  const trimmedCommand = command.trim()
-  const trimmedPrefix = prefix.trim()
-  if (!trimmedPrefix) return true
-
-  return trimmedCommand === trimmedPrefix || trimmedCommand.startsWith(`${trimmedPrefix} `)
-}
-
-function runShellCommand(
-  command: string,
-  cwd: string,
-  options: { timeoutMs: number; maxOutputBytes: number },
-): Promise<QualityGateCommandResult> {
-  return new Promise((resolve) => {
-    const child = spawn(command, {
-      cwd,
-      env: buildProcessEnvironment(),
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    let settled = false
-
-    const timeout = setTimeout(() => {
-      settled = true
-      child.kill('SIGTERM')
-      resolve({
-        exitCode: 124,
-        stdout,
-        stderr: `${stderr}\nVerification timed out after ${options.timeoutMs / 1_000}s.`,
-      })
-    }, options.timeoutMs)
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout = truncateOutput(stdout + chunk.toString(), options.maxOutputBytes)
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr = truncateOutput(stderr + chunk.toString(), options.maxOutputBytes)
-    })
-    child.on('error', (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve({ exitCode: 1, stdout, stderr: error.message })
-    })
-    child.on('exit', (code, signal) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      resolve({
-        exitCode: code ?? (signal ? 1 : 0),
-        stdout,
-        stderr,
-      })
-    })
-  })
-}
-
-function truncateOutput(output: string, maxBytes: number): string {
-  if (Buffer.byteLength(output, 'utf-8') <= maxBytes) return output
-
-  return `${Buffer.from(output, 'utf-8').subarray(0, maxBytes).toString('utf-8')}\n[output truncated]`
 }

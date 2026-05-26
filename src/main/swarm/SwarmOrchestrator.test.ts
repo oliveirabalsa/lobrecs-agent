@@ -438,6 +438,105 @@ describe('SwarmOrchestrator', () => {
     ])
   })
 
+  it('defers verification roles when a managed phase mixes them ahead of unfinished worker roles', async () => {
+    const { orchestrator, dispatched, completions } = createManagedHarness()
+
+    const spawnPromise = orchestrator.spawn(managedConfig())
+
+    await waitFor(() => dispatched.length === 1)
+    const result = await spawnPromise
+
+    completions.get(dispatched[0].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'Final Verification',
+            agentId: 'claude-code',
+            promptSuffix: 'Summarize the work and run the last verification pass.',
+          },
+          {
+            role: 'Automation Triage',
+            agentId: 'codex',
+            promptSuffix: 'Handle the queued automation follow-up work.',
+          },
+          {
+            role: 'Doctor MCP Manager',
+            agentId: 'antigravity',
+            promptSuffix: 'Check MCP health and repair broken integrations.',
+          },
+          {
+            role: 'Worktree Handoff',
+            agentId: 'codex',
+            promptSuffix: 'Prepare the repo handoff details for the thread.',
+          },
+        ],
+      }),
+    })
+
+    await waitFor(() => dispatched.length === 4)
+
+    expect(dispatched.map((call) => call.role)).toEqual([
+      'manager',
+      'Automation Triage',
+      'Doctor MCP Manager',
+      'Worktree Handoff',
+    ])
+    expect(dispatched.some((call) => call.role === 'Final Verification')).toBe(false)
+
+    completions.get(dispatched[1].sessionId)?.resolve({
+      status: 'done',
+      output: 'Automation triage complete.',
+    })
+    completions.get(dispatched[2].sessionId)?.resolve({
+      status: 'done',
+      output: 'Doctor checks complete.',
+    })
+    completions.get(dispatched[3].sessionId)?.resolve({
+      status: 'done',
+      output: 'Worktree handoff complete.',
+    })
+
+    await waitFor(() => dispatched.length === 5)
+    expect(dispatched[4].role).toBe('manager')
+
+    completions.get(dispatched[4].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({
+        strategy: 'parallel',
+        agents: [
+          {
+            role: 'Final Verification',
+            agentId: 'claude-code',
+            promptSuffix: 'Summarize the completed worker output and verify it.',
+          },
+        ],
+      }),
+    })
+
+    await waitFor(() => dispatched.length === 6)
+    expect(dispatched[5].role).toBe('Final Verification')
+
+    completions.get(dispatched[5].sessionId)?.resolve({
+      status: 'done',
+      output: 'Final verification complete.',
+    })
+
+    await waitFor(() => dispatched.length === 7)
+    expect(dispatched[6].role).toBe('manager')
+
+    completions.get(dispatched[6].sessionId)?.resolve({
+      status: 'done',
+      output: JSON.stringify({ status: 'complete', agents: [] }),
+    })
+
+    await waitFor(() => {
+      const swarm = orchestrator.get(result.swarmId)
+      return swarm?.sessions.at(-1)?.role === 'manager' && swarm.sessions.every((session) => session.status === 'done')
+    })
+  })
+
   it('marks invalid manager JSON as failed before spawning workers', async () => {
     const { orchestrator, dispatched, completions } = createManagedHarness()
     const spawnPromise = orchestrator.spawn(managedConfig())

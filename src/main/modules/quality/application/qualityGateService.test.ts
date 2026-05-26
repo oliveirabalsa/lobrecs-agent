@@ -287,6 +287,55 @@ describe('runQualityGate', () => {
 
     expect(dispatchRepair).not.toHaveBeenCalled()
   })
+
+  it('skips repair dispatch when another repair is already in flight', async () => {
+    const activities: AgentActivity[] = []
+    const auditEvents: Parameters<NonNullable<QualityGateDependencies['recordAudit']>>[0][] = []
+    const dispatchRepair = vi.fn()
+
+    await runQualityGate(
+      {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        projectId: 'project-1',
+        repoPath: '/repo',
+        changedFiles: [appliedProposal('/repo/src/app.ts')],
+        attempt: 0,
+        emitActivity: (activity) => activities.push(activity),
+      },
+      {
+        getSettings: () => DEFAULT_APP_SETTINGS,
+        routeModel: vi.fn(),
+        dispatchRepair,
+        recordAudit: (event) => auditEvents.push(event),
+        isRepairInFlight: () => true,
+        runCommand: vi.fn<RunCommand>(async (command) =>
+          command.includes('build')
+            ? { exitCode: 1, stdout: '', stderr: 'Build failed' }
+            : { exitCode: 0, stdout: 'ok', stderr: '' },
+        ),
+      },
+    )
+
+    expect(dispatchRepair).not.toHaveBeenCalled()
+    expect(auditEvents.at(-1)).toMatchObject({
+      phase: 'gate-stopped',
+      stopReason: 'repair-in-flight',
+      finalStatus: 'failed',
+      recipeId: 'build',
+      exitCode: 1,
+    })
+    expect(activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'step',
+          title: 'Self-healing skipped',
+          detail: expect.stringContaining('Another repair session is already running'),
+          status: 'error',
+        }),
+      ]),
+    )
+  })
 })
 
 function appliedProposal(filePath: string): DiffProposal {

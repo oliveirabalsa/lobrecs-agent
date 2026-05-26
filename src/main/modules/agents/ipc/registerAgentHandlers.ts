@@ -5,19 +5,32 @@ import { modelTierFromModel } from '../../../router'
 import { capacityFallbackModelsForAgent } from '../../../router/modelCapacityFallbacks'
 import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { delegateTask } from '../application/delegateTask'
+import {
+  getAgentProfile,
+  listAgentProfiles,
+  promptWithAgentProfile,
+} from '../application/agentProfileService'
+import { listAgentModelCatalogs } from '../application/listAgentModelCatalogs'
 import { submitPlanDecision } from '../../../swarm/planPrompt'
 import { submitStepApprovalDecision } from '../../../swarm/stepApprovalPrompt'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
+import { listCapabilities } from '../../system/ipc/registerSystemHandlers'
 import {
   runtimeSettingsWithApprovalMode,
   runtimeSettingsWithThinkingLevel,
 } from '../domain/approvalMode'
 import { isSupportedAgentId } from '../domain/isSupportedAgentId'
+import {
+  validateAgentDispatchParams,
+  validateEnqueueParams,
+  validateSessionId,
+  validateSteerParams,
+  validateThreadId,
+} from '../../../../shared/types'
 import type {
   AgentDispatchParams,
   AgentDelegateTaskParams,
-  AgentId,
   AgentModelRecoveryDecisionPayload,
   AgentPlanDecisionPayload,
   AgentPlanReviewDecisionPayload,
@@ -71,10 +84,18 @@ export function registerAgentHandlers(context: MainIpcContext): void {
     'agent:dispatch',
     async (
       _event,
-      params: AgentDispatchParams & { imageAttachments?: ImageAttachment[]; agentId?: AgentId },
+      rawParams: unknown,
     ) => {
+      const params = validateAgentDispatchParams(rawParams)
       const project = requireProject(params.projectId)
       const settings = context.settingsService.getEffective(project.id).settings
+      const profile = await getAgentProfile(project.id, params.profileId)
+      if (params.profileId && !profile) {
+        throw new Error(`Agent profile not found: ${params.profileId}`)
+      }
+      const prompt = promptWithAgentProfile(params.prompt, profile)
+      const approvalMode = params.approvalMode ?? profile?.approvalMode
+      const thinking = params.thinking ?? profile?.thinking
       const imageAttachments = await normalizeImageAttachments(
         params.imageAttachments,
         settings.agents.imageAttachments,
@@ -82,17 +103,17 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       const userPickedAgent = isSupportedAgentId(params.agentId)
       const preferredAgentId = userPickedAgent
         ? (params.agentId as SupportedAgentId)
-        : settings.agents.defaultAgentId
+        : profile?.defaultAgentId ?? settings.agents.defaultAgentId
       const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
         prompt: failure.prompt,
         tier: modelTierFromModel(failure.model),
         failed: true,
       }))
       const decision = await context.modelRouter.route({
-        prompt: params.prompt,
+        prompt,
         preferredAgentId,
         requiresImageSupport: imageAttachments.length > 0,
-        modelOverride: params.modelOverride,
+        modelOverride: params.modelOverride ?? profile?.defaultModel,
         projectId: project.id,
         recentFailures,
         autoAgentSelection: !userPickedAgent && !params.modelOverride,
@@ -106,15 +127,15 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         runtimeSettingsWithThinkingLevel(
           settings.agents.runtimes[decision.agentId],
           decision.agentId,
-          params.thinking,
+          thinking,
         ),
-        params.approvalMode,
+        approvalMode,
         settings.execution.defaultApprovalMode,
       )
 
       const { sessionId, threadId } = await context.sessionManager.dispatch({
         projectId: project.id,
-        prompt: params.prompt,
+        prompt,
         agentId: decision.agentId,
         model: decision.model,
         modelFallbacks: capacityFallbackModelsForAgent({
@@ -131,6 +152,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         runtimeSettings,
         planMode: params.planMode,
         spawnedAgent: normalizeSpawnedAgent(params.spawnedAgent),
+        returnAfterSessionCreated: true,
       })
 
       return { sessionId, threadId }
@@ -141,13 +163,29 @@ export function registerAgentHandlers(context: MainIpcContext): void {
     'agent:delegate-task',
     async (_event, params: AgentDelegateTaskParams) => delegateTask(context, params),
   )
-  ipcMain.handle('agent:approve', async (_event, sessionId: string) => {
+  ipcMain.handle('agent:list-profiles', async (_event, rawInput: unknown) => {
+    const projectId = typeof rawInput === 'string'
+      ? rawInput
+      : rawInput && typeof rawInput === 'object'
+        ? (rawInput as { projectId?: unknown }).projectId
+        : undefined
+    if (typeof projectId !== 'string') throw new Error('Project id is required.')
+    const [capabilities, modelCatalogs] = await Promise.all([
+      listCapabilities(context),
+      listAgentModelCatalogs(context),
+    ])
+    return listAgentProfiles({ projectId, capabilities, modelCatalogs })
+  })
+  ipcMain.handle('agent:approve', async (_event, rawSessionId: unknown) => {
+    const sessionId = validateSessionId(rawSessionId)
     context.sessionManager.approve(sessionId)
   })
-  ipcMain.handle('agent:reject', async (_event, sessionId: string) => {
+  ipcMain.handle('agent:reject', async (_event, rawSessionId: unknown) => {
+    const sessionId = validateSessionId(rawSessionId)
     context.sessionManager.reject(sessionId)
   })
-  ipcMain.handle('agent:cancel', async (_event, sessionId: string) => {
+  ipcMain.handle('agent:cancel', async (_event, rawSessionId: unknown) => {
+    const sessionId = validateSessionId(rawSessionId)
     context.sessionManager.cancel(sessionId)
   })
   ipcMain.handle('agent:kill-all', async () => {
@@ -244,23 +282,31 @@ export function registerAgentHandlers(context: MainIpcContext): void {
 
   ipcMain.handle(
     'agent:enqueue',
-    async (_event, params: EnqueueParams): Promise<QueuedMessage> => {
+    async (_event, rawParams: unknown): Promise<QueuedMessage> => {
+      const params: EnqueueParams = validateEnqueueParams(rawParams)
       const project = requireProject(params.projectId)
       const settings = context.settingsService.getEffective(project.id).settings
+      const profile = await getAgentProfile(project.id, params.profileId)
+      if (params.profileId && !profile) {
+        throw new Error(`Agent profile not found: ${params.profileId}`)
+      }
+      const prompt = promptWithAgentProfile(params.prompt, profile)
+      const approvalMode = params.approvalMode ?? profile?.approvalMode
+      const thinking = params.thinking ?? profile?.thinking
       const userPickedAgent = isSupportedAgentId(params.agentId)
       const preferredAgentId = userPickedAgent
         ? (params.agentId as SupportedAgentId)
-        : settings.agents.defaultAgentId
+        : profile?.defaultAgentId ?? settings.agents.defaultAgentId
       const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
         prompt: failure.prompt,
         tier: modelTierFromModel(failure.model),
         failed: true,
       }))
       const decision = await context.modelRouter.route({
-        prompt: params.prompt,
+        prompt,
         preferredAgentId,
         requiresImageSupport: false,
-        modelOverride: params.modelOverride,
+        modelOverride: params.modelOverride ?? profile?.defaultModel,
         projectId: project.id,
         recentFailures,
         autoAgentSelection: !userPickedAgent && !params.modelOverride,
@@ -277,19 +323,20 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         runtimeSettingsWithThinkingLevel(
           settings.agents.runtimes[decision.agentId],
           decision.agentId,
-          params.thinking,
+          thinking,
         ),
-        params.approvalMode,
+        approvalMode,
         settings.execution.defaultApprovalMode,
       )
 
       return context.sessionManager.enqueueMessage(
         {
-          prompt: params.prompt,
+          prompt,
           agentId: decision.agentId,
           model: decision.model,
-          approvalMode: params.approvalMode,
-          thinking: params.thinking,
+          profileId: params.profileId,
+          approvalMode,
+          thinking,
           runtimeSettings,
         },
         params.threadId,
@@ -299,7 +346,8 @@ export function registerAgentHandlers(context: MainIpcContext): void {
 
   ipcMain.handle(
     'agent:queue-status',
-    async (_event, threadId: string): Promise<QueuedMessage[]> => {
+    async (_event, rawThreadId: unknown): Promise<QueuedMessage[]> => {
+      const threadId = validateThreadId(rawThreadId)
       return context.sessionManager.getQueue(threadId)
     },
   )
@@ -307,15 +355,19 @@ export function registerAgentHandlers(context: MainIpcContext): void {
   ipcMain.handle(
     'agent:dequeue-item',
     async (_event, payload: { threadId: string; messageId: string }) => {
+      validateThreadId(payload.threadId)
+      validateSessionId(payload.messageId)
       context.sessionManager.removeQueueItem(payload.threadId, payload.messageId)
     },
   )
 
-  ipcMain.handle('agent:clear-queue', async (_event, threadId: string) => {
+  ipcMain.handle('agent:clear-queue', async (_event, rawThreadId: unknown) => {
+    const threadId = validateThreadId(rawThreadId)
     context.sessionManager.clearQueue(threadId)
   })
 
-  ipcMain.handle('agent:steer', async (_event, params: SteerParams) => {
+  ipcMain.handle('agent:steer', async (_event, rawParams: unknown) => {
+    const params: SteerParams = validateSteerParams(rawParams)
     const session = sessionsStore.get(params.sessionId)
     if (!session) {
       throw new Error(`Session not found: ${params.sessionId}`)
@@ -323,19 +375,26 @@ export function registerAgentHandlers(context: MainIpcContext): void {
 
     const project = requireProject(session.projectId)
     const settings = context.settingsService.getEffective(project.id).settings
+    const profile = await getAgentProfile(project.id, params.profileId)
+    if (params.profileId && !profile) {
+      throw new Error(`Agent profile not found: ${params.profileId}`)
+    }
+    const prompt = promptWithAgentProfile(params.prompt, profile)
+    const approvalMode = params.approvalMode ?? profile?.approvalMode
+    const thinking = params.thinking ?? profile?.thinking
     const preferredAgentId = isSupportedAgentId(params.agentId)
       ? params.agentId
-      : session.agentId
+      : profile?.defaultAgentId ?? session.agentId
     const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
       prompt: failure.prompt,
       tier: modelTierFromModel(failure.model),
       failed: true,
     }))
     const decision = await context.modelRouter.route({
-      prompt: params.prompt,
+      prompt,
       preferredAgentId,
       requiresImageSupport: false,
-      modelOverride: params.modelOverride,
+      modelOverride: params.modelOverride ?? profile?.defaultModel,
       projectId: project.id,
       recentFailures,
     })
@@ -344,16 +403,16 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       runtimeSettingsWithThinkingLevel(
         settings.agents.runtimes[decision.agentId],
         decision.agentId,
-        params.thinking,
+        thinking,
       ),
-      params.approvalMode,
+      approvalMode,
       settings.execution.defaultApprovalMode,
     )
 
     return context.sessionManager.steer({
       sessionId: params.sessionId,
       projectId: session.projectId,
-      prompt: params.prompt,
+      prompt,
       agentId: decision.agentId,
       model: decision.model,
       modelFallbacks: capacityFallbackModelsForAgent({

@@ -1,44 +1,38 @@
 import { ipcMain } from 'electron'
-import { automationsStore, projectsStore } from '../../../store'
-import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
-import type { Automation } from '../../../../shared/types'
+import type { CreateAutomationInput, UpdateAutomationInput } from '../../../store'
+import { automationSchedulerService } from '../application/automationSchedulerService'
 
 export function registerAutomationHandlers(context: MainIpcContext): void {
+  automationSchedulerService.configure(context)
+
   ipcMain.handle('automations:list', async (_event, projectId: string) =>
-    automationsStore.list(projectId),
+    automationSchedulerService.list(projectId),
   )
   ipcMain.handle(
     'automations:create',
-    async (_event, data: Omit<Automation, 'id' | 'createdAt' | 'lastRunAt'>) =>
-      automationsStore.create(data),
+    async (_event, data: CreateAutomationInput) =>
+      automationSchedulerService.createAutomation(data),
   )
-  ipcMain.handle('automations:update', async (_event, id: string, data: Partial<Automation>) =>
-    automationsStore.update(id, data),
+  ipcMain.handle('automations:update', async (_event, id: string, data: UpdateAutomationInput) =>
+    automationSchedulerService.updateAutomation(id, data),
   )
   ipcMain.handle('automations:delete', async (_event, id: string) => {
-    automationsStore.delete(id)
+    automationSchedulerService.deleteAutomation(id)
   })
-  ipcMain.handle('automations:run-now', async (_event, id: string) => {
-    const automation = automationsStore.get(id)
-    if (!automation) throw new Error('Automation not found')
-
-    const project = requireProject(automation.projectId)
-    const decision = await context.modelRouter.route({
-      prompt: automation.prompt,
-      preferredAgentId: automation.agentId,
-    })
-    const { sessionId } = await context.sessionManager.dispatch({
-      projectId: project.id,
-      prompt: `[Automation: ${automation.name}]\n${automation.prompt}`,
-      agentId: decision.agentId,
-      model: decision.model,
-      repoPath: project.repoPath,
-      context: projectsStore.getContext(project.id),
-      spawnedAgent: { kind: 'automation', role: automation.name },
-    })
-
-    automationsStore.markRun(id)
-    return { sessionId }
-  })
+  ipcMain.handle('automations:run-now', async (_event, id: string) =>
+    automationSchedulerService.runNow(id),
+  )
+  ipcMain.handle('automations:list-runs', async (_event, projectId: string) =>
+    automationSchedulerService.listRuns(projectId),
+  )
+  ipcMain.handle('automations:acknowledge-run', async (_event, runId: string) =>
+    automationSchedulerService.acknowledgeRun(runId),
+  )
+  ipcMain.handle('automations:review-run', async (_event, runId: string) =>
+    automationSchedulerService.reviewRun(runId),
+  )
+  ipcMain.handle('automations:retry-run', async (_event, runId: string) =>
+    automationSchedulerService.retryRun(runId),
+  )
 }

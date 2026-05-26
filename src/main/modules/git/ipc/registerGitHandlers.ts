@@ -1,4 +1,8 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
+import { watch, FSWatcher } from 'node:fs'
+import { promises as fsPromises } from 'node:fs'
+import * as path from 'node:path'
+import { getMainWindow } from '../../../app/bootstrap'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { requireProject } from '../../projects/application/requireProject'
 import { GitCommitWorkflowService } from '../application/gitCommitWorkflowService'
@@ -21,6 +25,12 @@ import type {
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
   GeneratePullRequestDraftInput,
+  ReviewPullRequestInput,
+  SyncPullRequestReviewInput,
+  BringThreadToLocalInput,
+  CreateBranchHereInput,
+  MoveThreadToWorktreeInput,
+  WorktreeHandoffRequest,
 } from '../../../../shared/types'
 
 export function registerGitHandlers(context: MainIpcContext): void {
@@ -84,9 +94,11 @@ export function registerGitHandlers(context: MainIpcContext): void {
   )
 
   ipcMain.handle('git:review-current-diff', async (_event, projectId: string, threadId?: string) => {
-    const result = await workflowService.reviewCurrentDiff(projectId, threadId)
-    reviewIssuesStore.saveDiffReviewIssues({ result, threadId })
-    return result
+    return workflowService.reviewCurrentDiff(projectId, threadId)
+  })
+
+  ipcMain.handle('git:get-fingerprint', async (_event, projectId: string) => {
+    return workflowService.getWorkingTreeFingerprint(projectId)
   })
 
   ipcMain.handle(
@@ -101,6 +113,9 @@ export function registerGitHandlers(context: MainIpcContext): void {
 
   ipcMain.handle('git:get-current-branch', async (_event, projectId: string) => {
     const project = requireProject(projectId)
+    startWatchingProject(projectId, project.repoPath).catch((err) => {
+      console.error('[git] failed to watch project git dir', err)
+    })
     const result = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], project.repoPath)
     if (result.exitCode !== 0) return ' HEAD'
     return result.stdout.trim()
@@ -125,6 +140,16 @@ export function registerGitHandlers(context: MainIpcContext): void {
       headBranch: input.headBranch,
       baseBranch: input.baseBranch,
     })
+  })
+
+  ipcMain.handle('git:review-pr', async (_event, input: ReviewPullRequestInput) => {
+    assertReviewPullRequestInput(input)
+    return prWorkflowService.reviewPullRequest(input)
+  })
+
+  ipcMain.handle('git:sync-pr-review', async (_event, input: SyncPullRequestReviewInput) => {
+    assertReviewPullRequestInput(input)
+    return prWorkflowService.syncPrReview(input)
   })
 
   ipcMain.handle('git:create-branch', async (_event, projectId: string, branchName: string) => {
@@ -169,6 +194,57 @@ export function registerGitHandlers(context: MainIpcContext): void {
   ipcMain.handle('git:get-file-diff', async (_event, request: GitFileDiffRequest) => {
     const project = requireProject(request.projectId)
     return gitWorkspaceService.getFileDiff(project.repoPath, request)
+  })
+
+  ipcMain.handle('git:get-worktree-handoff-state', async (_event, request: WorktreeHandoffRequest) => {
+    ensureWorktreeHandoffEnabled(context, request.projectId)
+    const project = requireProject(request.projectId)
+    return context.sessionManager.getWorktreeHandoffState(request, project.repoPath)
+  })
+
+  ipcMain.handle('git:preview-worktree-handoff', async (_event, request: WorktreeHandoffRequest) => {
+    ensureWorktreeHandoffEnabled(context, request.projectId)
+    const project = requireProject(request.projectId)
+    return context.sessionManager.previewWorktreeHandoff(request, project.repoPath)
+  })
+
+  ipcMain.handle('git:move-thread-to-worktree', async (_event, input: MoveThreadToWorktreeInput) => {
+    ensureWorktreeHandoffEnabled(context, input.projectId)
+    const project = requireProject(input.projectId)
+    return context.sessionManager.moveThreadToWorktree(input, project.repoPath)
+  })
+
+  ipcMain.handle('git:bring-thread-to-local', async (_event, input: BringThreadToLocalInput) => {
+    ensureWorktreeHandoffEnabled(context, input.projectId)
+    const project = requireProject(input.projectId)
+    return context.sessionManager.bringThreadToLocal(input, project.repoPath)
+  })
+
+  ipcMain.handle('git:create-branch-here', async (_event, input: CreateBranchHereInput) => {
+    ensureWorktreeHandoffEnabled(context, input.projectId)
+    const project = requireProject(input.projectId)
+    return context.sessionManager.createBranchHere(input, project.repoPath)
+  })
+
+  ipcMain.handle('git:restore-worktree-snapshot', async (_event, request: WorktreeHandoffRequest) => {
+    ensureWorktreeHandoffEnabled(context, request.projectId)
+    const project = requireProject(request.projectId)
+    return context.sessionManager.restoreWorktreeSnapshot(request, project.repoPath)
+  })
+
+  ipcMain.handle('git:open-worktree', async (_event, request: WorktreeHandoffRequest) => {
+    ensureWorktreeHandoffEnabled(context, request.projectId)
+    const metadata = context.worktreeManager.getThreadWorktree(request.threadId)
+    if (!metadata?.worktreePath) {
+      throw new Error('This thread is not attached to a worktree.')
+    }
+
+    const error = await shell.openPath(metadata.worktreePath)
+    if (error) throw new Error(error)
+    return context.sessionManager.getWorktreeHandoffState(
+      request,
+      requireProject(request.projectId).repoPath,
+    )
   })
 
   ipcMain.handle('git:get-commit-detail', async (_event, request: GitCommitDetailRequest) => {
@@ -230,4 +306,89 @@ export function registerGitHandlers(context: MainIpcContext): void {
     const project = requireProject(input.projectId)
     return gitWorkspaceService.dropStash(project.repoPath, input)
   })
+}
+
+function ensureWorktreeHandoffEnabled(context: MainIpcContext, projectId: string): void {
+  const settings = context.settingsService.getEffective(projectId).settings
+  if (!settings.execution.experimentalWorktreeHandoff) {
+    throw new Error('Experimental worktree handoff is disabled in settings.')
+  }
+}
+
+function assertReviewPullRequestInput(input: { projectId?: unknown; prNumber?: unknown }): void {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Pull request review input is required.')
+  }
+  if (typeof input.projectId !== 'string' || input.projectId.trim().length === 0) {
+    throw new Error('projectId is required.')
+  }
+  if (typeof input.prNumber !== 'number' || !Number.isInteger(input.prNumber) || input.prNumber <= 0) {
+    throw new Error('A positive integer prNumber is required.')
+  }
+}
+
+let activeProjectId: string | null = null
+let activeWatcher: FSWatcher | null = null
+let debounceTimeout: NodeJS.Timeout | null = null
+
+async function resolveGitDir(repoPath: string): Promise<string | null> {
+  const gitPath = path.join(repoPath, '.git')
+  try {
+    const stat = await fsPromises.stat(gitPath)
+    if (stat.isDirectory()) {
+      return gitPath
+    } else if (stat.isFile()) {
+      const content = await fsPromises.readFile(gitPath, 'utf8')
+      const match = content.match(/^gitdir:\s*(.+)$/m)
+      if (match) {
+        const gitDir = match[1].trim()
+        return path.isAbsolute(gitDir) ? gitDir : path.resolve(repoPath, gitDir)
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null
+}
+
+async function startWatchingProject(projectId: string, repoPath: string) {
+  if (activeProjectId === projectId) return
+
+  if (activeWatcher) {
+    activeWatcher.close()
+    activeWatcher = null
+  }
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout)
+    debounceTimeout = null
+  }
+
+  activeProjectId = projectId
+
+  try {
+    const gitDir = await resolveGitDir(repoPath)
+    if (!gitDir) return
+
+    activeWatcher = watch(gitDir, (eventType, filename) => {
+      if (filename === 'HEAD' || !filename) {
+        if (debounceTimeout) clearTimeout(debounceTimeout)
+        debounceTimeout = setTimeout(() => {
+          const win = getMainWindow()
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('git:branch-changed', { projectId })
+          }
+        }, 150)
+      }
+    })
+
+    activeWatcher.on('error', () => {
+      if (activeWatcher) {
+        activeWatcher.close()
+        activeWatcher = null
+      }
+      activeProjectId = null
+    })
+  } catch (e) {
+    // Ignore watcher errors
+  }
 }

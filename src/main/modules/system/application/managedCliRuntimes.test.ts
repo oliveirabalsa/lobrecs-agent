@@ -10,7 +10,7 @@ vi.mock('node:child_process', () => ({
 const execFileMock = vi.mocked(execFile)
 
 function createContext(
-  commands: Partial<Record<'claude-code' | 'codex' | 'opencode' | 'antigravity', string>> = {},
+  commands: Partial<Record<'claude-code' | 'codex' | 'opencode' | 'antigravity' | 'cursor', string>> = {},
 ): MainIpcContext {
   return {
     settingsService: {
@@ -21,6 +21,7 @@ function createContext(
             codex: { command: commands.codex ?? 'codex-test' },
             opencode: { command: commands.opencode ?? 'opencode-test' },
             antigravity: { command: commands.antigravity ?? 'agy-test' },
+            cursor: { command: commands.cursor ?? 'cursor-agent-test' },
           },
         },
       }),
@@ -59,6 +60,32 @@ describe('managed CLI runtimes', () => {
     })
   })
 
+  it('runs the fixed Cursor installer command for Cursor install requests', async () => {
+    execFileMock.mockImplementation((command, args, _options, callback) => {
+      if (command === 'which') {
+        callback?.(new Error('not found'), '', '')
+        return undefined as never
+      }
+
+      expect(command).toBe('/bin/bash')
+      expect(args).toEqual(['-lc', 'curl https://cursor.com/install -fsS | bash'])
+      callback?.(null, 'installed', '')
+      return undefined as never
+    })
+
+    const result = await runManagedCliAction(createContext(), {
+      agentId: 'cursor',
+      actionId: 'install',
+    })
+
+    expect(result).toMatchObject({
+      agentId: 'cursor',
+      actionId: 'install',
+      command: '/bin/bash -lc curl https://cursor.com/install -fsS | bash',
+      exitCode: 0,
+    })
+  })
+
   it('disables install for installed runtimes and upgrade until a newer version exists', async () => {
     execFileMock.mockImplementation((command, args, _options, callback) => {
       if (command === 'which') {
@@ -86,6 +113,11 @@ describe('managed CLI runtimes', () => {
         return undefined as never
       }
 
+      if (command === 'cursor-agent-test') {
+        callback?.(null, 'cursor-agent 1.0.0\n', '')
+        return undefined as never
+      }
+
       if (command === 'npm' && args?.[0] === 'view') {
         const packageName = args[1]
         const versions: Record<string, string> = {
@@ -103,6 +135,7 @@ describe('managed CLI runtimes', () => {
     const runtimes = await listManagedCliRuntimes(createContext())
     const claude = runtimes.find((runtime) => runtime.agentId === 'claude-code')
     const codex = runtimes.find((runtime) => runtime.agentId === 'codex')
+    const cursor = runtimes.find((runtime) => runtime.agentId === 'cursor')
 
     expect(claude).toMatchObject({
       version: '2.1.149 (Claude Code)',
@@ -124,6 +157,19 @@ describe('managed CLI runtimes', () => {
       available: false,
       commandPreview: 'codex update',
       unavailableReason: 'Already on the latest version (0.130.0).',
+    })
+    expect(cursor).toMatchObject({
+      name: 'Cursor CLI',
+      command: 'cursor-agent-test',
+      version: 'cursor-agent 1.0.0',
+    })
+    expect(cursor?.actions.find((action) => action.id === 'install')).toMatchObject({
+      commandPreview: 'curl https://cursor.com/install -fsS | bash',
+      available: false,
+    })
+    expect(cursor?.actions.find((action) => action.id === 'upgrade')).toMatchObject({
+      commandPreview: 'cursor-agent update',
+      available: true,
     })
   })
 
@@ -210,6 +256,34 @@ describe('managed CLI runtimes', () => {
       expect.anything(),
       expect.anything(),
     )
+  })
+
+  it('runs Cursor upgrades through the fixed update subcommand without latest-version gating', async () => {
+    execFileMock.mockImplementation((command, args, _options, callback) => {
+      if (command === 'which') {
+        callback?.(null, '/bin/cursor-agent-test\n', '')
+        return undefined as never
+      }
+      if (command === 'cursor-agent-test' && args?.[0] === 'update') {
+        callback?.(null, 'updated\n', '')
+        return undefined as never
+      }
+
+      throw new Error(`Unexpected command: ${command} ${args?.join(' ')}`)
+    })
+
+    const result = await runManagedCliAction(createContext(), {
+      agentId: 'cursor',
+      actionId: 'upgrade',
+    })
+
+    expect(result).toMatchObject({
+      agentId: 'cursor',
+      actionId: 'upgrade',
+      command: 'cursor-agent-test update',
+      exitCode: 0,
+      stdout: 'updated',
+    })
   })
 
   it('rejects unsupported agent action pairs before spawning', async () => {

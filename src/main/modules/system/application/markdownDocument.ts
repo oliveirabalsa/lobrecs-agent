@@ -1,11 +1,16 @@
 import { readFile, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type {
   MarkdownDocument,
   ReadMarkdownDocumentInput,
 } from '../../../../shared/contracts/system'
+import {
+  isPathInside,
+  isTrustedGeneratedMarkdownPath,
+} from './trustedPaths'
+
+export { isTrustedGeneratedMarkdownPath } from './trustedPaths'
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx', '.markdown'])
@@ -50,6 +55,7 @@ function parseMarkdownLocation(input: ReadMarkdownDocumentInput): MarkdownLocati
   const url = parseUrl(href)
   if (url) {
     if (url.protocol === 'http:' || url.protocol === 'https:') {
+      ensureSafeRemoteMarkdownUrl(url)
       return { kind: 'remote', url }
     }
     if (url.protocol === 'file:') {
@@ -131,7 +137,13 @@ function resolveRelativeMarkdownPath(pathLike: string, repoPath?: string): strin
 }
 
 function ensureAllowedLocalMarkdownPath(filePath: string, repoPath?: string): string {
-  if (!repoPath) return path.resolve(filePath)
+  if (!repoPath) {
+    if (isTrustedGeneratedMarkdownPath(filePath)) {
+      return path.resolve(filePath)
+    }
+
+    throw new Error('Markdown preview requires a selected project.')
+  }
 
   if (isInsideRepo(filePath, repoPath) || isTrustedGeneratedMarkdownPath(filePath)) {
     return path.resolve(filePath)
@@ -144,25 +156,27 @@ function isInsideRepo(filePath: string, repoPath: string): boolean {
   return isPathInside(path.resolve(repoPath), path.resolve(filePath))
 }
 
-function isPathInside(root: string, filePath: string): boolean {
-  const resolvedRoot = path.resolve(root)
-  const resolved = path.resolve(filePath)
-  const relative = path.relative(resolvedRoot, resolved)
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
-}
-
-export function isTrustedGeneratedMarkdownPath(filePath: string): boolean {
-  return isPathInside(
-    path.join(homedir(), '.gemini', 'antigravity-cli', 'brain'),
-    path.resolve(filePath),
-  )
-}
-
 function parseUrl(value: string): URL | null {
   try {
     return new URL(value)
   } catch {
     return null
+  }
+}
+
+function ensureSafeRemoteMarkdownUrl(url: URL): void {
+  const hostname = url.hostname.toLowerCase()
+  if (
+    hostname === 'localhost' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname.startsWith('127.') ||
+    hostname.startsWith('10.') ||
+    hostname.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+    hostname.startsWith('169.254.')
+  ) {
+    throw new Error('Remote Markdown preview cannot load local network URLs.')
   }
 }
 

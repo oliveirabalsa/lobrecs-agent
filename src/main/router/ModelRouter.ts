@@ -1,5 +1,6 @@
 import { MODEL_MAP, SUPPORTED_AGENT_IDS } from '../../shared/types'
 import { inferModelTier, pickModelForTier, modelSupportsImages } from '../agents/modelDiscovery'
+import { DEFAULT_APP_SETTINGS } from '../modules/settings'
 import { scoreComplexity } from './ComplexityScorer'
 import type {
   AgentId,
@@ -32,6 +33,8 @@ export interface RouteParams {
   preferredAgentId?: AgentId | string
   requiresImageSupport?: boolean
   modelOverride?: string
+  minimumTier?: ModelTier
+  agentPreference?: SupportedAgentId[]
   projectId?: string
   recentFailures?: ScoringContext['recentFailures']
   /**
@@ -116,12 +119,15 @@ export class ModelRouter {
       }
     }
 
-    const scoring = scoreComplexity(params.prompt, {
-      recentFailures: params.recentFailures,
-      tierThresholds: settings.routing.tierThresholds,
-      securityMinimumTier: settings.routing.securityMinimumTier,
-      useRecentFailureEscalation: settings.routing.useRecentFailureEscalation,
-    })
+    const scoring = applyMinimumTier(
+      scoreComplexity(params.prompt, {
+        recentFailures: params.recentFailures,
+        tierThresholds: settings.routing.tierThresholds,
+        securityMinimumTier: settings.routing.securityMinimumTier,
+        useRecentFailureEscalation: settings.routing.useRecentFailureEscalation,
+      }),
+      params.minimumTier,
+    )
     const preferredAgent = this.normalizeAgentId(params.preferredAgentId, enabledAgents)
     let agentId: SupportedAgentId
     if (params.autoAgentSelection) {
@@ -130,6 +136,7 @@ export class ModelRouter {
         prompt: params.prompt,
         enabledAgents,
         preferredAgent,
+        agentPreference: params.agentPreference,
         fallbackAgentId,
         defaultAgentId,
       })
@@ -165,6 +172,7 @@ export class ModelRouter {
         'codex',
         'claude-code',
         'antigravity',
+        'cursor',
         ...enabledAgents,
       ] as SupportedAgentId[]).filter((id) => enabledAgents.includes(id))
 
@@ -186,6 +194,9 @@ export class ModelRouter {
   }
 
   supportsImages(agentId: SupportedAgentId, modelId?: string): boolean {
+    if (agentId === 'cursor') {
+      return false
+    }
     if (modelId) {
       return modelSupportsImages(modelId)
     }
@@ -237,17 +248,19 @@ export class ModelRouter {
     prompt: string
     enabledAgents: readonly SupportedAgentId[]
     preferredAgent?: SupportedAgentId
+    agentPreference?: readonly SupportedAgentId[]
     fallbackAgentId: SupportedAgentId
     defaultAgentId: SupportedAgentId
   }): Promise<SupportedAgentId> {
     const tierPreference: Record<ModelTier, SupportedAgentId[]> = {
-      frontier: ['codex', 'claude-code', 'antigravity', 'opencode'],
-      advanced: ['codex', 'claude-code', 'antigravity', 'opencode'],
-      balanced: ['opencode', 'codex', 'antigravity', 'claude-code'],
-      lightweight: ['opencode', 'codex', 'antigravity', 'claude-code'],
+      frontier: ['codex', 'claude-code', 'antigravity', 'cursor', 'opencode'],
+      advanced: ['codex', 'claude-code', 'antigravity', 'cursor', 'opencode'],
+      balanced: ['opencode', 'codex', 'cursor', 'antigravity', 'claude-code'],
+      lightweight: ['opencode', 'codex', 'cursor', 'antigravity', 'claude-code'],
     }
 
     const candidates: SupportedAgentId[] = [
+      ...(params.agentPreference ?? []).filter((id) => params.enabledAgents.includes(id)),
       ...tierPreference[params.tier].filter((id) => params.enabledAgents.includes(id)),
       ...(params.preferredAgent ? [params.preferredAgent] : []),
       params.defaultAgentId,
@@ -378,131 +391,35 @@ export function modelTierFromModel(model: string): ModelTier {
 }
 
 function authoritativeCatalogModels(models: AgentModel[]): AgentModel[] {
-  const discovered = models.filter((model) => model.source !== 'fallback')
-  return discovered.length > 0 ? discovered : models
+  const authoritative = models.filter(
+    (model) => model.source === 'cli' || model.source === 'config',
+  )
+  return authoritative.length > 0 ? authoritative : models
 }
 
 function isSupportedAgentId(agentId?: AgentId | string): agentId is SupportedAgentId {
   return typeof agentId === 'string' && Object.hasOwn(MODEL_MAP, agentId)
 }
 
+function applyMinimumTier<T extends { tier: ModelTier; reasoning: string }>(
+  scoring: T,
+  minimumTier: ModelTier | undefined,
+): T {
+  if (!minimumTier) return scoring
+
+  const currentRank = TIER_PRIORITY.indexOf(scoring.tier)
+  const minimumRank = TIER_PRIORITY.indexOf(minimumTier)
+  if (currentRank <= minimumRank) return scoring
+
+  return {
+    ...scoring,
+    tier: minimumTier,
+    reasoning: `${scoring.reasoning}; raised to ${minimumTier} by routing minimum`,
+  }
+}
+
 export const modelRouter = new ModelRouter()
 
 function fallbackSettings(): AppSettings {
-  return {
-    schemaVersion: 1,
-    general: {
-      appName: 'Lobrecs Agent',
-      startOnLaunch: false,
-      openLastProjectOnLaunch: true,
-      enableDesktopNotifications: true,
-      onlyWhenUnfocused: true,
-      notificationEvents: {
-        swarmCompleted: true,
-        diffReady: true,
-        automationSuccess: true,
-        automationFailure: true,
-        sessionError: true,
-      },
-    },
-    agents: {
-      defaultAgentId: 'opencode',
-      fallbackAgentId: 'codex',
-      enabledAgentIds: [...SUPPORTED_AGENT_IDS],
-      runtimes: {
-        'claude-code': {
-          enabled: true,
-          command: '',
-          permissionMode: 'dangerous',
-          extraArgs: [],
-        },
-        codex: {
-          enabled: true,
-          command: '',
-          permissionMode: 'dangerous',
-          extraArgs: [],
-        },
-        opencode: {
-          enabled: true,
-          command: '',
-          permissionMode: 'dangerous',
-          extraArgs: [],
-        },
-        antigravity: {
-          enabled: true,
-          command: '',
-          permissionMode: 'dangerous',
-          extraArgs: [],
-        },
-      },
-      modelMap: {
-        'claude-code': { ...MODEL_MAP['claude-code'] },
-        codex: { ...MODEL_MAP.codex },
-        opencode: { ...MODEL_MAP.opencode },
-        antigravity: { ...MODEL_MAP.antigravity },
-      },
-      imageAttachments: { maxCount: 8, maxSizeMb: 20 },
-    },
-    routing: {
-      tierThresholds: { lightweightMax: 30, balancedMax: 65, advancedMax: 85 },
-      securityMinimumTier: 'advanced',
-      allowOpenCodeForFrontier: false,
-      useRecentFailureEscalation: true,
-    },
-    execution: {
-      worktreeIsolation: false,
-      autoApplyCompletedDiffs: true,
-      defaultApprovalMode: 'dangerous',
-      maxQueuedMessagesPerThread: 20,
-      commandPrefix: 'rtk',
-      warnWhenCommandMissingPrefix: true,
-      sessionOutputRetentionDays: 30,
-    },
-    swarms: {
-      defaultStrategy: 'managed',
-      maxAgents: 8,
-      maxReviewerIterations: 3,
-      defaultAgents: [],
-      rolePrompts: {},
-      templates: [],
-    },
-    specs: {
-      defaultAgentIds: ['codex'],
-      defaultRunMode: 'local',
-      defaultVerificationRecipeIds: ['build', 'test'],
-      targetFileLimit: 12,
-      requireApprovalBeforeRun: true,
-    },
-    verification: {
-      recipes: [],
-      requireCommandPrefix: true,
-      maxOutputBytes: 512_000,
-      defaultTimeoutSeconds: 120,
-      autoRunAfterAgentDiffs: true,
-      selfHealingMaxAttempts: 1,
-    },
-    costs: {
-      currency: 'USD',
-      monthlyBudgetUsd: 50,
-      warnAtPercent: 80,
-      pricing: {},
-    },
-    ui: {
-      compactMode: false,
-      sidebarDefaultWidth: 260,
-      rightPanelDefaultOpen: false,
-      rightPanelDefaultMode: 'diff',
-      terminalDefaultHeight: 260,
-      showCostBadges: true,
-      showTokenCounts: true,
-    },
-    editor: {
-      defaultEditorId: '',
-      cliEditorId: 'shell',
-      fontSize: 13,
-      tabSize: 2,
-      wordWrap: true,
-      formatOnSave: false,
-    },
-  }
+  return structuredClone(DEFAULT_APP_SETTINGS)
 }

@@ -58,6 +58,37 @@ describe('WorktreeManager', () => {
 
     rmSync(emptyRepoPath, { recursive: true, force: true })
   })
+
+  it('creates stable thread worktree metadata and restores its snapshot', async () => {
+    const metadata = await manager.createThreadWorktree({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      repoPath,
+      cleanupPolicy: 'manual',
+    })
+
+    expect(metadata).toMatchObject({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      location: 'worktree',
+      snapshotStatus: 'clean',
+      cleanupPolicy: 'manual',
+    })
+    expect(metadata.worktreePath).toContain('agentforge-thread-thread-1')
+    expect(manager.getThreadWorktree('thread-1')?.worktreePath).toBe(metadata.worktreePath)
+
+    git(['commit', '--allow-empty', '-m', 'thread change'], metadata.worktreePath ?? '')
+    expect(await manager.refreshThreadSnapshotStatus('thread-1')).toBe('clean')
+
+    await manager.restoreThreadSnapshot('thread-1')
+    expect(manager.getThreadWorktree('thread-1')).toMatchObject({
+      snapshotStatus: 'restored',
+      baseCommit: metadata.baseCommit,
+    })
+
+    await manager.removeThread('thread-1', repoPath)
+    expect(manager.getThreadWorktree('thread-1')).toBeNull()
+  }, 15_000)
 })
 
 function git(args: string[], cwd: string): string {

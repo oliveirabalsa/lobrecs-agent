@@ -145,12 +145,19 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
         permissionMode: 'dangerous',
         extraArgs: [],
       },
+      cursor: {
+        enabled: true,
+        command: '',
+        permissionMode: 'dangerous',
+        extraArgs: [],
+      },
     },
     modelMap: {
       'claude-code': { ...MODEL_MAP['claude-code'] },
       codex: { ...MODEL_MAP.codex },
       opencode: { ...MODEL_MAP.opencode },
       antigravity: { ...MODEL_MAP.antigravity },
+      cursor: { ...MODEL_MAP.cursor },
     },
     imageAttachments: {
       maxCount: 8,
@@ -169,6 +176,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   },
   execution: {
     worktreeIsolation: false,
+    experimentalWorktreeHandoff: false,
     autoApplyCompletedDiffs: true,
     defaultApprovalMode: 'dangerous',
     maxQueuedMessagesPerThread: 20,
@@ -228,6 +236,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
       'gemini-3.0-pro': { inputPer1M: 0, outputPer1M: 0 },
       'gemini-3.1-pro': { inputPer1M: 0, outputPer1M: 0 },
       'gemini-3.5-flash': { inputPer1M: 0, outputPer1M: 0 },
+      auto: { inputPer1M: 0, outputPer1M: 0 },
+      'gpt-5': { inputPer1M: 0, outputPer1M: 0 },
     },
   },
   ui: {
@@ -238,6 +248,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     terminalDefaultHeight: 260,
     showCostBadges: true,
     showTokenCounts: true,
+    chatBackground: {
+      enabled: false,
+      imagePath: '',
+      opacity: 8,
+      blur: 0,
+      size: 'cover',
+      position: 'center',
+      repeat: 'no-repeat',
+      fixed: true,
+    },
   },
   editor: {
     defaultEditorId: '',
