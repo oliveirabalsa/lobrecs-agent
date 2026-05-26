@@ -47,6 +47,7 @@ describe('preload api shape', () => {
       'threads',
       'agent',
       'swarm',
+      'multitask',
       'router',
       'reviews',
       'feedback',
@@ -189,6 +190,10 @@ describe('preload api shape', () => {
         ],
       },
       {
+        call: (agentforge) => agentforge.agent.listProfiles('project-1'),
+        expected: ['agent:list-profiles', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.agent.approve('session-1'),
         expected: ['agent:approve', 'session-1'],
       },
@@ -282,6 +287,10 @@ describe('preload api shape', () => {
         ],
       },
       {
+        call: (agentforge) => agentforge.reviews.listProviders('project-1'),
+        expected: ['reviews:list-providers', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.feedback.save('session-1', 'success', 'Looks good'),
         expected: ['feedback:save', 'session-1', 'success', 'Looks good'],
       },
@@ -351,6 +360,34 @@ describe('preload api shape', () => {
         ],
       },
       {
+        call: (agentforge) =>
+          agentforge.extensions.updateRuntimeState({
+            installationId: 'install-1',
+            trusted: true,
+            enabled: false,
+          }),
+        expected: [
+          'extensions:update-runtime-state',
+          {
+            installationId: 'install-1',
+            trusted: true,
+            enabled: false,
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.extensions.runDoctor({
+            installationId: 'install-1',
+          }),
+        expected: [
+          'extensions:run-doctor',
+          {
+            installationId: 'install-1',
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.automations.list('project-1'),
         expected: ['automations:list', 'project-1'],
       },
@@ -370,6 +407,22 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.automations.runNow('automation-1'),
         expected: ['automations:run-now', 'automation-1'],
+      },
+      {
+        call: (agentforge) => agentforge.automations.listRuns('project-1'),
+        expected: ['automations:list-runs', 'project-1'],
+      },
+      {
+        call: (agentforge) => agentforge.automations.acknowledgeRun('run-1'),
+        expected: ['automations:acknowledge-run', 'run-1'],
+      },
+      {
+        call: (agentforge) => agentforge.automations.reviewRun('run-1'),
+        expected: ['automations:review-run', 'run-1'],
+      },
+      {
+        call: (agentforge) => agentforge.automations.retryRun('run-1'),
+        expected: ['automations:retry-run', 'run-1'],
       },
       {
         call: (agentforge) => agentforge.specs.list('project-1'),
@@ -405,6 +458,30 @@ describe('preload api shape', () => {
         expected: ['specs:approve', 'spec-1'],
       },
       {
+        call: (agentforge) => agentforge.specs.listArtifacts('spec-1'),
+        expected: ['specs:list-artifacts', 'spec-1'],
+      },
+      {
+        call: (agentforge) => agentforge.specs.readArtifact('spec-1', 'prd'),
+        expected: ['specs:read-artifact', { specId: 'spec-1', artifactId: 'prd' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.specs.writeArtifact({
+            specId: 'spec-1',
+            kind: 'prd',
+            markdown: '# PRD',
+          }),
+        expected: [
+          'specs:write-artifact',
+          {
+            specId: 'spec-1',
+            kind: 'prd',
+            markdown: '# PRD',
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.runs.start({ specId: 'spec-1', mode: 'worktree' }),
         expected: ['runs:start', { specId: 'spec-1', mode: 'worktree' }],
       },
@@ -423,6 +500,23 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.runs.getPromptEvidence('session-1'),
         expected: ['runs:getPromptEvidence', 'session-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.runs.captureVisualEvidence('session-1', {
+            url: 'http://localhost:5173/',
+            viewport: { width: 390, height: 844 },
+            replayNotes: 'mobile smoke',
+          }),
+        expected: [
+          'runs:captureVisualEvidence',
+          'session-1',
+          {
+            url: 'http://localhost:5173/',
+            viewport: { width: 390, height: 844, deviceScaleFactor: 1 },
+            replayNotes: 'mobile smoke',
+          },
+        ],
       },
       {
         call: (agentforge) => agentforge.git.diff({ projectId: 'project-1' }),
@@ -475,6 +569,87 @@ describe('preload api shape', () => {
         call: (agentforge) =>
           agentforge.git.getFileDiff({ projectId: 'project-1', path: 'src/main.ts' }),
         expected: ['git:get-file-diff', { projectId: 'project-1', path: 'src/main.ts' }],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.getWorktreeHandoffState({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+          }),
+        expected: [
+          'git:get-worktree-handoff-state',
+          { projectId: 'project-1', threadId: 'thread-1' },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.previewWorktreeHandoff({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+          }),
+        expected: [
+          'git:preview-worktree-handoff',
+          { projectId: 'project-1', threadId: 'thread-1' },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.moveThreadToWorktree({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+            cleanupPolicy: 'manual',
+          }),
+        expected: [
+          'git:move-thread-to-worktree',
+          { projectId: 'project-1', threadId: 'thread-1', cleanupPolicy: 'manual' },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.bringThreadToLocal({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+            removeAfterApply: false,
+          }),
+        expected: [
+          'git:bring-thread-to-local',
+          { projectId: 'project-1', threadId: 'thread-1', removeAfterApply: false },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.createBranchHere({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+            branchName: 'feat/thread-handoff',
+          }),
+        expected: [
+          'git:create-branch-here',
+          {
+            projectId: 'project-1',
+            threadId: 'thread-1',
+            branchName: 'feat/thread-handoff',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.restoreWorktreeSnapshot({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+          }),
+        expected: [
+          'git:restore-worktree-snapshot',
+          { projectId: 'project-1', threadId: 'thread-1' },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.git.openWorktree({
+            projectId: 'project-1',
+            threadId: 'thread-1',
+          }),
+        expected: ['git:open-worktree', { projectId: 'project-1', threadId: 'thread-1' }],
       },
       {
         call: (agentforge) =>
@@ -704,6 +879,10 @@ describe('preload api shape', () => {
         expected: ['system:list-capabilities'],
       },
       {
+        call: (agentforge) => agentforge.system.getAgentProfileDoctor('project-1'),
+        expected: ['system:agent-profile-doctor', 'project-1'],
+      },
+      {
         call: (agentforge) => agentforge.system.listVerificationRecipes('project-1'),
         expected: ['system:list-verification-recipes', 'project-1'],
       },
@@ -740,6 +919,34 @@ describe('preload api shape', () => {
             dataUrl: 'data:image/png;base64,AAAA',
             name: 'paste.png',
             mimeType: 'image/png',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.copyImageToClipboard({
+            source: 'file:///tmp/paste.png',
+            suggestedName: 'paste.png',
+          }),
+        expected: [
+          'system:copy-image-to-clipboard',
+          {
+            source: 'file:///tmp/paste.png',
+            suggestedName: 'paste.png',
+          },
+        ],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.system.saveImageFile({
+            source: 'file:///tmp/paste.png',
+            suggestedName: 'paste.png',
+          }),
+        expected: [
+          'system:save-image-file',
+          {
+            source: 'file:///tmp/paste.png',
+            suggestedName: 'paste.png',
           },
         ],
       },
@@ -806,6 +1013,23 @@ describe('preload api shape', () => {
 
       expect(ipcRenderer.invoke).toHaveBeenCalledWith(...expected)
     }
+  })
+
+  it('passes interactive terminal control keys through the preload bridge', async () => {
+    const ipcRenderer = createIpcRendererMock()
+    const api = createAgentForgeApi(
+      ipcRenderer as unknown as Parameters<typeof createAgentForgeApi>[0],
+    )
+
+    await api.system.writeCliEditorTerminal({
+      sessionId: 'terminal-1',
+      data: 'abc\u007f\u001b[D\u0003\r',
+    })
+
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith('system:write-cli-editor-terminal', {
+      sessionId: 'terminal-1',
+      data: 'abc\u007f\u001b[D\u0003\r',
+    })
   })
 
   it('keeps event subscription cleanup behavior', () => {

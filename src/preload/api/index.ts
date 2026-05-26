@@ -16,6 +16,7 @@ import { createRunsApi, type RunsApi } from './runs'
 import { createSettingsApi, type SettingsApi } from './settings'
 import { createSessionsApi, type SessionsApi } from './sessions'
 import { createSpecsApi, type SpecsApi } from './specs'
+import { createMultitaskApi, type MultitaskApi } from './multitask'
 import { createSwarmApi, type SwarmApi } from './swarms'
 import { createSystemApi, type SystemApi } from './system'
 import { createThreadsApi, type ThreadsApi } from './threads'
@@ -27,6 +28,7 @@ export interface AgentForgeApi extends AgentForgeEventsApi {
   threads: ThreadsApi
   agent: AgentApi
   swarm: SwarmApi
+  multitask: MultitaskApi
   router: RouterApi
   reviews: ReviewsApi
   feedback: FeedbackApi
@@ -53,6 +55,7 @@ export function createAgentForgeApi(ipcRenderer: IpcRenderer): AgentForgeApi {
     threads: createThreadsApi(ipcRenderer),
     agent: createAgentApi(ipcRenderer),
     swarm: createSwarmApi(ipcRenderer),
+    multitask: createMultitaskApi(ipcRenderer),
     router: createRouterApi(ipcRenderer),
     reviews: createReviewsApi(ipcRenderer),
     feedback: createFeedbackApi(ipcRenderer),

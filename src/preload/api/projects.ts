@@ -1,4 +1,9 @@
-import type { Project } from '../../shared/contracts/projects'
+import {
+  validateCreateProjectInput,
+  validateProjectId,
+  validateUpdateProjectInput,
+  type Project,
+} from '../../shared/contracts/projects'
 import type { IpcInvoker } from './ipc'
 
 export interface ProjectsApi {
@@ -11,8 +16,9 @@ export interface ProjectsApi {
 export function createProjectsApi(ipcRenderer: IpcInvoker): ProjectsApi {
   return {
     list: () => ipcRenderer.invoke('projects:list'),
-    create: (data) => ipcRenderer.invoke('projects:create', data),
-    update: (id, data) => ipcRenderer.invoke('projects:update', id, data),
-    delete: (id) => ipcRenderer.invoke('projects:delete', id),
+    create: (data) => ipcRenderer.invoke('projects:create', validateCreateProjectInput(data)),
+    update: (id, data) =>
+      ipcRenderer.invoke('projects:update', validateProjectId(id), validateUpdateProjectInput(data)),
+    delete: (id) => ipcRenderer.invoke('projects:delete', validateProjectId(id)),
   }
 }

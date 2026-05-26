@@ -21,8 +21,16 @@ import type {
   CreatePullRequestInput,
   CreatePullRequestFromDraftInput,
   CreatePullRequestResult,
+  BringThreadToLocalInput,
+  CreateBranchHereInput,
   GeneratePullRequestDraftInput,
   GeneratePullRequestDraftResult,
+  MoveThreadToWorktreeInput,
+  ReviewPullRequestInput,
+  SyncPullRequestReviewInput,
+  WorktreeDiffPreview,
+  WorktreeHandoffRequest,
+  WorktreeHandoffState,
 } from '../../shared/contracts/git'
 import type { IpcInvoker } from './ipc'
 
@@ -35,6 +43,7 @@ export interface GitApi {
   getPendingChanges(projectId: string): Promise<GitPendingChanges>
   analyzeCommitPlan(projectId: string): Promise<GitCommitAnalysisResult>
   reviewCurrentDiff(projectId: string, threadId?: string): Promise<GitDiffReviewResult>
+  getFingerprint(projectId: string): Promise<{ branch: string; fingerprint: string }>
   executeCommitPlan(input: GitCommitPlanExecutionInput): Promise<GitCommitPlanExecutionResult>
   getRemote(projectId: string): Promise<GitRemoteInfo>
   getPrTemplate(projectId: string): Promise<string>
@@ -42,6 +51,8 @@ export interface GitApi {
   generatePrDraft(input: GeneratePullRequestDraftInput): Promise<GeneratePullRequestDraftResult>
   createPrFromDraft(input: CreatePullRequestFromDraftInput): Promise<CreatePullRequestResult>
   createPr(input: CreatePullRequestInput): Promise<CreatePullRequestResult>
+  reviewPr(input: ReviewPullRequestInput): Promise<GitDiffReviewResult>
+  syncPrReview(input: SyncPullRequestReviewInput): Promise<GitDiffReviewResult>
   createBranch(projectId: string, branchName: string): Promise<GitCommandResult>
   checkoutBranch(projectId: string, branchName: string): Promise<GitOperationResult>
   listBranches(projectId: string): Promise<string[]>
@@ -49,6 +60,13 @@ export interface GitApi {
   fetch(projectId: string): Promise<GitOperationResult>
   getSnapshot(request: GitSnapshotRequest): Promise<GitRepositorySnapshot>
   getFileDiff(request: GitFileDiffRequest): Promise<GitOperationResult>
+  getWorktreeHandoffState(request: WorktreeHandoffRequest): Promise<WorktreeHandoffState>
+  previewWorktreeHandoff(request: WorktreeHandoffRequest): Promise<WorktreeDiffPreview>
+  moveThreadToWorktree(input: MoveThreadToWorktreeInput): Promise<WorktreeHandoffState>
+  bringThreadToLocal(input: BringThreadToLocalInput): Promise<WorktreeHandoffState>
+  createBranchHere(input: CreateBranchHereInput): Promise<WorktreeHandoffState>
+  restoreWorktreeSnapshot(request: WorktreeHandoffRequest): Promise<WorktreeHandoffState>
+  openWorktree(request: WorktreeHandoffRequest): Promise<WorktreeHandoffState>
   getCommitDetail(request: GitCommitDetailRequest): Promise<GitOperationResult>
   getStashDetail(request: GitStashDetailRequest): Promise<GitOperationResult>
   stageFile(input: GitFileActionInput): Promise<GitOperationResult>
@@ -64,7 +82,7 @@ export interface GitApi {
 }
 
 export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
-  return {
+  const api: GitApi = {
     diff: (request) => ipcRenderer.invoke('git:diff', request),
     stage: (request) => ipcRenderer.invoke('git:stage', request),
     revert: (request) => ipcRenderer.invoke('git:revert', request),
@@ -74,6 +92,7 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     analyzeCommitPlan: (projectId) => ipcRenderer.invoke('git:analyze-commit-plan', projectId),
     reviewCurrentDiff: (projectId, threadId) =>
       ipcRenderer.invoke('git:review-current-diff', projectId, threadId),
+    getFingerprint: (projectId) => ipcRenderer.invoke('git:get-fingerprint', projectId),
     executeCommitPlan: (input) => ipcRenderer.invoke('git:execute-commit-plan', input),
     getRemote: (projectId) => ipcRenderer.invoke('git:get-remote', projectId),
     getPrTemplate: (projectId) => ipcRenderer.invoke('git:get-pr-template', projectId),
@@ -81,6 +100,8 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     generatePrDraft: (input) => ipcRenderer.invoke('git:generate-pr-draft', input),
     createPrFromDraft: (input) => ipcRenderer.invoke('git:create-pr-from-draft', input),
     createPr: (input) => ipcRenderer.invoke('git:create-pr', input),
+    reviewPr: (input) => ipcRenderer.invoke('git:review-pr', input),
+    syncPrReview: (input) => ipcRenderer.invoke('git:sync-pr-review', input),
     createBranch: (projectId, branchName) => ipcRenderer.invoke('git:create-branch', projectId, branchName),
     checkoutBranch: (projectId, branchName) => ipcRenderer.invoke('git:checkout-branch', projectId, branchName),
     listBranches: (projectId) => ipcRenderer.invoke('git:list-branches', projectId),
@@ -88,6 +109,17 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     fetch: (projectId) => ipcRenderer.invoke('git:fetch', projectId),
     getSnapshot: (request) => ipcRenderer.invoke('git:get-snapshot', request),
     getFileDiff: (request) => ipcRenderer.invoke('git:get-file-diff', request),
+    getWorktreeHandoffState: (request) =>
+      ipcRenderer.invoke('git:get-worktree-handoff-state', request),
+    previewWorktreeHandoff: (request) =>
+      ipcRenderer.invoke('git:preview-worktree-handoff', request),
+    moveThreadToWorktree: (input) =>
+      ipcRenderer.invoke('git:move-thread-to-worktree', input),
+    bringThreadToLocal: (input) => ipcRenderer.invoke('git:bring-thread-to-local', input),
+    createBranchHere: (input) => ipcRenderer.invoke('git:create-branch-here', input),
+    restoreWorktreeSnapshot: (request) =>
+      ipcRenderer.invoke('git:restore-worktree-snapshot', request),
+    openWorktree: (request) => ipcRenderer.invoke('git:open-worktree', request),
     getCommitDetail: (request) => ipcRenderer.invoke('git:get-commit-detail', request),
     getStashDetail: (request) => ipcRenderer.invoke('git:get-stash-detail', request),
     stageFile: (input) => ipcRenderer.invoke('git:stage-file', input),
@@ -101,4 +133,6 @@ export function createGitApi(ipcRenderer: IpcInvoker): GitApi {
     popStash: (input) => ipcRenderer.invoke('git:pop-stash', input),
     dropStash: (input) => ipcRenderer.invoke('git:drop-stash', input),
   }
+
+  return api
 }

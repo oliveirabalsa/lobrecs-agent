@@ -8,6 +8,14 @@ import type {
   ThreadSearchResult,
   ThreadUpdatedEvent,
 } from '../../shared/contracts/threads'
+import {
+  validateCreateThreadInput,
+  validateListThreadsInput,
+  validatePinThreadInput,
+  validateRenameThreadInput,
+  validateSearchThreadsInput,
+  validateThreadId,
+} from '../../shared/contracts/threads'
 import type { IpcInvoker, IpcSubscriber } from './ipc'
 
 export interface ThreadsApi {
@@ -34,14 +42,17 @@ export function createThreadsApi(
   ipcRenderer: IpcInvoker & IpcSubscriber,
 ): ThreadsApi {
   return {
-    list: (projectId, opts) => ipcRenderer.invoke('threads:list', projectId, opts),
-    get: (id) => ipcRenderer.invoke('threads:get', id),
-    search: (input) => ipcRenderer.invoke('threads:search', input),
-    create: (data) => ipcRenderer.invoke('threads:create', data),
-    rename: (params) => ipcRenderer.invoke('threads:rename', params),
-    delete: (id) => ipcRenderer.invoke('threads:delete', id),
-    pin: (params) => ipcRenderer.invoke('threads:pin', params),
-    archive: (id) => ipcRenderer.invoke('threads:archive', id),
+    list: (projectId, opts) => {
+      const input = validateListThreadsInput(projectId, opts)
+      return ipcRenderer.invoke('threads:list', input.projectId, input.opts)
+    },
+    get: (id) => ipcRenderer.invoke('threads:get', validateThreadId(id)),
+    search: (input) => ipcRenderer.invoke('threads:search', validateSearchThreadsInput(input)),
+    create: (data) => ipcRenderer.invoke('threads:create', validateCreateThreadInput(data)),
+    rename: (params) => ipcRenderer.invoke('threads:rename', validateRenameThreadInput(params)),
+    delete: (id) => ipcRenderer.invoke('threads:delete', validateThreadId(id)),
+    pin: (params) => ipcRenderer.invoke('threads:pin', validatePinThreadInput(params)),
+    archive: (id) => ipcRenderer.invoke('threads:archive', validateThreadId(id)),
     onUpdated: (callback) => {
       const handler = (_event: IpcRendererEvent, payload: ThreadUpdatedEvent) =>
         callback(payload)
