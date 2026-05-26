@@ -6,6 +6,39 @@ export type ExtensionCatalogSource = 'curated' | 'official' | 'community' | 'ext
 export type ExtensionInstallScope = 'global' | 'project'
 export type ExtensionInstallStatus = 'installed' | 'updated' | 'skipped'
 export type ExtensionTargetAgent = Extract<SupportedAgentId, 'claude-code' | 'codex' | 'opencode'>
+export type ExtensionRuntime = 'node' | 'binary' | 'shell'
+export type ExtensionHookKind =
+  | 'prompt-decoration'
+  | 'review-provider-registration'
+  | 'quality-gate-observation'
+  | 'retry-gating'
+export type ExtensionHookScope = ExtensionInstallScope | 'both'
+export type ExtensionDoctorStatus = 'passed' | 'warning' | 'failed' | 'not-run'
+
+export interface ExecutableExtensionManifest {
+  command: string
+  args?: string[]
+  runtime: ExtensionRuntime
+  hooks: ExtensionHookKind[]
+  capabilities: string[]
+  scope: ExtensionHookScope
+  timeoutMs?: number
+}
+
+export interface ExtensionDoctorResult {
+  status: ExtensionDoctorStatus
+  message: string
+  checkedAt: number
+  stderr?: string
+}
+
+export interface InstalledExecutableExtensionState {
+  manifest: ExecutableExtensionManifest
+  trusted: boolean
+  enabled: boolean
+  scope: ExtensionInstallScope
+  doctorResult?: ExtensionDoctorResult
+}
 
 export interface ExtensionMcpServerArtifact {
   kind: 'mcp-server'
@@ -65,6 +98,7 @@ export interface MarketplaceExtension {
   documentationUrl?: string
   setupNotes?: string[]
   permissions?: string[]
+  executable?: ExecutableExtensionManifest
 }
 
 export interface SearchMarketplaceExtensionsInput {
@@ -115,6 +149,17 @@ export interface InstalledExtensionRecord {
   targetAgents: ExtensionTargetAgent[]
   actions: ExtensionInstallAction[]
   installedAt: number
+  executable?: InstalledExecutableExtensionState
+}
+
+export interface UpdateExtensionRuntimeStateInput {
+  installationId: string
+  trusted?: boolean
+  enabled?: boolean
+}
+
+export interface RunExtensionDoctorInput {
+  installationId: string
 }
 
 export interface ExtensionMarketplaceState {

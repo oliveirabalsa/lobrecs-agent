@@ -1,15 +1,7 @@
 import type { SpawnedAgentSession } from './sessions'
-import {
-  assertPlainId,
-  assertRecord,
-  assertString,
-  optionalBoolean,
-  optionalOneOf,
-  optionalString,
-} from './validation'
 
-export type AgentId = 'claude-code' | 'codex' | 'opencode' | 'antigravity' | 'cursor'
-export type SupportedAgentId = AgentId
+export type SupportedAgentId = 'claude-code' | 'codex' | 'opencode' | 'antigravity'
+export type AgentId = SupportedAgentId | 'cursor'
 
 export type ModelTier = 'lightweight' | 'balanced' | 'advanced' | 'frontier'
 export type AgentThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -19,12 +11,7 @@ export const SUPPORTED_AGENT_IDS = [
   'codex',
   'opencode',
   'antigravity',
-  'cursor',
 ] as const satisfies readonly SupportedAgentId[]
-
-const AGENT_APPROVAL_MODES = ['manual', 'auto-safe', 'full'] as const
-const AGENT_THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
-const SPAWNED_AGENT_KINDS = ['swarm', 'quality-repair', 'automation', 'delegation'] as const
 
 export const AGENT_LABELS: Record<AgentId, string> = {
   'claude-code': 'Claude Code',
@@ -45,18 +32,11 @@ export interface AgentModel {
   supportedThinkingLevels?: Array<Exclude<AgentThinkingLevel, 'off'>>
 }
 
-export interface AgentAccountInfo {
-  status: 'authenticated' | 'unauthenticated' | 'unknown'
-  label: string
-  detail?: string
-}
-
 export interface AgentModelCatalog {
   agentId: SupportedAgentId
   name: string
   installed: boolean
   models: AgentModel[]
-  account?: AgentAccountInfo
   error?: string
 }
 
@@ -65,7 +45,6 @@ export type AgentApprovalMode = 'manual' | 'auto-safe' | 'full'
 export interface AgentDispatchParams {
   projectId: string
   prompt: string
-  profileId?: string
   agentId?: AgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
@@ -94,7 +73,6 @@ export interface AgentDelegateTaskParams {
   parentSessionId: string
   goal: string
   context?: string
-  profileId?: string
   approvalMode?: AgentApprovalMode
   thinking?: AgentThinkingLevel
 }
@@ -206,7 +184,6 @@ export interface QueuedMessage {
   prompt: string
   agentId: AgentId
   model: string
-  profileId?: string
   approvalMode?: AgentApprovalMode
   thinking?: AgentThinkingLevel
   createdAt: number
@@ -217,7 +194,6 @@ export interface EnqueueParams {
   threadId: string
   projectId: string
   prompt: string
-  profileId?: string
   agentId?: AgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
@@ -236,96 +212,10 @@ export interface SteerParams {
   sessionId: string
   projectId: string
   prompt: string
-  profileId?: string
   agentId?: AgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
   thinking?: AgentThinkingLevel
-}
-
-export function validateAgentDispatchParams(input: unknown): AgentDispatchParams {
-  const value = assertRecord(input, 'Agent dispatch input')
-  return {
-    projectId: assertPlainId(value.projectId, 'Project id'),
-    prompt: assertString(value.prompt, 'Prompt', { maxLength: 200_000 }),
-    profileId: optionalString(value.profileId, 'Agent profile id', { maxLength: 200 }),
-    agentId: optionalOneOf(value.agentId, 'Agent id', SUPPORTED_AGENT_IDS),
-    modelOverride: optionalString(value.modelOverride, 'Model override', { maxLength: 500 }),
-    approvalMode: optionalOneOf(value.approvalMode, 'Approval mode', AGENT_APPROVAL_MODES),
-    imageAttachments: validateImageAttachments(value.imageAttachments),
-    spawnedAgent: validateSpawnedAgent(value.spawnedAgent),
-    threadId: value.threadId === undefined ? undefined : assertPlainId(value.threadId, 'Thread id'),
-    planMode: optionalBoolean(value.planMode, 'Plan mode'),
-    thinking: optionalOneOf(value.thinking, 'Thinking level', AGENT_THINKING_LEVELS),
-  }
-}
-
-export function validateEnqueueParams(input: unknown): EnqueueParams {
-  const value = assertRecord(input, 'Agent enqueue input')
-  return {
-    threadId: assertPlainId(value.threadId, 'Thread id'),
-    projectId: assertPlainId(value.projectId, 'Project id'),
-    prompt: assertString(value.prompt, 'Prompt', { maxLength: 200_000 }),
-    profileId: optionalString(value.profileId, 'Agent profile id', { maxLength: 200 }),
-    agentId: optionalOneOf(value.agentId, 'Agent id', SUPPORTED_AGENT_IDS),
-    modelOverride: optionalString(value.modelOverride, 'Model override', { maxLength: 500 }),
-    approvalMode: optionalOneOf(value.approvalMode, 'Approval mode', AGENT_APPROVAL_MODES),
-    thinking: optionalOneOf(value.thinking, 'Thinking level', AGENT_THINKING_LEVELS),
-  }
-}
-
-export function validateSteerParams(input: unknown): SteerParams {
-  const value = assertRecord(input, 'Agent steer input')
-  return {
-    sessionId: assertPlainId(value.sessionId, 'Session id'),
-    projectId: assertPlainId(value.projectId, 'Project id'),
-    prompt: assertString(value.prompt, 'Prompt', { maxLength: 200_000 }),
-    profileId: optionalString(value.profileId, 'Agent profile id', { maxLength: 200 }),
-    agentId: optionalOneOf(value.agentId, 'Agent id', SUPPORTED_AGENT_IDS),
-    modelOverride: optionalString(value.modelOverride, 'Model override', { maxLength: 500 }),
-    approvalMode: optionalOneOf(value.approvalMode, 'Approval mode', AGENT_APPROVAL_MODES),
-    thinking: optionalOneOf(value.thinking, 'Thinking level', AGENT_THINKING_LEVELS),
-  }
-}
-
-function validateImageAttachments(value: unknown): ImageAttachment[] | undefined {
-  if (value === undefined || value === null) return undefined
-  if (!Array.isArray(value)) throw new Error('Image attachments must be an array.')
-  if (value.length > 20) throw new Error('Too many image attachments.')
-
-  return value.map((item, index) => {
-    const attachment = assertRecord(item, `Image attachment ${index + 1}`)
-    const rawSize = attachment.size
-    if (
-      rawSize !== undefined &&
-      (typeof rawSize !== 'number' || !Number.isFinite(rawSize) || rawSize < 0)
-    ) {
-      throw new Error(`Image attachment ${index + 1} has an invalid size.`)
-    }
-    const size = typeof rawSize === 'number' ? rawSize : undefined
-
-    return {
-      filePath: assertString(attachment.filePath, `Image attachment ${index + 1} path`, {
-        maxLength: 4096,
-      }),
-      name: optionalString(attachment.name, `Image attachment ${index + 1} name`, {
-        maxLength: 255,
-      }),
-      mimeType: optionalString(attachment.mimeType, `Image attachment ${index + 1} MIME type`, {
-        maxLength: 100,
-      }),
-      size,
-    }
-  })
-}
-
-function validateSpawnedAgent(value: unknown): SpawnedAgentSession | undefined {
-  if (value === undefined || value === null) return undefined
-  const spawned = assertRecord(value, 'Spawned agent')
-  return {
-    kind: optionalOneOf(spawned.kind, 'Spawned agent kind', SPAWNED_AGENT_KINDS) ?? 'delegation',
-    role: assertString(spawned.role, 'Spawned agent role', { maxLength: 120 }),
-  }
 }
 
 export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
@@ -354,11 +244,5 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
     balanced: 'gemini-2.5-flash',
     advanced: 'gemini-3.1-pro',
     frontier: 'gemini-3.5-flash',
-  },
-  cursor: {
-    lightweight: 'auto',
-    balanced: 'auto',
-    advanced: 'auto',
-    frontier: 'auto',
   },
 }

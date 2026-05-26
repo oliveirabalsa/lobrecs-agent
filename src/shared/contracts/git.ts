@@ -1,4 +1,10 @@
 import type { SupportedAgentId } from './agents'
+import type {
+  WorktreeCleanupPolicy,
+  WorktreeExecutionLocation,
+  WorktreeSessionMetadata,
+  WorktreeSnapshotStatus,
+} from './runs'
 
 export type DiffScope = 'working-tree' | 'staged' | 'head'
 
@@ -84,6 +90,18 @@ export interface GitDiffReviewFinding {
   recommendation?: string
 }
 
+export type GitDiffReviewTarget = 'working-tree' | 'branch' | 'pull-request'
+
+export interface GitDiffReviewSource {
+  provider: GitProviderType
+  url?: string
+  prNumber?: number
+  repoSlug?: string
+  baseBranch?: string
+  headBranch?: string
+  headSha?: string
+}
+
 export interface GitDiffReviewResult {
   projectId: string
   fingerprint: string
@@ -94,6 +112,8 @@ export interface GitDiffReviewResult {
   findings: GitDiffReviewFinding[]
   rawOutput?: string
   analysis: GitDiffReviewAnalysis
+  target?: GitDiffReviewTarget
+  source?: GitDiffReviewSource
 }
 
 /**
@@ -146,6 +166,52 @@ export interface WorktreeMetadata {
   detached: boolean
 }
 
+export type WorktreeHandoffCommand =
+  | 'move-to-worktree'
+  | 'bring-to-local'
+  | 'create-branch-here'
+  | 'restore-snapshot'
+  | 'open-worktree'
+
+export interface WorktreeHandoffState extends WorktreeSessionMetadata {
+  command?: WorktreeHandoffCommand
+  pendingChangeCount: number
+  hasLocalChanges: boolean
+  hasWorktreeChanges: boolean
+  conflictCheck: 'clean' | 'local-dirty' | 'worktree-missing' | 'unknown'
+}
+
+export interface WorktreeHandoffRequest {
+  projectId: string
+  threadId: string
+}
+
+export interface MoveThreadToWorktreeInput extends WorktreeHandoffRequest {
+  cleanupPolicy?: WorktreeCleanupPolicy
+}
+
+export interface BringThreadToLocalInput extends WorktreeHandoffRequest {
+  removeAfterApply?: boolean
+}
+
+export interface CreateBranchHereInput extends WorktreeHandoffRequest {
+  branchName: string
+}
+
+export interface WorktreeDiffPreview extends WorktreeHandoffRequest {
+  location: WorktreeExecutionLocation
+  worktreePath?: string
+  branch?: string
+  baseBranch?: string
+  baseCommit?: string
+  snapshotStatus: WorktreeSnapshotStatus
+  cleanupPolicy: WorktreeCleanupPolicy
+  changedFiles: GitChangedFile[]
+  patch: string
+  hasLocalChanges: boolean
+  hasConflicts: boolean
+}
+
 export interface PullRequestContext {
   provider: 'github' | 'azure' | 'unsupported'
   owner?: string
@@ -190,6 +256,35 @@ export interface GeneratePullRequestDraftResult {
 }
 
 export type CreatePullRequestFromDraftInput = CreatePullRequestInput
+
+export interface ReviewPullRequestInput {
+  projectId: string
+  prNumber: number
+  baseBranch?: string
+  headBranch?: string
+  threadId?: string
+}
+
+export interface SyncPullRequestReviewInput {
+  projectId: string
+  prNumber: number
+  threadId?: string
+}
+
+export interface PullRequestDiffSnapshot {
+  prNumber: number
+  url: string
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  baseBranch: string
+  headBranch: string
+  baseSha: string
+  headSha: string
+  repoSlug: string
+  changedFiles: GitChangedFile[]
+  patch: string
+  diffStat: string
+}
 
 export interface GitPrTemplateRequest {
   projectId: string

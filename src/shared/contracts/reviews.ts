@@ -1,14 +1,17 @@
-import type { GitDiffReviewCategory, GitDiffReviewSeverity } from './git'
+import type { GitDiffReviewCategory, GitDiffReviewSeverity, GitDiffReviewTarget } from './git'
 
 export type ReviewIssueProvider =
   | 'local-diff-review'
   | 'github'
   | 'coderabbit'
   | 'local-review'
+  | `extension:${string}`
 
 export type ReviewIssueStatus = 'open' | 'fixing' | 'resolved' | 'ignored'
 
 export type ReviewIssueSeverity = GitDiffReviewSeverity
+
+export type ReviewTarget = GitDiffReviewTarget
 
 export type ReviewIssueCategory =
   | GitDiffReviewCategory
@@ -39,6 +42,9 @@ export interface ReviewIssue {
   createdAt: number
   updatedAt: number
   resolvedAt?: number
+  roundNumber?: number
+  providerRef?: string
+  batchStatus?: 'pending' | 'fixing' | 'applied' | 'failed'
 }
 
 export interface ReviewIssueListFilter {
@@ -47,6 +53,9 @@ export interface ReviewIssueListFilter {
   sessionId?: string
   threadId?: string
   specRunId?: string
+  roundNumber?: number
+  provider?: ReviewIssueProvider | 'all'
+  prNumber?: number
 }
 
 export interface ReviewIssueStatusCounts {
@@ -54,6 +63,13 @@ export interface ReviewIssueStatusCounts {
   fixing: number
   resolved: number
   ignored: number
+}
+
+export interface ExtensionReviewProviderRegistration {
+  installationId: string
+  extensionId: string
+  providers: string[]
+  stderr?: string
 }
 
 export interface ReviewIssueSnapshot {
@@ -64,4 +80,28 @@ export interface ReviewIssueSnapshot {
 export interface ReviewIssuePatch {
   status?: ReviewIssueStatus
   fixSessionId?: string | null
+  roundNumber?: number
+  providerRef?: string
+  batchStatus?: 'pending' | 'fixing' | 'applied' | 'failed' | null
+}
+
+export interface ReviewRound {
+  id: string
+  projectId: string
+  roundNumber: number
+  status: 'active' | 'completed'
+  createdAt: number
+  completedAt?: number
+}
+
+export type FixBatchStatus = 'pending' | 'running' | 'applied' | 'failed'
+
+export interface ReviewFixBatch {
+  id: string
+  projectId: string
+  issueIds: string[]
+  status: FixBatchStatus
+  sessionId?: string
+  createdAt: number
+  completedAt?: number
 }
