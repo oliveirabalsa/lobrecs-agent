@@ -76,7 +76,10 @@ describe('runQualityGate', () => {
       },
       {
         getSettings: () => settings,
-        routeModel: vi.fn(),
+        routeModel: vi.fn<QualityGateDependencies['routeModel']>(async (input) => ({
+          agentId: input.preferredAgentId,
+          model: 'test-model',
+        })),
         dispatchRepair: vi.fn(),
       },
     )

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { runVerificationCommand } from './verification'
+import { getUserShell } from './environment'
+
+const shell = getUserShell()
+const shellName = shell.split('/').pop() ?? 'shell'
 
 describe('runVerificationCommand', () => {
   it('returns exitCode 0 for a successful command', async () => {
@@ -14,7 +18,7 @@ describe('runVerificationCommand', () => {
 
   it('captures stderr from a failing command', async () => {
     const result = await runVerificationCommand(
-      'zsh -c "echo error >&2 && exit 1"',
+      `${shellName} -c "echo error >&2 && exit 1"`,
       '/tmp',
       { timeoutMs: 5000, maxOutputBytes: 1024 },
     )
@@ -45,7 +49,7 @@ describe('runVerificationCommand', () => {
     expect(Buffer.byteLength(result.stdout, 'utf-8')).toBeLessThanOrEqual(150)
   })
 
-  it('uses zsh -lc for shell expansion', async () => {
+  it('uses shell variable expansion', async () => {
     const result = await runVerificationCommand(
       'X=hello && echo $X',
       '/tmp',

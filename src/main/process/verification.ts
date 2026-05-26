@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { buildProcessEnvironment } from './environment'
+import { buildProcessEnvironment, getUserShell } from './environment'
 
 export interface VerificationCommandResult {
   exitCode: number
@@ -18,7 +18,8 @@ export function runVerificationCommand(
   options: VerificationCommandOptions,
 ): Promise<VerificationCommandResult> {
   return new Promise((resolve) => {
-    const child = spawn('zsh', ['-lc', command], {
+    const shell = getUserShell()
+    const child = spawn(shell, ['-lc', command], {
       cwd,
       env: buildProcessEnvironment(),
       stdio: ['ignore', 'pipe', 'pipe'],
