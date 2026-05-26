@@ -10,6 +10,7 @@ export function formatModelLabel(agentId: SupportedAgentId, modelId: string): st
   if (agentId === 'codex') return formatCodex(modelId)
   if (agentId === 'opencode') return formatOpenCode(modelId)
   if (agentId === 'antigravity') return formatAntigravity(modelId)
+  if (agentId === 'cursor') return formatCursor(modelId)
   return modelId
 }
 
@@ -48,6 +49,25 @@ function formatAntigravity(modelId: string): string {
     .replace(/-/g, ' ')
 }
 
+function formatCursor(modelId: string): string {
+  if (modelId === 'auto') return 'Auto'
+  if (/^gpt-/i.test(modelId)) {
+    return modelId.replace(/^gpt-/i, 'GPT-')
+  }
+  if (/^sonnet-\d(?:-thinking)?$/i.test(modelId)) {
+    return modelId
+      .replace(/^sonnet-/i, 'Sonnet ')
+      .replace(/-thinking$/i, ' Thinking')
+  }
+  if (/^claude-\d-(sonnet|opus)(?:-thinking)?$/i.test(modelId)) {
+    return modelId
+      .replace(/^claude-/i, 'Claude ')
+      .replace(/-(sonnet|opus)/i, (_, family: string) => ` ${family.charAt(0).toUpperCase()}${family.slice(1)}`)
+      .replace(/-thinking$/i, ' Thinking')
+  }
+  return modelId.replace(/-/g, ' ')
+}
+
 export const TIER_LABEL: Record<ModelTier, string> = {
   lightweight: 'Lightweight',
   balanced: 'Balanced',
@@ -67,6 +87,7 @@ export const AGENT_SHORT: Record<SupportedAgentId, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   antigravity: 'Antigravity',
+  cursor: 'Cursor',
 }
 
 /** Thinking support comes from the CLI model catalog, not broad model tiers. */

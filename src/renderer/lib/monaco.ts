@@ -74,11 +74,16 @@ export function registerDraculaTheme(monaco: Monaco): void {
       'editorWhitespace.foreground': '#3b3d54',
       'editorIndentGuide.background': '#3b3d54',
       'editorGutter.background': dracula.background,
-      // Diff gutters tinted with Dracula green / red at low alpha.
-      'diffEditor.insertedTextBackground': '#50fa7b22',
-      'diffEditor.removedTextBackground': '#ff555522',
-      'diffEditor.insertedLineBackground': '#50fa7b14',
-      'diffEditor.removedLineBackground': '#ff555514',
+      // Diff backgrounds need enough contrast to stay visible inside the
+      // docked review panel and the full-screen modal.
+      'diffEditor.insertedTextBackground': '#50fa7b55',
+      'diffEditor.removedTextBackground': '#ff555555',
+      'diffEditor.insertedLineBackground': '#50fa7b24',
+      'diffEditor.removedLineBackground': '#ff555524',
+      'diffEditorGutter.insertedLineBackground': '#50fa7b30',
+      'diffEditorGutter.removedLineBackground': '#ff555530',
+      'diffEditorOverview.insertedForeground': '#50fa7baa',
+      'diffEditorOverview.removedForeground': '#ff5555aa',
     },
   })
 }

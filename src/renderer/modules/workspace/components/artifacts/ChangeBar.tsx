@@ -7,6 +7,8 @@ export interface ChangeBarProps {
   additions: number
   /** Lines removed. */
   deletions: number
+  /** Visual treatment for the surface the bar is rendered on. */
+  variant?: 'default' | 'onAccent'
   /**
    * Extra classes for the outer track — e.g. responsive visibility or
    * margins. The track's size, shape, and background are fixed here.
@@ -23,28 +25,44 @@ export interface ChangeBarProps {
  * Renders nothing when there is nothing to show, so callers can drop it in
  * unconditionally next to their numeric +N/-M labels.
  */
-export function ChangeBar({ additions, deletions, className }: ChangeBarProps) {
+export function ChangeBar({
+  additions,
+  deletions,
+  variant = 'default',
+  className,
+}: ChangeBarProps) {
   const total = additions + deletions
   if (total <= 0) return null
 
   return (
     <span
       className={cx(
-        'inline-flex h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-white/10',
+        'inline-flex h-2 w-16 shrink-0 overflow-hidden rounded-full ring-1',
+        variant === 'onAccent'
+          ? 'bg-diff-track-on-accent ring-white/25'
+          : 'bg-diff-track ring-diff-track-border',
         className,
       )}
       aria-hidden="true"
     >
       {additions > 0 ? (
         <span
-          className="h-full bg-accent-add"
-          style={{ width: `${(additions / total) * 100}%`, transition: 'width 280ms ease-out' }}
+          className="h-full bg-diff-add-bar"
+          style={{
+            minWidth: 4,
+            width: `${(additions / total) * 100}%`,
+            transition: 'width 280ms ease-out',
+          }}
         />
       ) : null}
       {deletions > 0 ? (
         <span
-          className="h-full bg-accent-del"
-          style={{ width: `${(deletions / total) * 100}%`, transition: 'width 280ms ease-out' }}
+          className="h-full bg-diff-del-bar"
+          style={{
+            minWidth: 4,
+            width: `${(deletions / total) * 100}%`,
+            transition: 'width 280ms ease-out',
+          }}
         />
       ) : null}
     </span>

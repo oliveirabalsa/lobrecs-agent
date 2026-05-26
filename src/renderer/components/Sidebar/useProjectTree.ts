@@ -9,11 +9,10 @@ import type {
 
 /**
  * Sidebar-facing thread shape. Mirrors the `Thread` contract from
- * `src/shared/contracts/threads.ts` plus a derived `sessionStatus` field so
- * the sidebar can drive spinners and timestamps without an extra round-trip.
- * `sessionStatus` is hydrated from `sessions.get(lastSessionId)` and kept in
- * sync via `session:*` event subscriptions; `thread:updated` events refresh
- * the rest of the thread metadata.
+ * `src/shared/contracts/threads.ts` plus derived session state so the sidebar
+ * can reflect the parent session and any spawned child agents without another
+ * round-trip. `thread:updated` refreshes the thread shape; `session:*`
+ * subscriptions keep the aggregate status live between those refreshes.
  */
 export interface Thread {
   id: string
@@ -24,7 +23,9 @@ export interface Thread {
   pinned: boolean
   /** Required for sidebar status display — threads without sessions are hidden. */
   lastSessionId: string
+  lastSessionStatus: SessionStatus
   sessionStatus: SessionStatus
+  sessionIds: string[]
   agents: ThreadAgentSummary[]
 }
 
@@ -81,9 +82,9 @@ function writeExpandedFlag(projectId: string, value: boolean): void {
 
 /**
  * Fetches threads for a project via the real `threads:list` IPC (added in M7)
- * and hydrates each one with the matching session's status. Threads without
- * a `lastSessionId` are filtered out — the sidebar can't render a spinner /
- * timestamp without one. Pinned threads bubble to the top, then by recency.
+ * and hydrates each one with the matching session's status plus any spawned
+ * child-session state for the same thread. Threads without a `lastSessionId`
+ * are filtered out. Pinned threads bubble to the top, then by recency.
  */
 async function listThreadsForProject(projectId: string): Promise<Thread[]> {
   const contractThreads = await window.agentforge.threads.list(projectId)
@@ -102,6 +103,7 @@ async function listThreadsForProject(projectId: string): Promise<Thread[]> {
   }
 
   const merged: Thread[] = withSession
+    .filter((thread) => shouldShowThreadInSidebar(sessionsByThread.get(thread.id) ?? []))
     .map((thread) =>
       mergeContractWithSession(
         thread,
@@ -114,12 +116,24 @@ async function listThreadsForProject(projectId: string): Promise<Thread[]> {
   return merged.sort(compareThreads)
 }
 
+export function shouldShowThreadInSidebar(threadSessions: readonly Session[]): boolean {
+  return threadSessions.some((session) => !session.spawnedAgent)
+}
+
 function mergeContractWithSession(
   thread: ThreadContract & { lastSessionId: string },
   session: Session | null,
   threadSessions: readonly Session[] = session ? [session] : [],
 ): Thread | null {
   if (!session) return null
+  const backgroundAgents = threadSessions
+    .slice()
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .flatMap((item) => {
+      const summary = threadAgentSummaryFromSession(item)
+      return summary ? [summary] : []
+    })
+
   return {
     id: thread.id,
     projectId: thread.projectId,
@@ -128,14 +142,10 @@ function mergeContractWithSession(
     updatedAt: thread.updatedAt,
     pinned: thread.pinned,
     lastSessionId: thread.lastSessionId,
-    sessionStatus: session.status,
-    agents: threadSessions
-      .slice()
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .flatMap((item) => {
-        const summary = threadAgentSummaryFromSession(item)
-        return summary ? [summary] : []
-      }),
+    lastSessionStatus: session.status,
+    sessionStatus: aggregateThreadSessionStatus(session.status, backgroundAgents),
+    sessionIds: Array.from(new Set(threadSessions.map((item) => item.id))),
+    agents: backgroundAgents,
   }
 }
 
@@ -151,6 +161,25 @@ export function threadAgentSummaryFromSession(session: Session): ThreadAgentSumm
     status: session.status,
     createdAt: session.createdAt,
   }
+}
+
+const THREAD_STATUS_PRIORITY: readonly SessionStatus[] = [
+  'awaiting-input',
+  'awaiting-approval',
+  'running',
+]
+const ACTIVE_THREAD_SESSION_STATUSES = new Set<SessionStatus>(THREAD_STATUS_PRIORITY)
+
+export function aggregateThreadSessionStatus(
+  lastSessionStatus: SessionStatus,
+  agents: readonly ThreadAgentSummary[],
+): SessionStatus {
+  for (const status of THREAD_STATUS_PRIORITY) {
+    if (lastSessionStatus === status) return status
+    if (agents.some((agent) => agent.status === status)) return status
+  }
+
+  return lastSessionStatus
 }
 
 function compareThreads(a: Thread, b: Thread): number {
@@ -274,49 +303,71 @@ export function useProjectTree(): ProjectTreeApi {
     }
   }, [expanded, threadsByProject, loadingThreadsFor, refreshThreads])
 
-  // Subscribe to per-session events so the sidebar reflects live state
-  // (status changes flip the spinner / timestamp without a refresh).
+  // Subscribe to thread-owned session events so the sidebar reflects live
+  // parent/background-agent state without requiring a thread refresh.
   useEffect(() => {
     const allThreads = Object.values(threadsByProject).flat().filter(Boolean) as Thread[]
     if (allThreads.length === 0) return
 
     const unsubscribers: Array<() => void> = []
     for (const thread of allThreads) {
-      const off = window.agentforge.on(`session:${thread.lastSessionId}`, (event) => {
-        const nextStatus = inferStatusFromEvent(event)
-        if (!nextStatus) return
-        setThreadsByProject((prev) => {
-          const list = prev[thread.projectId]
-          if (!list) return prev
-          let mutated = false
-          const updated = list.map((t) => {
-            if (t.id !== thread.id) return t
-            if (TERMINAL_STATUSES.has(t.sessionStatus) && nextStatus === 'running') {
-              return t
-            }
-            if (
-              t.sessionStatus === nextStatus &&
-              t.updatedAt >= event.timestamp
-            ) {
-              return t
-            }
-            mutated = true
-            return {
-              ...t,
-              sessionStatus: nextStatus,
-              updatedAt: Math.max(t.updatedAt, event.timestamp),
-              agents: t.agents.map((agent) =>
-                agent.sessionId === thread.lastSessionId
-                  ? { ...agent, status: nextStatus }
-                  : agent,
-              ),
-            }
+      for (const sessionId of thread.sessionIds) {
+        const off = window.agentforge.on(`session:${sessionId}`, (event) => {
+          const nextStatus = inferStatusFromEvent(event)
+          if (!nextStatus) return
+          setThreadsByProject((prev) => {
+            const list = prev[thread.projectId]
+            if (!list) return prev
+            let mutated = false
+            const updated = list.map((t) => {
+              if (t.id !== thread.id) return t
+              const previousSessionStatus =
+                sessionId === t.lastSessionId
+                  ? t.lastSessionStatus
+                  : t.agents.find((agent) => agent.sessionId === sessionId)?.status
+
+              if (
+                previousSessionStatus &&
+                TERMINAL_STATUSES.has(previousSessionStatus) &&
+                ACTIVE_THREAD_SESSION_STATUSES.has(nextStatus)
+              ) {
+                return t
+              }
+
+              const nextLastSessionStatus =
+                sessionId === t.lastSessionId ? nextStatus : t.lastSessionStatus
+              const nextAgents = t.agents.map((agent) =>
+                agent.sessionId === sessionId ? { ...agent, status: nextStatus } : agent,
+              )
+              const nextThreadStatus = aggregateThreadSessionStatus(
+                nextLastSessionStatus,
+                nextAgents,
+              )
+
+              if (
+                t.sessionStatus === nextThreadStatus &&
+                t.lastSessionStatus === nextLastSessionStatus &&
+                t.updatedAt >= event.timestamp &&
+                nextAgents.every((agent, index) => agent.status === t.agents[index]?.status)
+              ) {
+                return t
+              }
+
+              mutated = true
+              return {
+                ...t,
+                lastSessionStatus: nextLastSessionStatus,
+                sessionStatus: nextThreadStatus,
+                updatedAt: Math.max(t.updatedAt, event.timestamp),
+                agents: nextAgents,
+              }
+            })
+            if (!mutated) return prev
+            return { ...prev, [thread.projectId]: updated }
           })
-          if (!mutated) return prev
-          return { ...prev, [thread.projectId]: updated }
         })
-      })
-      unsubscribers.push(off)
+        unsubscribers.push(off)
+      }
     }
 
     return () => {
@@ -340,10 +391,13 @@ export function useProjectTree(): ProjectTreeApi {
           const projectSessions = await window.agentforge.sessions
             .list(projectId)
             .catch(() => [session])
+          const threadSessions = projectSessions.filter((item) => item.threadId === incoming.id)
+          if (!shouldShowThreadInSidebar(threadSessions)) return
+
           const hydrated = mergeContractWithSession(
             { ...incoming, lastSessionId: incoming.lastSessionId! },
             session,
-            projectSessions.filter((item) => item.threadId === incoming.id),
+            threadSessions,
           )
           if (!hydrated) return
 

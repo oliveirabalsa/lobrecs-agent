@@ -114,7 +114,7 @@ export function DiffReviewCard({
             </Button>
           ) : null}
           <Button variant="chip" size="sm" loading={loading} onClick={() => void onReview()}>
-            {loading ? 'Reviewing' : 'Review'}
+            {loading ? 'Checking' : 'Run check'}
           </Button>
         </div>
       </div>
@@ -261,7 +261,8 @@ function isSupportedAgentId(agentId: string): agentId is SupportedAgentId {
     agentId === 'claude-code' ||
     agentId === 'codex' ||
     agentId === 'opencode' ||
-    agentId === 'antigravity'
+    agentId === 'antigravity' ||
+    agentId === 'cursor'
   )
 }
 

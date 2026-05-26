@@ -43,6 +43,8 @@ const CREDENTIAL_HELP: Record<SupportedAgentId, string> = {
     'Configure OpenCode with its normal provider auth or environment variables, then run the status check.',
   antigravity:
     'Configure Antigravity CLI credentials in the provider tool, then return here and run the status check.',
+  cursor:
+    'Use Cursor CLI login or CURSOR_API_KEY in your environment. Lobrecs only runs fixed Cursor CLI checks and does not store keys.',
 }
 
 const DEMO_PROMPT =

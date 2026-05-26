@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AGENT_LABELS, SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
   AgentPermissionMode,
   AppSettings,
+  ChatBackgroundPosition,
+  ChatBackgroundRepeat,
+  ChatBackgroundSize,
   ModelTier,
   Project,
   SupportedAgentId,
@@ -12,6 +15,7 @@ import type {
 import {
   FieldRow,
   NumberInput,
+  RangeInput,
   SelectInput,
   SettingsSection,
   TextInput,
@@ -53,6 +57,76 @@ const permissionModes: AgentPermissionMode[] = [
   'ask-for-approval',
   'read-only',
 ]
+
+type ChatBackgroundImagePickerProps = {
+  bg: AppSettings['ui']['chatBackground']
+  onUpdate: (next: AppSettings['ui']['chatBackground']) => void
+}
+
+function ChatBackgroundImagePicker({
+  bg,
+  onUpdate,
+}: ChatBackgroundImagePickerProps) {
+  const [preview, setPreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!bg.imagePath) {
+      setPreview(null)
+      return
+    }
+    void window.agentforge.system.loadBackgroundImage(bg.imagePath).then(setPreview)
+  }, [bg.imagePath])
+
+  const handleSelect = useCallback(async () => {
+    const filePath = await window.agentforge.system.selectBackgroundImage()
+    if (filePath) {
+      onUpdate({ ...bg, imagePath: filePath, enabled: true })
+    }
+  }, [bg, onUpdate])
+
+  const handleClear = useCallback(() => {
+    onUpdate({ ...bg, imagePath: '', enabled: false })
+    setPreview(null)
+  }, [bg, onUpdate])
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleSelect}
+          className="h-8 rounded-card border border-hairline bg-card px-3 text-[13px] text-primary transition-colors hover:border-hairline-strong hover:bg-card-raised"
+        >
+          {bg.imagePath ? 'Change Image' : 'Choose Image'}
+        </button>
+        {bg.imagePath && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="h-8 rounded-card border border-hairline bg-card px-3 text-[12px] text-danger transition-colors hover:border-danger/40"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {bg.imagePath && (
+        <div className="text-[12px] text-muted truncate max-w-full">
+          {bg.imagePath}
+        </div>
+      )}
+      {preview && (
+        <div className="relative h-24 w-full overflow-hidden rounded-card border border-hairline">
+          <img
+            src={preview}
+            alt="Background preview"
+            className="h-full w-full object-cover"
+            style={{ opacity: bg.opacity / 100 }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function SettingsView({
   isMac = false,
@@ -518,6 +592,14 @@ export function SettingsView({
                   }
                 />
               </FieldRow>
+              <FieldRow label="Experimental worktree handoff">
+                <Toggle
+                  checked={draft.execution.experimentalWorktreeHandoff}
+                  onChange={(experimentalWorktreeHandoff) =>
+                    update('execution', { ...draft.execution, experimentalWorktreeHandoff })
+                  }
+                />
+              </FieldRow>
               <FieldRow label="Auto-apply completed diffs">
                 <Toggle
                   checked={draft.execution.autoApplyCompletedDiffs}
@@ -720,6 +802,143 @@ export function SettingsView({
                 </div>
                 <ThemePicker />
               </div>
+
+              <div className="mt-2 border-t border-hairline pt-4">
+                <div className="text-[13px] font-medium text-secondary">
+                  Chat Background Image
+                </div>
+                <div className="mt-1 text-[12px] leading-5 text-muted">
+                  Set a background image for the chat view. The image is rendered
+                  behind messages with adjustable opacity.
+                </div>
+              </div>
+
+              <FieldRow label="Enable background" detail="Show an image behind chat messages">
+                <Toggle
+                  checked={draft.ui.chatBackground.enabled}
+                  onChange={(enabled) =>
+                    update('ui', {
+                      ...draft.ui,
+                      chatBackground: { ...draft.ui.chatBackground, enabled },
+                    })
+                  }
+                />
+              </FieldRow>
+
+              <ChatBackgroundImagePicker
+                bg={draft.ui.chatBackground}
+                onUpdate={(chatBackground) =>
+                  update('ui', { ...draft.ui, chatBackground })
+                }
+              />
+
+              {draft.ui.chatBackground.enabled && draft.ui.chatBackground.imagePath && (
+                <>
+                  <FieldRow label="Opacity" detail="0 = invisible, 100 = fully visible">
+                    <RangeInput
+                      value={draft.ui.chatBackground.opacity}
+                      min={0}
+                      max={100}
+                      unit="%"
+                      onChange={(opacity) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, opacity },
+                        })
+                      }
+                    />
+                  </FieldRow>
+
+                  <FieldRow label="Blur" detail="Gaussian blur in pixels">
+                    <RangeInput
+                      value={draft.ui.chatBackground.blur}
+                      min={0}
+                      max={40}
+                      unit="px"
+                      onChange={(blur) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, blur },
+                        })
+                      }
+                    />
+                  </FieldRow>
+
+                  <FieldRow label="Size">
+                    <SelectInput<ChatBackgroundSize>
+                      value={draft.ui.chatBackground.size}
+                      options={[
+                        { value: 'cover', label: 'Cover' },
+                        { value: 'contain', label: 'Contain' },
+                        { value: 'auto', label: 'Original' },
+                        { value: 'stretch', label: 'Stretch' },
+                      ]}
+                      onChange={(size) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, size },
+                        })
+                      }
+                    />
+                  </FieldRow>
+
+                  <FieldRow label="Position">
+                    <SelectInput<ChatBackgroundPosition>
+                      value={draft.ui.chatBackground.position}
+                      options={[
+                        { value: 'center', label: 'Center' },
+                        { value: 'top', label: 'Top' },
+                        { value: 'bottom', label: 'Bottom' },
+                        { value: 'left', label: 'Left' },
+                        { value: 'right', label: 'Right' },
+                        { value: 'top-left', label: 'Top Left' },
+                        { value: 'top-right', label: 'Top Right' },
+                        { value: 'bottom-left', label: 'Bottom Left' },
+                        { value: 'bottom-right', label: 'Bottom Right' },
+                      ]}
+                      onChange={(position) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, position },
+                        })
+                      }
+                    />
+                  </FieldRow>
+
+                  <FieldRow label="Repeat">
+                    <SelectInput<ChatBackgroundRepeat>
+                      value={draft.ui.chatBackground.repeat}
+                      options={[
+                        { value: 'no-repeat', label: 'No Repeat' },
+                        { value: 'repeat', label: 'Tile' },
+                        { value: 'repeat-x', label: 'Tile Horizontally' },
+                        { value: 'repeat-y', label: 'Tile Vertically' },
+                      ]}
+                      onChange={(repeat) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, repeat },
+                        })
+                      }
+                    />
+                  </FieldRow>
+
+                  <FieldRow
+                    label="Fixed position"
+                    detail="Image stays fixed while content scrolls"
+                  >
+                    <Toggle
+                      checked={draft.ui.chatBackground.fixed}
+                      onChange={(fixed) =>
+                        update('ui', {
+                          ...draft.ui,
+                          chatBackground: { ...draft.ui.chatBackground, fixed },
+                        })
+                      }
+                    />
+                  </FieldRow>
+                </>
+              )}
             </SettingsSection>
 
             <SettingsSection id="ui" title="UI">

@@ -26,7 +26,7 @@ import {
 export type PlanPromptActivity = Extract<AgentActivity, { kind: 'plan-prompt' }>
 export type UserQuestionActivity = Extract<AgentActivity, { kind: 'user-question' }>
 
-interface TimedActivity {
+export interface TimedActivity {
   activity: AgentActivity
   at: number
 }
@@ -35,6 +35,14 @@ interface UseSessionEventsOptions {
   onApprovalRequest?: (request: ApprovalRequest | null) => void
   onDiffProposals?: (proposals: DiffProposal[]) => void
   onStatusChange?: (status: SessionStatus) => void
+  /**
+   * Maximum activities to derive for rendering.
+   * When set, only the most recent `maxActivities` activities are returned
+   * in the `activities` / `activityTimes` outputs, while full event history
+   * is preserved in `events` for durability.
+   * Defaults to 120 (approximately 10 turns of typical activity).
+   */
+  maxActivities?: number
 }
 
 export function useSessionEvents(sessionId: string | null, options: UseSessionEventsOptions = {}) {
@@ -99,17 +107,25 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     }
   }, [sessionId])
 
+  const maxActivities = options.maxActivities ?? 120
+
   const timedActivities = useMemo(
     () => timedActivitiesFromEvents(events),
     [events],
   )
+
+  const boundedTimedActivities = useMemo(() => {
+    if (timedActivities.length <= maxActivities) return timedActivities
+    return timedActivities.slice(timedActivities.length - maxActivities)
+  }, [timedActivities, maxActivities])
+
   const activities = useMemo(
-    () => timedActivities.map(({ activity }) => activity),
-    [timedActivities],
+    () => boundedTimedActivities.map(({ activity }) => activity),
+    [boundedTimedActivities],
   )
   const activityTimes = useMemo(
-    () => timedActivities.map(({ at }) => at),
-    [timedActivities],
+    () => boundedTimedActivities.map(({ at }) => at),
+    [boundedTimedActivities],
   )
   const tokensIn = useMemo<number | null>(() => {
     for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -123,8 +139,9 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
 
   const pendingPlanPrompt = useMemo<PlanPromptActivity | null>(() => {
     // Search from the end so the latest unresolved prompt wins.
-    for (let i = activities.length - 1; i >= 0; i -= 1) {
-      const activity = activities[i]
+    // Use full timedActivities to find prompts even outside the bounded window.
+    for (let i = timedActivities.length - 1; i >= 0; i -= 1) {
+      const activity = timedActivities[i].activity
       if (activity.kind !== 'plan-prompt') continue
       if (resolvedPromptIdsRef.current.has(activity.promptId)) continue
       return activity
@@ -132,18 +149,19 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     return null
     // resolvedPromptVersion is part of the dependency list so the memo
     // refreshes when the resolved set mutates.
-  }, [activities, resolvedPromptVersion])
+  }, [timedActivities, resolvedPromptVersion])
 
   const pendingUserQuestion = useMemo<UserQuestionActivity | null>(() => {
     // Search from the end so the latest unresolved agent question wins.
-    for (let i = activities.length - 1; i >= 0; i -= 1) {
-      const activity = activities[i]
+    // Use full timedActivities to find questions even outside the bounded window.
+    for (let i = timedActivities.length - 1; i >= 0; i -= 1) {
+      const activity = timedActivities[i].activity
       if (activity.kind !== 'user-question') continue
       if (resolvedUserQuestionIdsRef.current.has(activity.promptId)) continue
       return activity
     }
     return null
-  }, [activities, resolvedPromptVersion])
+  }, [timedActivities, resolvedPromptVersion])
 
   const resolvePlanPrompt = useCallback((promptId: string) => {
     if (resolvedPromptIdsRef.current.has(promptId)) return
@@ -171,7 +189,13 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
 }
 
 export function deriveSessionActivities(events: readonly AgentEvent[]): AgentActivity[] {
-  return timedActivitiesFromEvents(events).map(({ activity }) => activity)
+  return deriveTimedSessionActivities(events).map(({ activity }) => activity)
+}
+
+export function deriveTimedSessionActivities(
+  events: readonly AgentEvent[],
+): TimedActivity[] {
+  return timedActivitiesFromEvents(events)
 }
 
 export function shouldReplayHistoricalSessionEvent(event: AgentEvent): boolean {
@@ -215,7 +239,11 @@ type ProcessWarningState = {
 
 function applySessionState(event: AgentEvent, options: UseSessionEventsOptions): void {
   if (event.type === 'activity' && isAgentActivity(event.payload)) {
-    if (userQuestionFromActivity(event.payload) || event.payload.kind === 'model-recovery') {
+    if (
+      userQuestionFromActivity(event.payload) ||
+      event.payload.kind === 'model-recovery' ||
+      event.payload.kind === 'multitask-plan'
+    ) {
       options.onStatusChange?.('awaiting-input')
     }
     return

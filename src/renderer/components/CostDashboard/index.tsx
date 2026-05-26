@@ -48,6 +48,7 @@ const providerInitials: Record<SupportedAgentId, string> = {
   'claude-code': 'CC',
   opencode: 'OC',
   antigravity: 'AG',
+  cursor: 'CR',
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -566,6 +567,7 @@ function providerIconClass(agentId: SupportedAgentId): string {
   if (agentId === 'codex') return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
   if (agentId === 'claude-code') return 'border-amber-400/30 bg-amber-400/10 text-amber-200'
   if (agentId === 'opencode') return 'border-sky-400/30 bg-sky-400/10 text-sky-200'
+  if (agentId === 'cursor') return 'border-violet-400/30 bg-violet-400/10 text-violet-200'
   return 'border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-200'
 }
 

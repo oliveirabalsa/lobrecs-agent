@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunAuditRecord } from '../../../../../shared/types'
-import { deriveRunAuditCommandRows } from './RunAuditTimelineCard'
+import { deriveRunAuditCommandRows, deriveVisualEvidenceRows } from './RunAuditTimelineCard'
 
 function auditRecord(
   input: Partial<RunAuditRecord> & Pick<RunAuditRecord, 'id' | 'phase'>,
@@ -79,6 +79,58 @@ describe('deriveRunAuditCommandRows', () => {
         status: 'failed',
         attempt: 0,
         exitCode: 1,
+      },
+    ])
+  })
+})
+
+describe('deriveVisualEvidenceRows', () => {
+  it('maps visual evidence records into renderer artifact rows', () => {
+    const rows = deriveVisualEvidenceRows([
+      auditRecord({
+        id: 'visual',
+        phase: 'visual-captured',
+        visualEvidence: {
+          id: 'evidence-1',
+          kind: 'local-web',
+          status: 'captured',
+          url: 'http://localhost:5173/',
+          finalUrl: 'http://localhost:5173/app',
+          title: 'App',
+          viewport: { width: 390, height: 844, deviceScaleFactor: 2 },
+          screenshot: {
+            mimeType: 'image/png',
+            width: 390,
+            height: 844,
+            sizeBytes: 10,
+            dataUrl: 'data:image/png;base64,AAAA',
+          },
+          consoleErrors: [{ message: 'boom', createdAt: 1 }],
+          networkFailures: [
+            {
+              url: 'http://localhost:5173/api',
+              errorText: 'ERR_FAILED',
+              createdAt: 2,
+            },
+          ],
+          replayNotes: 'Opened app shell.',
+          capturedAt: 3,
+        },
+      }),
+    ])
+
+    expect(rows).toEqual([
+      {
+        id: 'evidence-1',
+        status: 'captured',
+        url: 'http://localhost:5173/',
+        finalUrl: 'http://localhost:5173/app',
+        title: 'App',
+        viewport: '390x844 @2x',
+        screenshotDataUrl: 'data:image/png;base64,AAAA',
+        consoleErrorCount: 1,
+        networkFailureCount: 1,
+        replayNotes: 'Opened app shell.',
       },
     ])
   })

@@ -124,3 +124,36 @@ export function Toggle({
     />
   )
 }
+
+export function RangeInput({
+  value,
+  onChange,
+  min = 0,
+  max = 100,
+  step = 1,
+  unit,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-hairline accent-accent-primary"
+      />
+      <span className="min-w-[3ch] text-right text-[12px] tabular-nums text-muted">
+        {value}{unit}
+      </span>
+    </div>
+  )
+}

@@ -1,7 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import type { DiffProposal } from '../../../../../shared/types'
 import { filePathsReferToSameFile } from '../../lib/diffProposalMatching'
-import { AnimatedDiffStat } from './AnimatedDiffStat'
 import { FileDiffModal } from './FileDiffModal'
 
 export interface EditedFilesCardProps {
@@ -18,7 +17,6 @@ export interface EditedFilesCardProps {
     deletions?: number
     changeType?: 'added' | 'modified' | 'deleted'
   }>
-  onReview?: (filePath?: string) => void
 }
 
 export interface EditedFileEntry {
@@ -37,16 +35,12 @@ type OrderedEditedFileEntry = EditedFileEntry & {
 export function EditedFilesCard({
   proposals,
   fallbackFiles,
-  onReview,
 }: EditedFilesCardProps) {
   const entries = useMemo(
     () => buildEditedFileEntries(proposals, fallbackFiles),
     [proposals, fallbackFiles],
   )
 
-  const totalAdditions = entries.reduce((sum, e) => sum + e.additions, 0)
-  const totalDeletions = entries.reduce((sum, e) => sum + e.deletions, 0)
-  const hasVisibleStats = totalAdditions + totalDeletions > 0
   const count = entries.length
   const [showAllRows, setShowAllRows] = useState(false)
   const visibleEntries = visibleEditedFileEntries(entries, showAllRows)
@@ -59,7 +53,7 @@ export function EditedFilesCard({
   return (
     <>
       <section className="flex flex-col gap-0.5">
-        <header className="flex items-center justify-between gap-3">
+        <header className="flex items-center gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <span className="inline-flex shrink-0 text-muted" aria-hidden="true">
               {iconFileEdit}
@@ -68,28 +62,6 @@ export function EditedFilesCard({
               Edited {count} file{count === 1 ? '' : 's'}
             </span>
           </div>
-          {onReview && hasVisibleStats ? (
-            <button
-              type="button"
-              onClick={() => onReview()}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
-            >
-              Review
-              <AnimatedDiffStat
-                additions={totalAdditions}
-                deletions={totalDeletions}
-                className="text-[11px]"
-              />
-            </button>
-          ) : onReview ? (
-            <button
-              type="button"
-              onClick={() => onReview()}
-              className="rounded-md px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-white/5 hover:text-primary"
-            >
-              Review
-            </button>
-          ) : null}
         </header>
 
         <ul className="flex flex-col">
@@ -97,7 +69,6 @@ export function EditedFilesCard({
             <FileRow
               key={entry.filePath}
               entry={entry}
-              onReview={onReview}
               onOpenDiff={setModalEntry}
             />
           ))}
@@ -214,7 +185,6 @@ function toEditedFileEntry(entry: OrderedEditedFileEntry): EditedFileEntry {
 
 export interface FileRowProps {
   entry: EditedFileEntry
-  onReview?: (filePath?: string) => void
   /** Opens the full-screen diff modal for this file. */
   onOpenDiff: (entry: EditedFileEntry) => void
 }
@@ -249,10 +219,10 @@ const FileRow = memo(function FileRow({
           {filePath}
         </span>
         {hasVisibleStats ? (
-          <span className="shrink-0 font-mono text-[11px] tabular-nums">
-            <span className="text-accent-add">+{additions}</span>
+          <span className="shrink-0 rounded-sm bg-card-raised px-1.5 py-0.5 font-mono text-[11px] leading-none tabular-nums ring-1 ring-hairline">
+            <span className="text-diff-add-text">+{additions}</span>
             <span className="mx-0.5 text-muted">-</span>
-            <span className="text-accent-del">{deletions}</span>
+            <span className="text-diff-del-text">{deletions}</span>
           </span>
         ) : null}
       </button>
@@ -398,4 +368,3 @@ const iconFileEdit = (
     <path d="m10.5 10.25 2.5-2.5 1.25 1.25-2.5 2.5h-1.25v-1.25Z" strokeLinejoin="round" />
   </svg>
 )
-

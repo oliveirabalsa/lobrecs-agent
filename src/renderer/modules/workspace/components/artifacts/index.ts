@@ -59,7 +59,15 @@ export { CompletionFooter } from './CompletionFooter'
 export type { CompletionFooterProps } from './CompletionFooter'
 
 export { RunAuditTimelineCard } from './RunAuditTimelineCard'
-export type { RunAuditTimelineCardProps } from './RunAuditTimelineCard'
+export {
+  deriveRunAuditCommandRows,
+  deriveVisualEvidenceRows,
+} from './RunAuditTimelineCard'
+export type {
+  RunAuditTimelineCardProps,
+  RunAuditCommandRow,
+  VisualEvidenceRow,
+} from './RunAuditTimelineCard'
 
 export { PromptEvidenceCard } from './PromptEvidenceCard'
 export type { PromptEvidenceCardProps } from './PromptEvidenceCard'
@@ -72,3 +80,6 @@ export type { DelegationActivity, DelegationCardProps } from './DelegationCard'
 
 export { TodoCard } from './TodoCard'
 export type { TodoListActivity, TodoCardProps } from './TodoCard'
+
+export { MultitaskPlanCard } from './MultitaskPlanCard'
+export type { MultitaskPlanCardProps } from './MultitaskPlanCard'

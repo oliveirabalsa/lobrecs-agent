@@ -30,42 +30,34 @@ const proposal: DiffProposal = {
 
 interface EditedFilesCardElementProps {
   proposals: DiffProposal[]
-  onReview?: (filePath?: string) => void
 }
 
 describe('renderStreamItem diff actions', () => {
-  it('does not wire review or diff decision callbacks before a live proposal exists', () => {
+  it('renders edited files without an inline review callback', () => {
     const node = renderStreamItem(fileChange, 'change', {
       sessionId: 'session-1',
       running: false,
       diffProposals: [],
-      onReviewFile: vi.fn(),
     })
 
     const props = elementProps<EditedFilesCardElementProps>(node)
 
     expect(props.proposals).toEqual([])
-    expect(props.onReview).toBeUndefined()
   })
 
-  it('wires only review callbacks when a matching proposal exists', () => {
-    const onReview = vi.fn()
-
+  it('keeps matching proposals on the edited-files card for row-level diffs', () => {
     const node = renderStreamItem(fileChange, 'change', {
       sessionId: 'session-1',
       running: false,
       diffProposals: [proposal],
-      onReviewFile: onReview,
     })
 
     const props = elementProps<EditedFilesCardElementProps>(node)
 
     expect(props.proposals).toEqual([proposal])
-    expect(props.onReview).toBe(onReview)
   })
 
   it('matches relative file-change paths to absolute diff proposal paths', () => {
-    const onReview = vi.fn()
     const htmlProposal: DiffProposal = {
       filePath: '/Users/leo/project/index.html',
       originalContent: '<h1>Old</h1>\n',
@@ -86,14 +78,12 @@ describe('renderStreamItem diff actions', () => {
         sessionId: 'session-1',
         running: false,
         diffProposals: [htmlProposal],
-        onReviewFile: onReview,
       },
     )
 
     const props = elementProps<EditedFilesCardElementProps>(node)
 
     expect(props.proposals).toEqual([htmlProposal])
-    expect(props.onReview).toBe(onReview)
   })
 
   it('renders agent question prompts as answerable cards', () => {
@@ -182,5 +172,37 @@ describe('renderStreamItem diff actions', () => {
 
     expect(props.items).toBe(item.items)
     expect(props.running).toBe(true)
+  })
+
+  it('passes project and thread context into plan-review multitask controls', () => {
+    const onSessionStarted = vi.fn()
+    const item = {
+      kind: 'plan-review',
+      reviewId: 'review-1',
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+    } satisfies Extract<StreamItem, { kind: 'plan-review' }>
+
+    const node = renderStreamItem(item, 'plan-review', {
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      sessionId: 'session-1',
+      running: false,
+      planReviewPlanText: 'Plan text',
+      onSessionStarted,
+    })
+    const props = elementProps<{
+      projectId: string
+      threadId?: string
+      sessionId: string
+      planText?: string
+      onMultitaskSessionStarted?: unknown
+    }>(node)
+
+    expect(props.projectId).toBe('project-1')
+    expect(props.threadId).toBe('thread-1')
+    expect(props.sessionId).toBe('session-1')
+    expect(props.planText).toBe('Plan text')
+    expect(props.onMultitaskSessionStarted).toBe(onSessionStarted)
   })
 })

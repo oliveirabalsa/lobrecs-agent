@@ -15,6 +15,7 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
   const [error, setError] = useState<string | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const requestVersionRef = useRef(0)
   const normalizedQuery = useMemo(() => query.trim(), [query])
 
   useEffect(() => {
@@ -28,23 +29,25 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
     if (!open) return
 
     let cancelled = false
+    const requestVersion = requestVersionRef.current + 1
+    requestVersionRef.current = requestVersion
     const timer = window.setTimeout(() => {
       setLoading(true)
       window.agentforge.threads
         .search({ query: normalizedQuery, limit: 40 })
         .then((items) => {
-          if (cancelled) return
+          if (cancelled || requestVersionRef.current !== requestVersion) return
           setResults(items)
           setActiveIndex(0)
           setError(null)
         })
         .catch((searchError: unknown) => {
-          if (cancelled) return
+          if (cancelled || requestVersionRef.current !== requestVersion) return
           setResults([])
           setError(searchError instanceof Error ? searchError.message : 'Search failed')
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (!cancelled && requestVersionRef.current === requestVersion) setLoading(false)
         })
     }, 120)
 

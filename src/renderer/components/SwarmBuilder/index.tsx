@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react'
 import type {
   AgentModelCatalog,
+  AgentProfile,
   AppSettings,
   ImageAttachment,
   SupportedAgentId,
@@ -152,6 +153,8 @@ export function SwarmBuilder({
   )
   const [modelCatalogsLoaded, setModelCatalogsLoaded] = useState(false)
   const [swarmSettings, setSwarmSettings] = useState<AppSettings['swarms'] | null>(null)
+  const [profiles, setProfiles] = useState<AgentProfile[]>([])
+  const [profileIssues, setProfileIssues] = useState(0)
   const [launching, setLaunching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<AttachedImage[]>([])
@@ -180,15 +183,25 @@ export function SwarmBuilder({
     if (!open) return
 
     let cancelled = false
-    window.agentforge.settings
-      .getEffective(projectId ?? undefined)
-      .then((effective) => {
+    Promise.all([
+      window.agentforge.settings.getEffective(projectId ?? undefined),
+      projectId
+        ? window.agentforge.agent.listProfiles(projectId)
+        : Promise.resolve({ profiles: [], issues: [] }),
+    ])
+      .then(([effective, profileResult]) => {
         if (cancelled) return
         setSwarmSettings(effective.settings.swarms)
         setStrategy(effective.settings.swarms.defaultStrategy)
+        setProfiles(profileResult.profiles)
+        setProfileIssues(profileResult.issues.length)
       })
       .catch(() => {
-        if (!cancelled) setSwarmSettings(null)
+        if (!cancelled) {
+          setSwarmSettings(null)
+          setProfiles([])
+          setProfileIssues(0)
+        }
       })
 
     return () => {
@@ -332,6 +345,27 @@ export function SwarmBuilder({
     }
   }
 
+  function addProfileAgent(profile: AgentProfile) {
+    if (availableAgents.length === 0) return
+    const agentId =
+      profile.defaultAgentId && availableAgents.includes(profile.defaultAgentId)
+        ? profile.defaultAgentId
+        : availableAgents[0]
+
+    autoManageAgentsRef.current = false
+    if (strategy === 'managed') setStrategy('parallel')
+    setAgents((current) => [
+      ...current.slice(0, Math.max(0, maxAgents - 1)),
+      {
+        profileId: profile.id,
+        role: profile.role,
+        agentId,
+        modelOverride: profile.defaultAgentId === agentId ? profile.defaultModel : undefined,
+        promptSuffix: profile.instructions,
+      },
+    ])
+  }
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 px-4 backdrop-blur-sm">
       <section
@@ -473,6 +507,34 @@ export function SwarmBuilder({
                 ))}
               </div>
             </div>
+
+            {profiles.length > 0 ? (
+              <div className="grid gap-1.5">
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-muted">
+                    Profiles
+                  </div>
+                  {profileIssues > 0 ? (
+                    <span className="text-[10px] text-accent-warn">
+                      {profileIssues} issue{profileIssues === 1 ? '' : 's'}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {profiles.map((profile) => (
+                    <button
+                      key={profile.id}
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-pill border border-hairline bg-card-raised px-2.5 py-1 text-[11px] text-secondary transition-colors hover:border-accent-primary/30 hover:bg-accent-primary/10 hover:text-primary"
+                      onClick={() => addProfileAgent(profile)}
+                    >
+                      <span aria-hidden="true" className="text-muted">◇</span>
+                      {profile.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {!isManaged ? (
               <section className="rounded-card border border-hairline">

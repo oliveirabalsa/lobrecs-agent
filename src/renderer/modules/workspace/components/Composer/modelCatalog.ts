@@ -149,6 +149,41 @@ export const FALLBACK_MODEL_CATALOGS: AgentModelCatalog[] = [
       },
     ],
   },
+  {
+    agentId: 'cursor',
+    name: 'Cursor CLI',
+    installed: true,
+    models: [
+      {
+        id: 'auto',
+        label: 'Auto',
+        agentId: 'cursor',
+        tier: 'balanced',
+        source: 'fallback',
+      },
+      {
+        id: 'gpt-5',
+        label: 'GPT-5',
+        agentId: 'cursor',
+        tier: 'advanced',
+        source: 'fallback',
+      },
+      {
+        id: 'sonnet-4',
+        label: 'sonnet-4',
+        agentId: 'cursor',
+        tier: 'advanced',
+        source: 'fallback',
+      },
+      {
+        id: 'sonnet-4-thinking',
+        label: 'sonnet-4-thinking',
+        agentId: 'cursor',
+        tier: 'advanced',
+        source: 'fallback',
+      },
+    ],
+  },
 ]
 
 export function catalogOptions(catalogs: readonly AgentModelCatalog[]): ModelOption[] {
@@ -174,6 +209,7 @@ export function groupModelOptions(
     .map((catalog) => ({
       agentId: catalog.agentId,
       label: catalog.name,
+      account: catalog.account,
       options: catalogOptions([catalog]),
     }))
 }

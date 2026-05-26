@@ -11,6 +11,7 @@ const COMMANDS: Array<{ label: string; action: GitTuiAction }> = [
   { label: 'pull current branch', action: { type: 'pull' } },
   { label: 'push current branch', action: { type: 'push' } },
   { label: 'stage all files', action: { type: 'stage-all' } },
+  { label: 'create branch', action: { type: 'create-branch' } },
 ]
 
 export function GitCommandPalette({ open, onClose, onAction }: GitCommandPaletteProps) {

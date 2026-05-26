@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type {
   AgentId,
   AgentApprovalMode,
@@ -10,6 +10,7 @@ import type {
   QueuedMessage,
   Session,
   SessionStatus,
+  WorktreeHandoffState,
 } from '../../../../shared/types'
 import { DiffViewer } from '../../../components/DiffViewer'
 import { AutomationManager } from '../../automations'
@@ -25,11 +26,8 @@ import {
 } from '../../sessions'
 import { SwarmBuilder, SwarmGraphPanel } from '../../swarms'
 import { useSettings } from '../../settings'
-import {
-  BottomTerminalPanel,
-  createTerminalTab,
-  type TerminalTab,
-} from '../components/BottomTerminalPanel'
+import { BottomTerminalPanel } from '../components/BottomTerminalPanel'
+import { createTerminalTab, type TerminalTab } from '../components/terminalTabs'
 import type { MarkdownLinkRequest } from '../components/MarkdownContent'
 import {
   MarkdownPreviewer,
@@ -43,10 +41,16 @@ import { Composer } from '../components/Composer'
 import { ProjectContextDialog } from '../components/ProjectContextDialog'
 import { CliEditorTerminalOverlay } from '../components/CliEditorTerminalOverlay'
 import { BranchManagerDialog } from '../components/BranchManagerDialog'
+import { DoctorPanel } from '../components/DoctorPanel'
 import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
-import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
+import { WorkspaceTopBar } from '../components/WorkspaceTopBar'
+import { VisualEvidencePanel } from '../components/VisualEvidencePanel'
+import { formatModelLabel } from '../components/Composer/modelDisplay'
+import type { BackgroundAgentsBlockingState } from '../components/BackgroundAgentsCard'
 import type { DiffProposalScope, MainView } from '../hooks/useWorkspaceController'
+import { useWorkspaceGitActions } from '../hooks/useWorkspaceGitActions'
+import { useWorkspaceRightPanelState } from '../hooks/useWorkspaceRightPanelState'
 import { RunWorkspace } from './RunWorkspace'
 import type { SwarmGraphNode } from '../../swarms/domain/swarmGraph'
 
@@ -60,6 +64,7 @@ interface WorkspaceViewProps {
   diffProposals: DiffProposal[]
   approvalRequest: ApprovalRequest | null
   prefillPrompt?: string
+  prefillPromptRevision?: number
   bannerError: string | null
   busy: boolean
   busyReason?: string
@@ -69,6 +74,7 @@ interface WorkspaceViewProps {
   onRerunSession?: () => void | Promise<void>
   onDeleteThread: () => void
   onForkSession: (sessionId: string) => void
+  onRestorePrompt: (prompt: string) => void
   onFeedback: (
     sessionId: string,
     outcome: 'success' | 'failure' | 'partial',
@@ -133,33 +139,6 @@ function safeStorage(): Storage | null {
   }
 }
 
-function rightPanelOpenKey(threadId: string | null): string {
-  return threadId ? `workspace.rightPanelOpen.${threadId}` : 'workspace.rightPanelOpen'
-}
-
-function rightPanelModeKey(threadId: string | null): string {
-  return threadId ? `workspace.rightPanelMode.${threadId}` : 'workspace.rightPanelMode'
-}
-
-function readPanelOpen(threadId: string | null, fallback = false): boolean {
-  const ls = safeStorage()
-  if (!ls) return fallback
-  const key = rightPanelOpenKey(threadId)
-  if (ls.getItem(key) === null) return fallback
-  return ls.getItem(key) === '1'
-}
-
-function readPanelMode(threadId: string | null, fallback: RightPanelMode = 'diff'): RightPanelMode {
-  const ls = safeStorage()
-  const key = rightPanelModeKey(threadId)
-  const value = ls?.getItem(key)
-  if (value === null || value === undefined) return fallback
-  if (value === 'terminal' || value === 'swarm' || value === 'context' || value === 'reviews') {
-    return value
-  }
-  return 'diff'
-}
-
 export function WorkspaceView({
   isMac = false,
   selectedProject,
@@ -170,6 +149,7 @@ export function WorkspaceView({
   diffProposals,
   approvalRequest,
   prefillPrompt,
+  prefillPromptRevision,
   bannerError,
   busy,
   busyReason,
@@ -179,6 +159,7 @@ export function WorkspaceView({
   onRerunSession,
   onDeleteThread,
   onForkSession,
+  onRestorePrompt,
   onFeedback,
   onDiffProposals,
   onApprovalRequest,
@@ -203,8 +184,6 @@ export function WorkspaceView({
 }: WorkspaceViewProps) {
   const { globalSettings } = useSettings()
   const activeThreadId = activeSession?.threadId ?? null
-  const activeThreadIdRef = useRef(activeThreadId)
-  activeThreadIdRef.current = activeThreadId
   const handleActiveDiffProposals = useCallback(
     (proposals: DiffProposal[]) => {
       onDiffProposals(proposals, {
@@ -215,78 +194,59 @@ export function WorkspaceView({
     [activeSessionId, activeThreadId, onDiffProposals],
   )
 
-  const [rightPanelOpen, setRightPanelOpenState] = useState<boolean>(() =>
-    readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false),
-  )
-  const [rightPanelMounted, setRightPanelMounted] = useState<boolean>(() =>
-    readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false),
-  )
-  const [rightPanelMode, setRightPanelModeState] = useState<RightPanelMode>(() =>
-    readPanelMode(activeThreadId, globalSettings?.ui.rightPanelDefaultMode ?? 'diff'),
-  )
-  const [rightPanelFullscreen, setRightPanelFullscreen] = useState(false)
+  const {
+    rightPanelOpen,
+    rightPanelMounted,
+    rightPanelMode,
+    rightPanelFullscreen,
+    rightPanelWidth,
+    setRightPanelMounted,
+    setRightPanelMode,
+    setRightPanelFullscreen,
+    startRightPanelResize,
+    toggleRightPanel,
+    openMode,
+    closeRightPanel,
+  } = useWorkspaceRightPanelState({
+    activeThreadId,
+    defaultOpen: globalSettings?.ui.rightPanelDefaultOpen ?? false,
+    defaultMode: globalSettings?.ui.rightPanelDefaultMode ?? 'diff',
+    diffCount: diffProposals.length,
+  })
   const [contextDialogOpen, setContextDialogOpen] = useState(false)
   const [commitDialogOpen, setCommitDialogOpen] = useState(false)
   const [prDialogOpen, setPrDialogOpen] = useState(false)
   const [branchesDialogOpen, setBranchesDialogOpen] = useState(false)
   const [overlayEditor, setOverlayEditor] = useState<{ id: string; name: string } | null>(null)
-  const [currentBranch, setCurrentBranch] = useState<string | null>(null)
-  const [gitOperationRunning, setGitOperationRunning] = useState(false)
-  const [gitMenuOpen, setGitMenuOpen] = useState(false)
-  /** Number of uncommitted files in the working tree, from a lightweight `git status` probe. */
-  const [pendingChangeCount, setPendingChangeCount] = useState(0)
-  /**
-   * Monotonic id for in-flight pending-change probes. Several events can trigger
-   * a probe at once; without this a slow earlier probe could resolve last and
-   * overwrite a newer count. Only the most recent id is allowed to apply.
-   */
-  const pendingProbeRef = useRef(0)
+  const [backgroundBlocking, setBackgroundBlocking] =
+    useState<BackgroundAgentsBlockingState | null>(null)
+  const workspaceBusy = busy
+  const workspaceBusyReason = busyReason
+
+  useEffect(() => {
+    setBackgroundBlocking(null)
+  }, [activeThreadId])
+  const {
+    currentBranch,
+    gitOperationRunning,
+    gitMenuOpen,
+    pendingChangeCount,
+    setGitMenuOpen,
+    refreshPendingChanges,
+    refreshCurrentBranch,
+    handleGitPull,
+    handleGitFetch,
+  } = useWorkspaceGitActions({
+    selectedProject,
+    busy,
+    commitDialogOpen,
+    branchesDialogOpen,
+  })
   const [contextPercent, setContextPercent] = useState<number | null>(null)
   /** File path requested via the "Review" button — focused inside <DiffViewer>. */
   const [focusFilePath, setFocusFilePath] = useState<string | null>(null)
   const [bottomPanelOpen, setBottomPanelOpen] = useState(false)
   const [bottomPanelFullscreen, setBottomPanelFullscreen] = useState(false)
-  const [rightPanelWidth, setRightPanelWidth] = useState<number>(() => {
-    const ls = safeStorage()
-    const saved = ls?.getItem('lobrecs.right-panel-width')
-    if (saved) {
-      const val = parseInt(saved, 10)
-      if (!isNaN(val)) return val
-    }
-    return typeof window !== 'undefined' && window.innerWidth >= 1536 ? 520 : 420
-  })
-
-  const startRightPanelResize = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      event.preventDefault()
-      const startX = event.clientX
-      const startWidth = rightPanelWidth
-
-      function handlePointerMove(moveEvent: PointerEvent) {
-        const delta = moveEvent.clientX - startX
-        const newWidth = Math.max(320, Math.min(800, startWidth - delta))
-        setRightPanelWidth(newWidth)
-        const ls = safeStorage()
-        if (ls) {
-          ls.setItem('lobrecs.right-panel-width', String(newWidth))
-        }
-      }
-
-      function handlePointerUp() {
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-        window.removeEventListener('pointermove', handlePointerMove)
-        window.removeEventListener('pointerup', handlePointerUp)
-      }
-
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-      window.addEventListener('pointermove', handlePointerMove)
-      window.addEventListener('pointerup', handlePointerUp)
-    },
-    [rightPanelWidth],
-  )
-
   const [bottomPanelHeight, setBottomPanelHeightState] = useState<number>(() => {
     const ls = safeStorage()
     const saved = ls?.getItem('lobrecs.bottom-terminal-height')
@@ -329,96 +289,6 @@ export function WorkspaceView({
       document.removeEventListener('keydown', onDocKeyDown)
     }
   }, [gitMenuOpen])
-
-  // Lightweight `git status` probe so the Commit & Push action reflects whether
-  // a commit is even possible. Stable per project; safe to call from any event.
-  const refreshPendingChanges = useCallback(() => {
-    const projectId = selectedProject?.id
-    if (!projectId) {
-      setPendingChangeCount(0)
-      return
-    }
-
-    const probeId = pendingProbeRef.current + 1
-    pendingProbeRef.current = probeId
-    void window.agentforge.git
-      .getPendingChanges(projectId)
-      .then((result) => {
-        if (pendingProbeRef.current === probeId) setPendingChangeCount(result.fileCount)
-      })
-      .catch(() => {
-        if (pendingProbeRef.current === probeId) setPendingChangeCount(0)
-      })
-  }, [selectedProject?.id])
-
-  // Re-probe on the discrete moments the working tree is likely to have moved:
-  // project switch, an agent session finishing (busy clears), the commit dialog
-  // closing, and each time the git menu opens — so the gated menu item is fresh
-  // at the instant of click.
-  useEffect(() => {
-    refreshPendingChanges()
-  }, [refreshPendingChanges, busy, commitDialogOpen, gitMenuOpen])
-
-  // Load and refresh the current branch name
-  const refreshCurrentBranch = useCallback(() => {
-    if (!selectedProject?.id) {
-      setCurrentBranch(null)
-      return
-    }
-    window.agentforge.git.getCurrentBranch(selectedProject.id)
-      .then((branch) => {
-        setCurrentBranch(branch)
-      })
-      .catch(() => {
-        setCurrentBranch(null)
-      })
-  }, [selectedProject?.id])
-
-  useEffect(() => {
-    refreshCurrentBranch()
-  }, [refreshCurrentBranch, branchesDialogOpen])
-
-  const handleGitPull = useCallback(async () => {
-    if (!selectedProject || gitOperationRunning) return
-    setGitOperationRunning(true)
-    try {
-      const result = await window.agentforge.git.pull(selectedProject.id)
-      if (result.exitCode === 0) {
-        window.alert('Git pull succeeded:\n' + result.stdout)
-      } else {
-        window.alert('Git pull failed:\n' + result.stderr)
-      }
-    } catch (error: unknown) {
-      window.alert(
-        `Git pull failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      )
-    } finally {
-      setGitOperationRunning(false)
-      refreshPendingChanges()
-      refreshCurrentBranch()
-    }
-  }, [selectedProject, gitOperationRunning, refreshPendingChanges, refreshCurrentBranch])
-
-  const handleGitFetch = useCallback(async () => {
-    if (!selectedProject || gitOperationRunning) return
-    setGitOperationRunning(true)
-    try {
-      const result = await window.agentforge.git.fetch(selectedProject.id)
-      if (result.exitCode === 0) {
-        window.alert('Git fetch succeeded.')
-      } else {
-        window.alert('Git fetch failed:\n' + result.stderr)
-      }
-    } catch (error: unknown) {
-      window.alert(
-        `Git fetch failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      )
-    } finally {
-      setGitOperationRunning(false)
-      refreshPendingChanges()
-      refreshCurrentBranch()
-    }
-  }, [selectedProject, gitOperationRunning, refreshPendingChanges, refreshCurrentBranch])
 
   // Global chorded shortcuts: Space + g + g (LazyGit) and Space + v + v (Vim)
   useEffect(() => {
@@ -509,40 +379,6 @@ export function WorkspaceView({
     }
   }, [refreshPendingChanges, selectedProject?.id])
 
-  // Keep the right panel mounted while opening, and during the close animation
-  // so `data-state="closed"` exit keyframes can play before unmount.
-  useEffect(() => {
-    if (rightPanelOpen) setRightPanelMounted(true)
-  }, [rightPanelOpen])
-
-  // Restore per-thread panel state when switching threads.
-  useEffect(() => {
-    const open = readPanelOpen(activeThreadId, globalSettings?.ui.rightPanelDefaultOpen ?? false)
-    setRightPanelOpenState(open)
-    setRightPanelMounted(open)
-    setRightPanelModeState(
-      readPanelMode(activeThreadId, globalSettings?.ui.rightPanelDefaultMode ?? 'diff'),
-    )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeThreadId])
-
-  useEffect(() => {
-    const ls = safeStorage()
-    if (ls?.getItem(rightPanelOpenKey(activeThreadIdRef.current)) !== null) return
-    const defaultOpen = globalSettings?.ui.rightPanelDefaultOpen
-    if (defaultOpen === undefined) return
-    setRightPanelOpenState(defaultOpen)
-    setRightPanelMounted(defaultOpen)
-  }, [globalSettings?.ui.rightPanelDefaultOpen])
-
-  useEffect(() => {
-    const ls = safeStorage()
-    if (ls?.getItem(rightPanelModeKey(activeThreadIdRef.current)) !== null) return
-    const defaultMode = globalSettings?.ui.rightPanelDefaultMode
-    if (!defaultMode) return
-    setRightPanelModeState(defaultMode)
-  }, [globalSettings?.ui.rightPanelDefaultMode])
-
   useEffect(() => {
     const ls = safeStorage()
     if (ls?.getItem('lobrecs.bottom-terminal-height') !== null) return
@@ -551,59 +387,9 @@ export function WorkspaceView({
     setBottomPanelHeightState(defaultHeight)
   }, [bottomPanelOpen, globalSettings?.ui.terminalDefaultHeight])
 
-  // Persist panel state per thread.
-  useEffect(() => {
-    const ls = safeStorage()
-    if (!ls) return
-    const key = rightPanelOpenKey(activeThreadIdRef.current)
-    if (rightPanelOpen) ls.setItem(key, '1')
-    else ls.removeItem(key)
-  }, [rightPanelOpen])
-
-  useEffect(() => {
-    const ls = safeStorage()
-    if (!ls) return
-    ls.setItem(rightPanelModeKey(activeThreadIdRef.current), rightPanelMode)
-  }, [rightPanelMode])
-
-  // If diff disappears while diff is selected, fall back to terminal.
-  useEffect(() => {
-    if (rightPanelMode === 'diff' && diffProposals.length === 0 && rightPanelOpen) {
-      setRightPanelModeState('terminal')
-    }
-  }, [diffProposals.length, rightPanelMode, rightPanelOpen])
-
-  useEffect(() => {
-    if (rightPanelMode === 'swarm' && !activeThreadId && rightPanelOpen) {
-      setRightPanelModeState('terminal')
-    }
-  }, [activeThreadId, rightPanelMode, rightPanelOpen])
-
-  // The swarm graph is cramped in the docked panel width, so expand to
-  // fullscreen whenever the Swarm tab opens. This intentionally omits
-  // `rightPanelFullscreen` from the deps: if the user manually exits
-  // fullscreen while staying on the Swarm tab, we don't fight them.
-  useEffect(() => {
-    if (rightPanelMode === 'swarm' && rightPanelOpen) {
-      setRightPanelFullscreen(true)
-    }
-  }, [rightPanelMode, rightPanelOpen])
-
-  const handleToggleRightPanel = useCallback(
-    (mode: RightPanelMode) => {
-      setRightPanelOpenState((prev) => {
-        if (prev && rightPanelMode === mode) return false
-        return true
-      })
-      setRightPanelModeState(mode)
-    },
-    [rightPanelMode],
-  )
-
   const openContextExplorer = useCallback(() => {
-    setRightPanelOpenState(true)
-    setRightPanelModeState('context')
-  }, [])
+    openMode('context')
+  }, [openMode])
 
   const openProjectContextDialog = useCallback(() => {
     setContextDialogOpen(true)
@@ -611,20 +397,17 @@ export function WorkspaceView({
 
   /**
    * Opens the right panel in diff mode and optionally focuses a specific file.
-   * Passed down through `RunWorkspace` → `MessageStream` → `<EditedFilesCard>`
-   * so per-file "Review" buttons jump straight to the matching diff tab.
+   * Passed down through `RunWorkspace` so the final post-run review CTA can
+   * open the matching diff tab.
    */
   const openDiffPanel = useCallback((filePath?: string) => {
-    setRightPanelOpenState(true)
-    setRightPanelModeState('diff')
-    setRightPanelFullscreen(true)
+    openMode('diff', true)
     setFocusFilePath(filePath ?? null)
-  }, [])
+  }, [openMode])
 
   const openAgentPanel = useCallback(() => {
-    setRightPanelOpenState(true)
-    setRightPanelModeState('swarm')
-  }, [])
+    openMode('swarm')
+  }, [openMode])
 
   const handleOpenSessionFromGraph = useCallback(
     async (sessionId: string) => {
@@ -798,7 +581,7 @@ export function WorkspaceView({
         threadId: result.threadId,
         prompt,
         routingDecision: null,
-        agentId: node.agentLabel === 'cursor' ? undefined : node.agentLabel,
+        agentId: node.agentLabel,
         modelOverride: node.model,
         createdAt,
       })
@@ -811,6 +594,103 @@ export function WorkspaceView({
     : selectedProject
       ? selectedProject.name
       : 'Workspace'
+  const activeModel = activeSession?.modelOverride ?? activeSession?.routingDecision?.model
+  const activeAgentId = activeSession?.agentId ?? activeSession?.routingDecision?.agentId
+  const activeModelLabel =
+    activeModel && activeAgentId ? formatModelLabel(activeAgentId, activeModel) : activeModel
+  const worktreeHandoffEnabled =
+    globalSettings?.execution.experimentalWorktreeHandoff === true
+  const [worktreeState, setWorktreeState] = useState<WorktreeHandoffState | null>(null)
+  const [worktreeActionBusy, setWorktreeActionBusy] = useState(false)
+
+  const refreshWorktreeState = useCallback(async () => {
+    if (!worktreeHandoffEnabled || !selectedProject || !activeThreadId) {
+      setWorktreeState(null)
+      return
+    }
+
+    try {
+      const state = await window.agentforge.git.getWorktreeHandoffState({
+        projectId: selectedProject.id,
+        threadId: activeThreadId,
+      })
+      setWorktreeState(state)
+    } catch (error) {
+      setWorktreeState(null)
+      onBannerError(error instanceof Error ? error.message : 'Unable to read worktree handoff state.')
+    }
+  }, [activeThreadId, onBannerError, selectedProject, worktreeHandoffEnabled])
+
+  useEffect(() => {
+    void refreshWorktreeState()
+  }, [refreshWorktreeState])
+
+  const runWorktreeAction = useCallback(
+    async (action: () => Promise<WorktreeHandoffState>) => {
+      if (worktreeActionBusy) return
+      setWorktreeActionBusy(true)
+      try {
+        const state = await action()
+        setWorktreeState(state)
+        if (state.conflictCheck === 'local-dirty') {
+          onBannerError('Bring to local is blocked while the local working tree has changes.')
+        }
+      } catch (error) {
+        onBannerError(error instanceof Error ? error.message : 'Worktree handoff action failed.')
+      } finally {
+        setWorktreeActionBusy(false)
+      }
+    },
+    [onBannerError, worktreeActionBusy],
+  )
+
+  const handoffRequest = selectedProject && activeThreadId
+    ? { projectId: selectedProject.id, threadId: activeThreadId }
+    : null
+
+  const handleMoveToWorktree = useCallback(() => {
+    if (!handoffRequest) return
+    void runWorktreeAction(() =>
+      window.agentforge.git.moveThreadToWorktree({
+        ...handoffRequest,
+        cleanupPolicy: 'manual',
+      }),
+    )
+  }, [handoffRequest, runWorktreeAction])
+
+  const handleBringToLocal = useCallback(() => {
+    if (!handoffRequest) return
+    void runWorktreeAction(() =>
+      window.agentforge.git.bringThreadToLocal({
+        ...handoffRequest,
+        removeAfterApply: false,
+      }),
+    )
+  }, [handoffRequest, runWorktreeAction])
+
+  const handleCreateBranchHere = useCallback(() => {
+    if (!handoffRequest) return
+    const branchName = window.prompt('Branch name')
+    if (!branchName?.trim()) return
+    void runWorktreeAction(() =>
+      window.agentforge.git.createBranchHere({
+        ...handoffRequest,
+        branchName,
+      }),
+    )
+  }, [handoffRequest, runWorktreeAction])
+
+  const handleRestoreSnapshot = useCallback(() => {
+    if (!handoffRequest) return
+    const confirmed = window.confirm('Restore this thread worktree to its original snapshot?')
+    if (!confirmed) return
+    void runWorktreeAction(() => window.agentforge.git.restoreWorktreeSnapshot(handoffRequest))
+  }, [handoffRequest, runWorktreeAction])
+
+  const handleOpenWorktree = useCallback(() => {
+    if (!handoffRequest) return
+    void runWorktreeAction(() => window.agentforge.git.openWorktree(handoffRequest))
+  }, [handoffRequest, runWorktreeAction])
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
@@ -819,7 +699,8 @@ export function WorkspaceView({
           <>
             <WorkspaceTopBar
               title={titleForTopBar}
-              model={activeSession?.modelOverride ?? activeSession?.routingDecision?.model}
+              model={activeModelLabel}
+              branchName={currentBranch}
               rightPanelOpen={rightPanelOpen}
               rightPanelMode={rightPanelMode}
               hasDiff={diffProposals.length > 0}
@@ -828,7 +709,7 @@ export function WorkspaceView({
               hasReviews={Boolean(selectedProject)}
               canRerun={Boolean(activeSession?.prompt) && !busy}
               onRerun={onRerunSession}
-              onToggleRightPanel={handleToggleRightPanel}
+              onToggleRightPanel={toggleRightPanel}
               onFork={activeSessionId ? () => onForkSession(activeSessionId) : undefined}
               onDelete={activeSession?.threadId ? onDeleteThread : undefined}
               reserveTrafficLightInset={isMac}
@@ -837,7 +718,49 @@ export function WorkspaceView({
               onOpenCliEditor={handleOpenCliEditor}
               sidebarCollapsed={sidebarCollapsed}
               onToggleSidebar={onToggleSidebar}
+              projectId={selectedProject?.id}
+              onBranchesClick={() => setBranchesDialogOpen(true)}
+              onBranchChanged={refreshCurrentBranch}
             />
+
+            {worktreeHandoffEnabled && activeThreadId ? (
+              <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-card/35 px-3 py-1.5 text-[11px] text-muted">
+                <span className="max-w-[220px] truncate">
+                  {worktreeState?.location === 'worktree'
+                    ? `Worktree ${worktreeState.branch ?? ''}`
+                    : 'Local thread'}
+                </span>
+                <span className="hidden text-muted/70 sm:inline">
+                  {worktreeState?.pendingChangeCount ?? 0} changed
+                </span>
+                <div className="flex-1" />
+                <HandoffButton
+                  label="Move to worktree"
+                  disabled={workspaceBusy || worktreeActionBusy || worktreeState?.location === 'worktree'}
+                  onClick={handleMoveToWorktree}
+                />
+                <HandoffButton
+                  label="Bring to local"
+                  disabled={workspaceBusy || worktreeActionBusy || worktreeState?.location !== 'worktree'}
+                  onClick={handleBringToLocal}
+                />
+                <HandoffButton
+                  label="Create branch here"
+                  disabled={workspaceBusy || worktreeActionBusy}
+                  onClick={handleCreateBranchHere}
+                />
+                <HandoffButton
+                  label="Restore snapshot"
+                  disabled={workspaceBusy || worktreeActionBusy || worktreeState?.location !== 'worktree'}
+                  onClick={handleRestoreSnapshot}
+                />
+                <HandoffButton
+                  label="Open worktree"
+                  disabled={worktreeActionBusy || worktreeState?.location !== 'worktree'}
+                  onClick={handleOpenWorktree}
+                />
+              </div>
+            ) : null}
 
             {bannerError ? (
               <div className="shrink-0 break-words border-b border-accent-del/40 bg-accent-del/10 px-4 py-2 text-xs text-accent-del">
@@ -878,7 +801,9 @@ export function WorkspaceView({
                         onOpenAgentPanel={openAgentPanel}
                         onOpenMarkdown={openMarkdownLink}
                         onPreviewMarkdown={openMarkdownDocument}
+                        onRestorePrompt={onRestorePrompt}
                         onContextPercent={setContextPercent}
+                        onBackgroundBlockingChange={setBackgroundBlocking}
                       />
                     ) : (
                       <div className="flex min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
@@ -894,7 +819,9 @@ export function WorkspaceView({
                             onRemove={onRemoveQueueItem}
                             onClearAll={onClearQueue}
                             onForceSteer={
-                              busy && activeSessionId ? onForceSteerQueuedMessage : undefined
+                              busy && activeSessionId
+                                ? onForceSteerQueuedMessage
+                                : undefined
                             }
                           />
                         </div>
@@ -908,9 +835,10 @@ export function WorkspaceView({
                           activeThreadId={activeSession?.threadId ?? null}
                           activeSessionId={activeSessionId}
                           activeSessionStatus={activeSession?.status ?? null}
-                          busy={busy}
-                          busyReason={busyReason}
+                          busy={workspaceBusy}
+                          busyReason={workspaceBusyReason}
                           prefillPrompt={prefillPrompt}
+                          prefillPromptRevision={prefillPromptRevision}
                           onCancelSession={onCancelSession}
                           onSessionStarted={onSessionStarted}
                           contextPercent={contextPercent}
@@ -1090,6 +1018,7 @@ export function WorkspaceView({
                 ) : mainView === 'git' ? (
                   <GitTuiPanel
                     project={selectedProject}
+                    onBranchChanged={refreshCurrentBranch}
                   />
                 ) : (
                   <MemoryManager project={selectedProject} />
@@ -1159,28 +1088,39 @@ export function WorkspaceView({
                       label="Diff"
                       active={rightPanelMode === 'diff'}
                       disabled={diffProposals.length === 0}
-                      onClick={() => setRightPanelModeState('diff')}
+                      onClick={() => setRightPanelMode('diff')}
                     />
                     <RightPanelTab
                       label="Terminal"
                       active={rightPanelMode === 'terminal'}
-                      onClick={() => setRightPanelModeState('terminal')}
+                      onClick={() => setRightPanelMode('terminal')}
                     />
                     <RightPanelTab
                       label="Swarm"
                       active={rightPanelMode === 'swarm'}
                       disabled={!activeThreadId}
-                      onClick={() => setRightPanelModeState('swarm')}
+                      onClick={() => setRightPanelMode('swarm')}
                     />
                     <RightPanelTab
                       label="Context"
                       active={rightPanelMode === 'context'}
-                      onClick={() => setRightPanelModeState('context')}
+                      onClick={() => setRightPanelMode('context')}
                     />
                     <RightPanelTab
                       label="Reviews"
                       active={rightPanelMode === 'reviews'}
-                      onClick={() => setRightPanelModeState('reviews')}
+                      onClick={() => setRightPanelMode('reviews')}
+                    />
+                    <RightPanelTab
+                      label="Evidence"
+                      active={rightPanelMode === 'evidence'}
+                      disabled={!activeSessionId}
+                      onClick={() => setRightPanelMode('evidence')}
+                    />
+                    <RightPanelTab
+                      label="Doctor"
+                      active={rightPanelMode === 'doctor'}
+                      onClick={() => setRightPanelMode('doctor')}
                     />
                     <div className="flex-1" />
                     <button
@@ -1195,8 +1135,7 @@ export function WorkspaceView({
                     <button
                       type="button"
                       onClick={() => {
-                        setRightPanelFullscreen(false)
-                        setRightPanelOpenState(false)
+                        closeRightPanel()
                       }}
                       aria-label="Close panel"
                       className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
@@ -1237,6 +1176,10 @@ export function WorkspaceView({
                         activeThreadId={activeThreadId}
                         onSessionStarted={onSessionStarted}
                       />
+                    ) : rightPanelMode === 'evidence' ? (
+                      <VisualEvidencePanel sessionId={activeSessionId} />
+                    ) : rightPanelMode === 'doctor' ? (
+                      <DoctorPanel project={selectedProject} />
                     ) : (
                       <TerminalPanel
                         sessionId={activeSessionId}
@@ -1382,6 +1325,27 @@ function RightPanelTab({
       onClick={onClick}
       disabled={disabled}
       className={`shrink-0 rounded px-2 py-1 text-[11px] font-medium transition-colors ${stateClasses}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function HandoffButton({
+  label,
+  disabled,
+  onClick,
+}: {
+  label: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="h-7 shrink-0 rounded border border-hairline px-2 text-[11px] font-medium text-secondary transition-colors hover:border-white/15 hover:bg-white/5 hover:text-primary disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:border-hairline disabled:hover:bg-transparent"
     >
       {label}
     </button>

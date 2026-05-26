@@ -1,1 +1,1 @@
-export { AutomationManager } from '../../components/AutomationManager'
+export { AutomationManager } from './views/AutomationManager'

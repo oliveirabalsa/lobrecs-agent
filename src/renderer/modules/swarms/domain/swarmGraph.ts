@@ -185,6 +185,12 @@ function textFromActivity(activity: AgentActivity): string {
       return `Model recovery needed: ${activity.failedAgentId} / ${activity.failedModel}`
     case 'delegation':
       return activity.summary ?? activity.lastOutput ?? `Delegated task: ${activity.goal}`
+    case 'multitask-plan':
+      return `${activity.tasks.length} multitask items ready`
+    default: {
+      const _exhaustive: never = activity
+      return _exhaustive
+    }
   }
 }
 
@@ -218,6 +224,13 @@ function summarizeActivities(events: readonly AgentEvent[]) {
       case 'message':
         counts.messageCount += 1
         break
+      case 'step':
+      case 'tool-call':
+      case 'tool-result':
+      case 'completion':
+      case 'compaction':
+      case 'model-recovery':
+        break
       case 'command':
         counts.commandCount += 1
         break
@@ -230,6 +243,7 @@ function summarizeActivities(events: readonly AgentEvent[]) {
       case 'plan-prompt':
       case 'user-question':
       case 'swarm-step-approval':
+      case 'multitask-plan':
         counts.approvalCount += 1
         break
       case 'todo-list':
@@ -238,6 +252,10 @@ function summarizeActivities(events: readonly AgentEvent[]) {
       case 'delegation':
         counts.messageCount += 1
         break
+      default: {
+        const _exhaustive: never = event.payload
+        void _exhaustive
+      }
     }
   }
 

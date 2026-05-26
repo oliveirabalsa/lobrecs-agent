@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import type { MouseEvent } from 'react'
 import type { SessionStatus } from '../../../shared/types'
 import { Spinner } from '../ui'
 import { formatRelative } from '../../lib/relativeTime'
@@ -34,22 +34,14 @@ const STATUS_DOT: Record<SessionStatus, StatusDotStyle> = {
 }
 
 export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }: ThreadRowProps) {
+  void onSelectAgent
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)
-  const visibleAgents = active && thread.agents.length > 1 ? thread.agents : []
-  const hasSubagents = visibleAgents.length > 0
-  const [subagentsExpanded, setSubagentsExpanded] = useState(true)
-  const subagentsVisible = hasSubagents && subagentsExpanded
   const baseClasses =
     'group flex h-8 w-full cursor-pointer items-center gap-1 rounded-card pr-1 pl-3 text-left transition-colors'
   const stateClasses = active
     ? 'bg-white/10 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary'
   const inactiveButtonClass = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition hover:bg-accent-del/10 hover:text-accent-del'
-
-  function handleSubagentsToggleClick(event: MouseEvent<HTMLButtonElement>) {
-    event.stopPropagation()
-    setSubagentsExpanded((value) => !value)
-  }
 
   function handleDeleteClick(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation()
@@ -66,17 +58,6 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
             className="animate-accent-line absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-pill bg-accent-primary shadow-[0_0_8px_var(--color-accent-primary)]"
             aria-hidden="true"
           />
-        ) : null}
-        {hasSubagents ? (
-          <button
-            type="button"
-            onClick={handleSubagentsToggleClick}
-            aria-label={subagentsExpanded ? 'Collapse subagents' : 'Expand subagents'}
-            aria-expanded={subagentsExpanded}
-            className="-ml-1 flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
-          >
-            <ChevronIcon open={subagentsExpanded} />
-          </button>
         ) : null}
         <button
           type="button"
@@ -112,53 +93,7 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
         ) : null}
       </div>
 
-      {subagentsVisible ? (
-        <div className="ml-5 mt-1 grid gap-0.5 border-l border-hairline pl-2">
-          <div className="px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted">
-            Subagents
-          </div>
-          {visibleAgents.map((agent, index) => (
-            <button
-              key={agent.sessionId}
-              type="button"
-              onClick={() => onSelectAgent?.(thread, agent.sessionId)}
-              className="grid h-7 min-w-0 grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2 rounded-card px-2 text-left text-secondary transition-colors hover:bg-white/5 hover:text-primary"
-              title={`${agent.role} / ${agent.agentId} / ${agent.model}`}
-            >
-              <StatusDot status={agent.status} />
-              <span className="min-w-0 truncate text-[12px] leading-none">
-                {agent.role}
-              </span>
-              <span className="shrink-0 text-[10px] text-muted">
-                {index + 1}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
-  )
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{
-        transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-        transition: 'transform 120ms ease-out',
-      }}
-    >
-      <polyline points="9 6 15 12 9 18" />
-    </svg>
   )
 }
 

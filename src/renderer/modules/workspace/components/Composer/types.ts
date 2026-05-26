@@ -1,4 +1,5 @@
 import type {
+  AgentAccountInfo,
   AgentModelCatalog,
   AgentApprovalMode,
   AgentThinkingLevel,
@@ -38,6 +39,7 @@ export interface ModelOption {
 export interface ModelGroup {
   agentId: SupportedAgentId
   label: string
+  account?: AgentAccountInfo
   options: ModelOption[]
 }
 

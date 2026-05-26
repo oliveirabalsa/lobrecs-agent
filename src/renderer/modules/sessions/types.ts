@@ -37,6 +37,7 @@ export interface StartedSessionSummary {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  profileId?: string
   thinking?: AgentThinkingLevel
   planMode?: boolean
   createdAt?: number

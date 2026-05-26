@@ -17,6 +17,7 @@ import {
   EditedFilesCard,
   McpCallCard,
   ModelRecoveryCard,
+  MultitaskPlanCard,
   PlanReviewCard,
   RanCommandsPill,
   SwarmStepApprovalCard,
@@ -38,6 +39,8 @@ import {
  * Carries live run state + callbacks the artifacts need (approvals, diffs).
  */
 export interface RendererContext {
+  projectId?: string | null
+  threadId?: string | null
   sessionId: string | null
   running: boolean
   /** Live diff proposals from the parent — used by EditedFilesCard. */
@@ -46,7 +49,6 @@ export interface RendererContext {
   approvalRequest?: ApprovalRequest | null
   /** Latest unresolved agent question. Used to highlight its timeline card. */
   pendingUserQuestionPromptId?: string | null
-  onReviewFile?: (filePath?: string) => void
   onApproveApproval?: () => void | Promise<void>
   onRejectApproval?: () => void | Promise<void>
   onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
@@ -58,12 +60,9 @@ export interface RendererContext {
 }
 
 const EMPTY_CONTEXT: RendererContext = {
+  projectId: null,
   sessionId: null,
   running: false,
-}
-
-function hasLiveDiffProposals(proposals: DiffProposal[]): boolean {
-  return proposals.length > 0
 }
 
 /**
@@ -210,7 +209,6 @@ export function renderStreamItem(
     case 'file-change':
       {
         const proposals = matchingDiffProposals(ctx.diffProposals ?? [], item.filePath)
-        const hasLiveProposals = hasLiveDiffProposals(proposals)
         return (
           <EditedFilesCard
             key={key}
@@ -223,7 +221,6 @@ export function renderStreamItem(
                 changeType: item.changeType,
               },
             ]}
-            onReview={hasLiveProposals ? ctx.onReviewFile : undefined}
           />
         )
       }
@@ -245,15 +242,18 @@ export function renderStreamItem(
       )
 
     case 'plan-review':
-      if (!ctx.sessionId) return null
+      if (!ctx.sessionId || !ctx.projectId) return null
       return (
         <PlanReviewCard
           key={key}
           reviewId={item.reviewId}
           sessionId={ctx.sessionId}
+          projectId={ctx.projectId}
+          threadId={ctx.threadId}
           planText={ctx.planReviewPlanText}
           agentId={item.agentId}
           planningModel={item.model}
+          onMultitaskSessionStarted={ctx.onSessionStarted}
           onPreviewMarkdown={ctx.onPreviewMarkdown}
         />
       )
@@ -276,6 +276,19 @@ export function renderStreamItem(
           recovery={item}
           sessionId={ctx.sessionId}
           onSessionStarted={ctx.onSessionStarted}
+        />
+      )
+
+    case 'multitask-plan':
+      if (!ctx.sessionId) return null
+      return (
+        <MultitaskPlanCard
+          key={key}
+          planId={item.planId}
+          sessionId={ctx.sessionId}
+          tasks={item.tasks}
+          totalEstimatedCostUsd={item.totalEstimatedCostUsd}
+          decomposedBy={item.decomposedBy}
         />
       )
 
@@ -323,7 +336,6 @@ export function renderStreamItem(
         }
       }
       const proposals = [...proposalsByPath.values()]
-      const hasLiveProposals = hasLiveDiffProposals(proposals)
       const fallback = item.items.map((change) => ({
         filePath: change.filePath,
         additions: change.additions,
@@ -335,7 +347,6 @@ export function renderStreamItem(
           key={key}
           proposals={proposals}
           fallbackFiles={fallback}
-          onReview={hasLiveProposals ? ctx.onReviewFile : undefined}
         />
       )
     }

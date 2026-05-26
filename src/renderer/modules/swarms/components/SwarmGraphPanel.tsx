@@ -706,6 +706,16 @@ function activityPreviewFromActivity(
         detail: activity.summary ?? activity.lastOutput ?? activity.goal,
         tone: activity.status === 'error' ? 'danger' : activity.status === 'done' ? 'success' : 'info',
       }
+    case 'multitask-plan':
+      return {
+        label: 'Multitask plan',
+        detail: `${activity.tasks.length} tasks`,
+        tone: 'warn',
+      }
+    default: {
+      const _exhaustive: never = activity
+      return _exhaustive
+    }
   }
 }
 

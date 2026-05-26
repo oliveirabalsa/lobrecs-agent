@@ -18,6 +18,9 @@ export function shortAgentModelLabel(
   if (agentId === 'opencode' && modelId.includes('/')) {
     return modelId.slice(modelId.lastIndexOf('/') + 1).replace(/^MiniMax-/i, 'MiniMax ')
   }
+  if (agentId === 'cursor' && modelId === 'auto') {
+    return 'Auto'
+  }
   return modelId
 }
 
@@ -45,9 +48,10 @@ export function AgentModelPicker({
   )
   const selectedAgentId = selected?.agentId ?? selectedModel?.agentId
   const selectedModelId = selected?.id ?? selectedModel?.modelId ?? 'Select model'
+  const selectedModelLabel = selected?.label ?? selectedModelId
   const agentShort = selectedAgentId ? AGENT_SHORT[selectedAgentId] ?? selectedAgentId : 'Agent'
   const label = selectedAgentId
-    ? `${agentShort} · ${shortAgentModelLabel(selectedAgentId, selectedModelId)}`
+    ? `${agentShort} · ${shortAgentModelLabel(selectedAgentId, selectedModelLabel)}`
     : 'Select model'
 
   const modelGroups = useMemo(() => groupModelsByAgent(models), [models])
@@ -117,7 +121,7 @@ function groupModelsByAgent(models: readonly AgentModel[]): ModelGroup[] {
       agentId: model.agentId,
       agentName: AGENT_LABELS[model.agentId] ?? model.agentId,
       modelId: model.id,
-      label: formatModelLabel(model.agentId, model.id),
+      label: formatModelLabel(model.agentId, model.label || model.id),
       tier: model.tier,
     })
 

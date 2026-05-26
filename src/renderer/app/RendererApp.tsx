@@ -445,6 +445,7 @@ export function RendererApp() {
           diffProposals={workspace.diffProposals}
           approvalRequest={workspace.approvalRequest}
           prefillPrompt={workspace.prefillPrompt}
+          prefillPromptRevision={workspace.prefillPromptRevision}
           bannerError={workspace.bannerError}
           busy={workspace.isBusy || Boolean(workspace.approvalRequest)}
           busyReason={workspace.busyReason}
@@ -454,6 +455,7 @@ export function RendererApp() {
           onRerunSession={() => void handleRerunSession()}
           onDeleteThread={() => void workspace.handleDeleteActiveThread()}
           onForkSession={(sessionId) => void workspace.handleForkSession(sessionId)}
+          onRestorePrompt={workspace.handleRestorePrompt}
           onFeedback={(sessionId, outcome, note) =>
             void workspace.handleFeedback(sessionId, outcome, note)
           }

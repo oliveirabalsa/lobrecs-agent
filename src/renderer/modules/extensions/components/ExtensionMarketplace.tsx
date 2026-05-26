@@ -144,6 +144,40 @@ export function ExtensionMarketplace({
     [loadInstalled, scope, selectedProject?.repoPath, target],
   )
 
+  const updateRuntimeState = useCallback(
+    async (installationId: string, patch: { trusted?: boolean; enabled?: boolean }) => {
+      setError(null)
+      setNotice(null)
+      try {
+        await window.agentforge.extensions.updateRuntimeState({
+          installationId,
+          ...patch,
+        })
+        setNotice('Extension runtime state updated.')
+        await loadInstalled()
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Failed to update extension hooks.')
+      }
+    },
+    [loadInstalled],
+  )
+
+  const runDoctor = useCallback(
+    async (installationId: string) => {
+      setError(null)
+      setNotice(null)
+      try {
+        const record = await window.agentforge.extensions.runDoctor({ installationId })
+        const status = record.executable?.doctorResult?.status ?? 'not-run'
+        setNotice(`Extension doctor ${status}.`)
+        await loadInstalled()
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Failed to run extension doctor.')
+      }
+    },
+    [loadInstalled],
+  )
+
   const items = catalog?.items ?? []
   const total = catalog?.total ?? 0
 
@@ -282,6 +316,10 @@ export function ExtensionMarketplace({
           target={target}
           installing={installingId === selectedExtension?.id}
           onInstall={(extension) => void install(extension)}
+          onUpdateRuntimeState={(installationId, patch) =>
+            void updateRuntimeState(installationId, patch)
+          }
+          onRunDoctor={(installationId) => void runDoctor(installationId)}
         />
       </div>
     </div>
@@ -375,6 +413,8 @@ function ExtensionDetail({
   target,
   installing,
   onInstall,
+  onUpdateRuntimeState,
+  onRunDoctor,
 }: {
   extension: MarketplaceExtension | null
   latest?: InstalledExtensionRecord
@@ -383,6 +423,11 @@ function ExtensionDetail({
   target: ExtensionTargetAgent | 'all'
   installing: boolean
   onInstall: (extension: MarketplaceExtension) => void
+  onUpdateRuntimeState: (
+    installationId: string,
+    patch: { trusted?: boolean; enabled?: boolean },
+  ) => void
+  onRunDoctor: (installationId: string) => void
 }) {
   if (!extension) {
     return (
@@ -398,8 +443,10 @@ function ExtensionDetail({
       : extension.targetAgents.includes(target)
         ? [target]
         : []
-  const providerOnly = extension.artifacts.length === 0
-  const unsupportedRecipe = extension.category !== 'provider' && extension.artifacts.length === 0
+  const hookOnly = Boolean(extension.executable) && extension.artifacts.length === 0
+  const providerOnly = extension.artifacts.length === 0 && !extension.executable
+  const unsupportedRecipe =
+    extension.category !== 'provider' && extension.artifacts.length === 0 && !extension.executable
   const missingProject = extension.requiresProject && !selectedProject
   const disabled = providerOnly || missingProject || allowedTargets.length === 0 || installing
 
@@ -457,11 +504,47 @@ function ExtensionDetail({
               ))
             ) : (
               <div className="text-[12px] text-muted">
-                {unsupportedRecipe ? 'Install recipe unavailable.' : 'Provider catalog entry.'}
+                {hookOnly
+                  ? 'Executable hook registration. No agent config files are written.'
+                  : unsupportedRecipe
+                    ? 'Install recipe unavailable.'
+                    : 'Provider catalog entry.'}
               </div>
             )}
           </div>
         </DetailBlock>
+
+        {extension.executable ? (
+          <DetailBlock label="Executable hooks">
+            <div className="rounded border border-hairline bg-card px-3 py-2">
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-secondary">
+                <span className="rounded bg-white/5 px-1.5 py-0.5">{extension.executable.runtime}</span>
+                <span className="rounded bg-white/5 px-1.5 py-0.5">{extension.executable.scope}</span>
+                <span className="break-all font-mono text-muted">{extension.executable.command}</span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {extension.executable.hooks.map((hook) => (
+                  <span
+                    key={hook}
+                    className="rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[10px] text-secondary"
+                  >
+                    {hookLabel(hook)}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {extension.executable.capabilities.map((capability) => (
+                  <span
+                    key={capability}
+                    className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-muted"
+                  >
+                    {capability}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </DetailBlock>
+        ) : null}
 
         {extension.setupNotes?.length ? (
           <DetailBlock label="Setup">
@@ -485,8 +568,17 @@ function ExtensionDetail({
 
         {latest ? (
           <DetailBlock label="Installed">
-            <div className="text-[12px] leading-5 text-muted">
-              {new Date(latest.installedAt).toLocaleString()} · {latest.scope}
+            <div className="grid gap-3">
+              <div className="text-[12px] leading-5 text-muted">
+                {new Date(latest.installedAt).toLocaleString()} · {latest.scope}
+              </div>
+              {latest.executable ? (
+                <InstalledHookControls
+                  latest={latest}
+                  onUpdateRuntimeState={onUpdateRuntimeState}
+                  onRunDoctor={onRunDoctor}
+                />
+              ) : null}
             </div>
           </DetailBlock>
         ) : null}
@@ -622,6 +714,83 @@ function artifactIdentifier(extension: MarketplaceExtension['artifacts'][number]
   return 'packageName' in extension
     ? `${extension.packageName} / ${extension.cliSkillName ?? extension.skillName}`
     : extension.skillName
+}
+
+function hookLabel(hook: string): string {
+  if (hook === 'prompt-decoration') return 'Prompt decoration'
+  if (hook === 'review-provider-registration') return 'Review providers'
+  if (hook === 'quality-gate-observation') return 'Quality gate'
+  if (hook === 'retry-gating') return 'Retry gating'
+  return hook
+}
+
+function InstalledHookControls({
+  latest,
+  onUpdateRuntimeState,
+  onRunDoctor,
+}: {
+  latest: InstalledExtensionRecord
+  onUpdateRuntimeState: (
+    installationId: string,
+    patch: { trusted?: boolean; enabled?: boolean },
+  ) => void
+  onRunDoctor: (installationId: string) => void
+}) {
+  const executable = latest.executable
+  if (!executable) return null
+  const doctor = executable.doctorResult
+
+  return (
+    <div className="rounded border border-hairline bg-card px-3 py-2">
+      <div className="grid gap-2">
+        <label className="flex items-center justify-between gap-3 text-[12px] text-secondary">
+          <span>Trusted</span>
+          <input
+            type="checkbox"
+            checked={executable.trusted}
+            onChange={(event) =>
+              onUpdateRuntimeState(latest.id, {
+                trusted: event.currentTarget.checked,
+                enabled: event.currentTarget.checked ? executable.enabled : false,
+              })
+            }
+          />
+        </label>
+        <label className="flex items-center justify-between gap-3 text-[12px] text-secondary">
+          <span>Enabled</span>
+          <input
+            type="checkbox"
+            checked={executable.enabled}
+            disabled={!executable.trusted}
+            onChange={(event) =>
+              onUpdateRuntimeState(latest.id, { enabled: event.currentTarget.checked })
+            }
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline pt-3">
+        <div className="min-w-0 text-[11px] leading-5 text-muted">
+          {doctor ? (
+            <>
+              <span className={doctor.status === 'passed' ? 'text-accent-add' : 'text-accent-warn'}>
+                {doctor.status}
+              </span>
+              <span> · {doctor.message}</span>
+            </>
+          ) : (
+            'Doctor has not run.'
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => onRunDoctor(latest.id)}
+          className="shrink-0 rounded border border-hairline bg-canvas px-2 py-1 text-[11px] text-secondary transition-colors hover:bg-card-raised"
+        >
+          Doctor
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function skillsCliPreview(packageName: string, skillName?: string): string {

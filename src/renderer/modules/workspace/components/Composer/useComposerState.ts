@@ -112,6 +112,7 @@ function writeModelSelection(selection: ModelSelection): void {
 export interface UseComposerStateOptions {
   projectId: string
   prefillPrompt?: string
+  prefillPromptRevision?: number
 }
 
 export interface UseComposerStateResult {
@@ -148,6 +149,7 @@ export interface UseComposerStateResult {
 export function useComposerState({
   projectId,
   prefillPrompt,
+  prefillPromptRevision,
 }: UseComposerStateOptions): UseComposerStateResult {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachmentsState] = useState<AttachedImage[]>([])
@@ -196,7 +198,7 @@ export function useComposerState({
   useEffect(() => {
     if (prefillPrompt === undefined) return
     setDraft(prefillPrompt)
-  }, [prefillPrompt])
+  }, [prefillPrompt, prefillPromptRevision])
 
   // Router preview — only when auto selection and draft non-empty.
   useEffect(() => {

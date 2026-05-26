@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom'
 import type {
   AgentId,
   AgentApprovalMode,
+  AgentProfile,
   AgentThinkingLevel,
   ImageAttachment,
   Project,
@@ -23,6 +24,7 @@ import { Spinner } from '../../../../components/ui'
 import { AttachButton } from './AttachButton'
 import { AttachmentStrip } from './AttachmentStrip'
 import { ApprovalModeChip } from './ApprovalModeChip'
+import { BackgroundWaitNotice } from './BackgroundWaitNotice'
 import { ModelChip } from './ModelChip'
 import { SendButton } from './SendButton'
 import { SlashMentionPalette } from './SlashMentionPalette'
@@ -52,6 +54,7 @@ export interface ComposerStartedSession {
   agentId?: SupportedAgentId
   modelOverride?: string
   approvalMode?: AgentApprovalMode
+  profileId?: string
   thinking?: AgentThinkingLevel
   planMode?: boolean
 }
@@ -64,8 +67,12 @@ export interface ComposerProps {
   busy?: boolean
   /** Optional reason string shown in the status row when busy. */
   busyReason?: string
+  /** Optional non-blocking status surfaced above the input. */
+  backgroundNotice?: { message: string } | null
   /** Pre-populate the textarea (e.g., after forking a session). */
   prefillPrompt?: string
+  /** Monotonic signal that reapplies `prefillPrompt`, even if the text matches. */
+  prefillPromptRevision?: number
   /** Active session id — used to enable the Stop action. */
   activeSessionId?: string | null
   /** Active session status — distinguishes a stoppable run from other busy gates. */
@@ -89,6 +96,7 @@ export interface ComposerProps {
     agentId?: AgentId,
     modelOverride?: string,
     approvalMode?: AgentApprovalMode,
+    profileId?: string,
     thinking?: AgentThinkingLevel,
   ) => void | Promise<void>
   /** Starts the draft as a background child agent on the active thread. */
@@ -141,7 +149,9 @@ export function Composer({
   activeThreadId,
   busy = false,
   busyReason,
+  backgroundNotice = null,
   prefillPrompt,
+  prefillPromptRevision,
   activeSessionId,
   activeSessionStatus,
   onCancelSession,
@@ -154,7 +164,11 @@ export function Composer({
   onEnqueue,
   onDelegateTask,
 }: ComposerProps) {
-  const state = useComposerState({ projectId: project.id, prefillPrompt })
+  const state = useComposerState({
+    projectId: project.id,
+    prefillPrompt,
+    prefillPromptRevision,
+  })
   const {
     draft,
     setDraft,
@@ -178,6 +192,9 @@ export function Composer({
   } = state
 
   const [submitting, setSubmitting] = useState(false)
+  const [profiles, setProfiles] = useState<AgentProfile[]>([])
+  const [profileIssues, setProfileIssues] = useState(0)
+  const [selectedProfileId, setSelectedProfileId] = useState('')
   const [submitPhase, setSubmitPhase] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [cursorPosition, setCursorPosition] = useState(0)
@@ -203,9 +220,32 @@ export function Composer({
   }, [draft])
 
   useEffect(() => {
+    let cancelled = false
+    window.agentforge.agent
+      .listProfiles(project.id)
+      .then((result) => {
+        if (cancelled) return
+        setProfiles(result.profiles)
+        setProfileIssues(result.issues.length)
+        if (selectedProfileId && !result.profiles.some((profile) => profile.id === selectedProfileId)) {
+          setSelectedProfileId('')
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProfiles([])
+          setProfileIssues(0)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project.id, selectedProfileId])
+
+  useEffect(() => {
     if (prefillPrompt === undefined) return
     window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
-  }, [prefillPrompt])
+  }, [prefillPrompt, prefillPromptRevision])
 
   const slashTrigger = useMemo(
     () => findActiveSlashMentionTrigger(draft, cursorPosition),
@@ -301,6 +341,7 @@ export function Composer({
           manualOption?.agentId,
           manualOption?.modelId,
           approvalMode,
+          selectedProfileId || undefined,
           modelSelection.thinking,
         )
         setDraft('')
@@ -318,7 +359,7 @@ export function Composer({
     }
 
     setSubmitting(true)
-    setSubmitPhase('Preparing context')
+    setSubmitPhase(null)
     setError(null)
     const startedAt = Date.now()
     const sentAttachments = attachments.map((image) => image.attachment)
@@ -328,6 +369,7 @@ export function Composer({
       const result = await window.agentforge.agent.dispatch({
         projectId: project.id,
         prompt: effectivePrompt,
+        profileId: selectedProfileId || undefined,
         agentId: manualOption?.agentId,
         modelOverride: manualOption?.modelId,
         approvalMode,
@@ -336,7 +378,6 @@ export function Composer({
         threadId: activeThreadId ?? undefined,
         planMode: planMode || undefined,
       })
-      setSubmitPhase('Starting session')
       onSessionStarted({
         sessionId: result.sessionId,
         threadId: result.threadId,
@@ -377,6 +418,7 @@ export function Composer({
     planMode,
     project.id,
     routerPreview,
+    selectedProfileId,
     setDraft,
     setError,
     setPlanMode,
@@ -395,6 +437,44 @@ export function Composer({
       setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel session')
     }
   }, [activeSessionId, onCancelSession, setError])
+
+  const handleMultitask = useCallback(async () => {
+    const effectivePrompt = draft.trim()
+    if (!effectivePrompt || submitting) return
+
+    setSubmitting(true)
+    setError(null)
+    const startedAt = Date.now()
+    const sentAttachments = attachments.map((a) => a.attachment)
+
+    try {
+      const result = await window.agentforge.multitask.decompose({
+        projectId: project.id,
+        prompt: effectivePrompt,
+        threadId: activeThreadId ?? undefined,
+        imageAttachments: sentAttachments,
+      })
+
+      onSessionStarted({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt: effectivePrompt,
+        imageAttachments: sentAttachments,
+        routingDecision: null,
+        createdAt: startedAt,
+      })
+
+      setDraft('')
+      clearAttachments()
+      window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
+    } catch (multitaskError: unknown) {
+      setError(
+        multitaskError instanceof Error ? multitaskError.message : 'Failed to decompose tasks',
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }, [activeThreadId, attachments, clearAttachments, draft, onSessionStarted, project.id, setDraft, setError, submitting])
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -460,6 +540,28 @@ export function Composer({
       textarea.setSelectionRange(next.cursorPosition, next.cursorPosition)
       autosizeTextarea(textarea)
     })
+  }
+
+  function selectProfile(profileId: string) {
+    setSelectedProfileId(profileId)
+    const profile = profiles.find((item) => item.id === profileId)
+    if (!profile) return
+
+    if (profile.defaultAgentId && profile.defaultModel) {
+      setModelSelection({
+        kind: 'manual',
+        agentId: profile.defaultAgentId,
+        modelId: profile.defaultModel,
+        thinking: profile.thinking,
+      })
+    } else if (profile.thinking) {
+      setModelSelection(
+        modelSelection.kind === 'manual'
+          ? { ...modelSelection, thinking: profile.thinking }
+          : { kind: 'auto', thinking: profile.thinking },
+      )
+    }
+    if (profile.approvalMode) setApprovalMode(profile.approvalMode)
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
@@ -559,11 +661,13 @@ export function Composer({
 
   const hasContent = draft.trim().length > 0 || attachments.length > 0
   const queueAllowed = busy && !awaitingInput && Boolean(onEnqueue)
-  const delegateAllowed = Boolean(activeThreadId && activeSessionId && onDelegateTask)
   const canSend = hasContent && !attaching && (!busy || queueAllowed)
   const showRouterPreview = modelSelection.kind === 'auto' && draft.trim().length > 0
+  const inputBlocked = busy && !queueAllowed
   const placeholder = awaitingInput
-    ? 'Answer the agent question above'
+    ? 'Respond to the pending agent request above'
+    : inputBlocked && busyReason
+      ? busyReason
     : queueAllowed
       ? 'Queue a follow-up message…'
       : activeThreadId
@@ -575,47 +679,18 @@ export function Composer({
       ? 'Queue message'
       : undefined
 
-  const delegateDraft = useCallback(async () => {
-    const goal = draft.trim()
-    if (!goal || submitting || attaching || !onDelegateTask) return
-
-    setSubmitting(true)
-    setSubmitPhase('Delegating task')
-    setError(null)
-    try {
-      await onDelegateTask(goal, {
-        approvalMode,
-        thinking: modelSelection.thinking,
-      })
-      setDraft('')
-      clearAttachments()
-      window.requestAnimationFrame(() => autosizeTextarea(textareaRef.current))
-    } catch (delegateError: unknown) {
-      setError(
-        delegateError instanceof Error ? delegateError.message : 'Failed to delegate task',
-      )
-    } finally {
-      setSubmitting(false)
-      setSubmitPhase(null)
-    }
-  }, [
-    approvalMode,
-    attaching,
-    clearAttachments,
-    draft,
-    modelSelection.thinking,
-    onDelegateTask,
-    setDraft,
-    setError,
-    submitting,
-  ])
-
   const wrapperBorderClass = 'border-hairline focus-within:border-white/15'
   // Soft accent glow breathing behind the bar while the agent runs a turn.
   const wrapperGlowClass = ''
 
   return (
     <form onSubmit={handleSubmit} className="w-full pb-1 pt-2">
+      {backgroundNotice ? (
+        <div className="mb-3">
+          <BackgroundWaitNotice message={backgroundNotice.message} />
+        </div>
+      ) : null}
+
       <div
         className={`rounded-bubble border bg-card ${wrapperBorderClass} ${wrapperGlowClass}`}
       >
@@ -639,7 +714,7 @@ export function Composer({
           className="block w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-primary outline-none placeholder:text-muted"
           style={{ minHeight: MIN_TEXTAREA_HEIGHT, maxHeight: MAX_TEXTAREA_HEIGHT }}
           placeholder={placeholder}
-          disabled={submitting || attaching}
+          disabled={submitting || attaching || inputBlocked}
           aria-label="Message composer"
         />
 
@@ -692,26 +767,22 @@ export function Composer({
               disabled={submitting}
               onFilesSelected={(files) => void attachImageFiles(files)}
             />
+            {profiles.length > 0 ? (
+              <ProfileSelect
+                profiles={profiles}
+                issueCount={profileIssues}
+                value={selectedProfileId}
+                onChange={selectProfile}
+              />
+            ) : null}
             <ApprovalModeChip mode={approvalMode} onChange={setApprovalMode} />
             {!running ? (
-              <button
-                type="button"
-                onClick={() => setPlanMode(!planMode)}
-                aria-pressed={planMode}
-                title={
-                  planMode
-                    ? 'Plan mode on — the agent drafts a plan and waits for your approval before executing'
-                    : 'Plan mode off — the agent starts work immediately'
-                }
-                className={`flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
-                  planMode
-                    ? 'bg-accent-primary/20 text-accent-primary'
-                    : 'text-muted hover:bg-white/5 hover:text-secondary'
-                }`}
-              >
-                <PlanModeIcon />
-                Plan
-              </button>
+              <ComposerModeChip
+                planMode={planMode}
+                onTogglePlan={() => setPlanMode(!planMode)}
+                onMultitask={() => void handleMultitask()}
+                multitaskDisabled={!draft.trim() || submitting || attaching}
+              />
             ) : null}
             {onOpenSwarm ? (
               <button
@@ -722,18 +793,6 @@ export function Composer({
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary"
               >
                 <BeeIcon />
-              </button>
-            ) : null}
-            {delegateAllowed ? (
-              <button
-                type="button"
-                onClick={() => void delegateDraft()}
-                disabled={!draft.trim() || submitting || attaching}
-                aria-label="Delegate draft to background agent"
-                title="Delegate draft to background agent"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <DelegateIcon />
               </button>
             ) : null}
             {busyReason && !queueAllowed ? (
@@ -821,6 +880,136 @@ function DropzoneOverlay() {
   )
 }
 
+function ComposerModeChip({
+  planMode,
+  onTogglePlan,
+  onMultitask,
+  multitaskDisabled,
+}: {
+  planMode: boolean
+  onTogglePlan: () => void
+  onMultitask: () => void
+  multitaskDisabled: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        title={
+          planMode
+            ? 'Plan mode on — click to change mode'
+            : 'Click to set execution mode (Plan, Multitask)'
+        }
+        className={`flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
+          planMode
+            ? 'bg-accent-primary/20 text-accent-primary'
+            : 'text-muted hover:bg-white/5 hover:text-secondary'
+        }`}
+      >
+        <PlanModeIcon />
+        {planMode ? 'Plan' : 'Mode'}
+        <ChevronDownIcon />
+      </button>
+
+      {open ? (
+        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] overflow-hidden rounded-card border border-hairline bg-card-raised shadow-lg">
+          <button
+            type="button"
+            onClick={() => {
+              if (planMode) onTogglePlan()
+              setOpen(false)
+            }}
+            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${
+              !planMode ? 'font-semibold text-accent-primary' : 'text-secondary'
+            }`}
+          >
+            <SendIcon size={11} />
+            Execute immediately
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!planMode) onTogglePlan()
+              setOpen(false)
+            }}
+            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${
+              planMode ? 'font-semibold text-accent-primary' : 'text-secondary'
+            }`}
+          >
+            <PlanModeIcon />
+            Plan first, then execute
+          </button>
+          <div className="border-t border-hairline" />
+          <button
+            type="button"
+            disabled={multitaskDisabled}
+            onClick={() => {
+              setOpen(false)
+              onMultitask()
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-secondary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <MultitaskIcon />
+            Decompose into parallel tasks
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ProfileSelect({
+  profiles,
+  issueCount,
+  value,
+  onChange,
+}: {
+  profiles: AgentProfile[]
+  issueCount: number
+  value: string
+  onChange: (profileId: string) => void
+}) {
+  return (
+    <label className="relative">
+      <span className="sr-only">Agent profile</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        title={issueCount > 0 ? `${issueCount} profile issue${issueCount === 1 ? '' : 's'} in Doctor` : 'Agent profile'}
+        className="h-6 max-w-[180px] rounded border border-hairline bg-card-raised px-2 pr-6 text-[11px] text-secondary outline-none transition hover:border-white/15 hover:text-primary focus:border-accent-primary/40"
+      >
+        <option value="">Profile: none</option>
+        {profiles.map((profile) => (
+          <option key={profile.id} value={profile.id}>
+            {profile.name}
+          </option>
+        ))}
+      </select>
+      {issueCount > 0 ? (
+        <span
+          aria-hidden="true"
+          className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent-warn"
+        />
+      ) : null}
+    </label>
+  )
+}
+
 /** Checklist-with-tick glyph for the composer's plan-mode toggle. */
 function PlanModeIcon() {
   return (
@@ -869,26 +1058,60 @@ function BeeIcon() {
   )
 }
 
-function DelegateIcon() {
+function ChevronDownIcon() {
   return (
     <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
+      width="8"
+      height="8"
+      viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.9"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M5 6h6" />
-      <path d="M5 12h4" />
-      <path d="M5 18h6" />
-      <path d="M14 7h2a3 3 0 0 1 3 3v1" />
-      <path d="M14 17h2a3 3 0 0 0 3-3v-1" />
-      <path d="m17 10 2 2 2-2" />
-      <path d="m17 14 2-2 2 2" />
+      <path d="m4 6 4 4 4-4" />
+    </svg>
+  )
+}
+
+function SendIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="12" y1="19" x2="12" y2="5" />
+      <polyline points="5 12 12 5 19 12" />
+    </svg>
+  )
+}
+
+function MultitaskIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
     </svg>
   )
 }

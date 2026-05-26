@@ -32,6 +32,7 @@ describe('gitTuiState', () => {
     expect(resolveGitTuiKeyCommand({ key: ':' })).toEqual({ type: 'show-palette' })
     expect(resolveGitTuiKeyCommand({ key: 'p' })).toEqual({ type: 'pull' })
     expect(resolveGitTuiKeyCommand({ key: 'P' })).toEqual({ type: 'push' })
+    expect(resolveGitTuiKeyCommand({ key: 'n' })).toEqual({ type: 'create-branch' })
   })
 
   it('maps c to commit and u to unstage', () => {
@@ -78,6 +79,9 @@ describe('gitTuiState', () => {
     expect(resolveGitTuiActionForCommand({ type: 'pull' }, 'status', selected)).toEqual({
       type: 'pull',
     })
+    expect(
+      resolveGitTuiActionForCommand({ type: 'create-branch' }, 'branches', selected),
+    ).toEqual({ type: 'create-branch' })
   })
 
   it('resolves unstage command for staged files', () => {

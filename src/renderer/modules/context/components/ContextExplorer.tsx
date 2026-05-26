@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   PromptEvidenceRecord,
   Project,
@@ -48,6 +48,7 @@ export function ContextExplorer({
   })
   const [query, setQuery] = useState('')
   const [indexing, setIndexing] = useState(false)
+  const searchVersionRef = useRef(0)
 
   const loadStatus = useCallback(async () => {
     setStatusState({ kind: 'loading' })
@@ -131,6 +132,8 @@ export function ContextExplorer({
       return
     }
 
+    const searchVersion = searchVersionRef.current + 1
+    searchVersionRef.current = searchVersion
     setSearchState({ kind: 'loading' })
     try {
       const results = await window.agentforge.context.search({
@@ -138,10 +141,13 @@ export function ContextExplorer({
         query: trimmed,
         limit: 8,
       })
+      if (searchVersionRef.current !== searchVersion) return
       setSearchState({ kind: 'ready', query: trimmed, results })
       const status = await window.agentforge.context.status(project.id)
+      if (searchVersionRef.current !== searchVersion) return
       setStatusState({ kind: 'ready', status })
     } catch (error: unknown) {
+      if (searchVersionRef.current !== searchVersion) return
       setSearchState({
         kind: 'error',
         query: trimmed,
