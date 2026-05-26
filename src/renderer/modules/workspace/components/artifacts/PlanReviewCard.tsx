@@ -1,187 +1,60 @@
 import { useEffect, useMemo, useState } from 'react'
 import type {
-  AgentDispatchResult,
   AgentModelCatalog,
-  AgentPlanReviewDecisionPayload,
   SupportedAgentId,
 } from '../../../../../shared/types'
-import { SUPPORTED_AGENT_IDS } from '../../../../../shared/types'
+import type { MultitaskDecomposeResult } from '../../../../../shared/contracts/multitask'
 import { Button } from '../../../../components/ui'
 import { ModelChip } from '../Composer/ModelChip'
 import {
   FALLBACK_MODEL_CATALOGS,
   groupModelOptions,
 } from '../Composer/modelCatalog'
-import { formatModelLabel } from '../Composer/modelDisplay'
-import type { ModelGroup, ModelOption, ModelSelection } from '../Composer/types'
+import type { ModelSelection } from '../Composer/types'
 import type { MarkdownPreviewDocument } from '../MarkdownPreviewer'
+import {
+  buildPlanReviewDecisionPayload,
+  buildPlanReviewMultitaskRequest,
+  findPlanReviewManualOption,
+  isSupportedAgentId,
+  normalizePlanReviewText,
+  resolvePlanReviewOutcome,
+  selectPlanReviewModel,
+  toPlanReviewMarkdownDocument,
+  type PlanReviewOutcome,
+} from './planReviewCardState'
 
 export interface PlanReviewCardProps {
   /** Identifier from the `plan-review` activity — echoed back to main. */
   reviewId: string
   /** The planning session that produced the plan above this card. */
   sessionId: string
+  /** Project that owns the planning session and follow-up multitask run. */
+  projectId: string
+  /** Thread that owns the planning session and follow-up multitask run. */
+  threadId?: string | null
   /** The assistant plan text rendered directly above this review control. */
   planText?: string
   /** Agent that produced the plan — used to scope the model picker. */
   agentId?: string
   /** Model that produced the plan — used as the default in the model picker. */
   planningModel?: string
+  onMultitaskSessionStarted?: (session: {
+    sessionId: string
+    threadId: string
+    prompt: string
+    routingDecision: null
+    createdAt: number
+  }) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
-}
-
-/**
- * The terminal state of a plan review:
- *  - `approved` — the gated execution session was dispatched.
- *  - `rejected` — the plan was discarded.
- *  - `stale`    — main returned no execution session for an approval, so the
- *                 review was already resolved (or its session is gone). The
- *                 card must not claim execution is underway in this case.
- */
-export type PlanReviewOutcome = 'approved' | 'rejected' | 'stale'
-
-/**
- * Maps a submitted decision and the main-process response into the card's
- * terminal state.
- *
- * `planReviewDecision` resolves with the execution session on a successful
- * approval, or `null` when main no longer knows the review (already resolved,
- * or the planning session was cancelled). A `null` for an `approve` therefore
- * means nothing was dispatched — the card reports `stale` instead of falsely
- * claiming execution has begun. A `reject` always resolves with `null` by
- * contract, so it maps straight to `rejected`.
- */
-export function resolvePlanReviewOutcome(
-  choice: 'approve' | 'reject',
-  result: AgentDispatchResult | null,
-): PlanReviewOutcome {
-  if (choice === 'reject') return 'rejected'
-  return result ? 'approved' : 'stale'
-}
-
-export function normalizePlanReviewText(
-  value: string | null | undefined,
-): string | undefined {
-  const normalized = value?.trim()
-  return normalized ? normalized : undefined
-}
-
-export function buildPlanReviewDecisionPayload(input: {
-  reviewId: string
-  sessionId: string
-  choice: 'approve' | 'reject'
-  originalPlanText?: string
-  editedPlanText?: string
-  suggestionText?: string
-  planningAgentId?: string
-  agentOverride?: string
-  planningModel?: string
-  modelOverride?: string
-}): AgentPlanReviewDecisionPayload {
-  const payload: AgentPlanReviewDecisionPayload = {
-    reviewId: input.reviewId,
-    sessionId: input.sessionId,
-    decision: input.choice,
-  }
-
-  if (input.choice !== 'approve') return payload
-
-  const originalPlanText = normalizePlanReviewText(input.originalPlanText)
-  const editedPlanText = normalizePlanReviewText(input.editedPlanText)
-  const suggestionText = normalizePlanReviewText(input.suggestionText)
-
-  if (editedPlanText && editedPlanText !== originalPlanText) {
-    payload.editedPlanText = editedPlanText
-  }
-  if (suggestionText) payload.suggestionText = suggestionText
-  if (
-    isSupportedAgentId(input.agentOverride) &&
-    input.agentOverride !== input.planningAgentId &&
-    input.modelOverride
-  ) {
-    payload.agentId = input.agentOverride
-  }
-  if (
-    input.modelOverride &&
-    (input.modelOverride !== input.planningModel || payload.agentId)
-  ) {
-    payload.modelOverride = input.modelOverride
-  }
-
-  return payload
-}
-
-export function toPlanReviewMarkdownDocument(
-  planText: string,
-): MarkdownPreviewDocument {
-  const normalized = planText.trim()
-  return {
-    title: 'Plan review.md',
-    content: normalized || '_No plan text was captured for this review._',
-    sourceLabel: 'Plan review',
-    suggestedFileName: 'plan-review.md',
-  }
 }
 
 function canPreviewPlan(planText?: string): planText is string {
   return typeof planText === 'string' && planText.trim().length > 0
 }
 
-function isSupportedAgentId(value: unknown): value is SupportedAgentId {
-  return typeof value === 'string' && SUPPORTED_AGENT_IDS.includes(value as SupportedAgentId)
-}
-
 function toSupportedAgentId(value: unknown): SupportedAgentId | undefined {
   return isSupportedAgentId(value) ? value : undefined
-}
-
-export function selectPlanReviewModel(
-  groups: readonly ModelGroup[],
-  planningAgentId?: SupportedAgentId,
-  planningModel?: string,
-): ModelSelection | null {
-  const plannedOption = groups
-    .find((group) => group.agentId === planningAgentId)
-    ?.options.find((option) => option.modelId === planningModel)
-  const sameAgentOption = groups.find((group) => group.agentId === planningAgentId)
-    ?.options[0]
-  const fallbackOption = plannedOption ?? sameAgentOption ?? groups[0]?.options[0]
-
-  if (fallbackOption) {
-    return {
-      kind: 'manual',
-      agentId: fallbackOption.agentId,
-      modelId: fallbackOption.modelId,
-    }
-  }
-
-  if (planningAgentId && planningModel) {
-    return { kind: 'manual', agentId: planningAgentId, modelId: planningModel }
-  }
-
-  return null
-}
-
-export function findPlanReviewManualOption(
-  groups: readonly ModelGroup[],
-  selection: ModelSelection | null,
-): ModelOption | null {
-  if (selection?.kind !== 'manual') return null
-
-  const option = groups
-    .find((group) => group.agentId === selection.agentId)
-    ?.options.find((candidate) => candidate.modelId === selection.modelId)
-
-  if (option) return option
-
-  return {
-    key: `${selection.agentId}:${selection.modelId}`,
-    agentId: selection.agentId,
-    agentName: selection.agentId,
-    modelId: selection.modelId,
-    label: formatModelLabel(selection.agentId, selection.modelId),
-    tier: 'balanced',
-  }
 }
 
 /**
@@ -199,9 +72,12 @@ export function findPlanReviewManualOption(
 export function PlanReviewCard({
   reviewId,
   sessionId,
+  projectId,
+  threadId,
   planText,
   agentId,
   planningModel,
+  onMultitaskSessionStarted,
   onPreviewMarkdown,
 }: PlanReviewCardProps) {
   const [decision, setDecision] = useState<PlanReviewOutcome | null>(null)
@@ -258,6 +134,39 @@ export function PlanReviewCard({
     const fallback = selectPlanReviewModel(modelGroups, planningAgentId, planningModel)
     if (fallback) setSelectedModel(fallback)
   }, [modelGroups, planningAgentId, planningModel, selectedModel])
+
+  const handleMultitaskBuild = async () => {
+    if (pending || decision !== null) return
+    setPending(true)
+    setError(null)
+    try {
+      const planContext = normalizePlanReviewText(editedPlanText) ?? planText ?? ''
+      const startedAt = Date.now()
+      const result: MultitaskDecomposeResult = await window.agentforge.multitask.decompose(
+        buildPlanReviewMultitaskRequest({
+          projectId,
+          threadId,
+          planText: planContext,
+        }),
+      )
+      onMultitaskSessionStarted?.({
+        sessionId: result.sessionId,
+        threadId: result.threadId,
+        prompt: planContext,
+        routingDecision: null,
+        createdAt: startedAt,
+      })
+      setDecision('approved')
+    } catch (multitaskError: unknown) {
+      setError(
+        multitaskError instanceof Error
+          ? multitaskError.message
+          : 'Failed to decompose plan into multitask',
+      )
+    } finally {
+      setPending(false)
+    }
+  }
 
   const decide = async (choice: 'approve' | 'reject') => {
     if (pending || decision !== null) return
@@ -417,6 +326,14 @@ export function PlanReviewCard({
               disabled={pending}
             >
               Reject
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void handleMultitaskBuild()}
+              disabled={pending}
+            >
+              Build with Multitask
             </Button>
             <Button
               variant="primary"

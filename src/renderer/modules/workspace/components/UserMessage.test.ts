@@ -35,4 +35,16 @@ describe('UserMessage', () => {
     expect(html).toContain('Please implement the approved plan.')
     expect(html).not.toContain('Execution session started')
   })
+
+  it('shows a restore action when a stopped prompt can be edited', () => {
+    const html = renderToStaticMarkup(
+      createElement(UserMessage, {
+        text: 'Continue this stopped prompt',
+        onRestoreDraft: () => undefined,
+      }),
+    )
+
+    expect(html).toContain('aria-label="Edit stopped prompt"')
+    expect(html).toContain('Continue this stopped prompt')
+  })
 })

@@ -228,6 +228,8 @@ describe('sessionsStore', () => {
     const active = createThreadSession(thread.id, project.id, 'active prompt', 4_000)
 
     addAssistantMessage(first.id, 'first answer')
+    addToolCall(first.id, 'git status')
+    addFileChange(first.id, 'src/app.ts')
     addAssistantMessage(second.id, 'second answer')
     addAssistantMessage(third.id, 'third answer')
     addAssistantMessage(active.id, 'active answer')
@@ -247,6 +249,11 @@ describe('sessionsStore', () => {
           sessionId: turn.sessionId,
           prompt: turn.prompt,
           imageAttachments: turn.imageAttachments,
+          events: turn.events.map((event) =>
+            event.type === 'activity' && isRecord(event.payload)
+              ? { type: event.type, kind: event.payload.kind }
+              : { type: event.type },
+          ),
           assistantText: turn.assistantText,
         })),
     ).toEqual([
@@ -261,21 +268,58 @@ describe('sessionsStore', () => {
             size: 1_024,
           },
         ],
+        events: [
+          { type: 'activity', kind: 'message' },
+          { type: 'activity', kind: 'tool-call' },
+          { type: 'activity', kind: 'file-change' },
+        ],
         assistantText: 'first answer',
       },
       {
         sessionId: second.id,
         prompt: 'second prompt',
         imageAttachments: undefined,
+        events: [{ type: 'activity', kind: 'message' }],
         assistantText: 'second answer',
       },
       {
         sessionId: third.id,
         prompt: 'third prompt',
         imageAttachments: undefined,
+        events: [{ type: 'activity', kind: 'message' }],
         assistantText: 'third answer',
       },
     ])
+  })
+
+  it('can exclude spawned background sessions from thread transcript turns', () => {
+    const project = createProject()
+    const thread = threadsStore.create({ projectId: project.id, title: 'Background thread' })
+
+    const parent = createThreadSession(thread.id, project.id, 'parent prompt', 1_000)
+    const worker = sessionsStore.create({
+      projectId: project.id,
+      threadId: thread.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: 'worker prompt',
+      spawnedAgent: { kind: 'swarm', role: 'Worker 1' },
+      status: 'done',
+      createdAt: 2_000,
+      completedAt: 2_100,
+    })
+    const finalizer = createThreadSession(thread.id, project.id, 'finalizer prompt', 3_000)
+
+    expect(
+      sessionsStore
+        .listThreadTranscript(thread.id, { limit: 10, excludeSpawnedAgents: true })
+        .map((turn) => turn.sessionId),
+    ).toEqual([parent.id, finalizer.id])
+    expect(
+      sessionsStore
+        .listThreadTranscript(thread.id, { limit: 10 })
+        .map((turn) => turn.sessionId),
+    ).toEqual([parent.id, worker.id, finalizer.id])
   })
 })
 
@@ -320,4 +364,33 @@ function addAssistantMessage(sessionId: string, text: string): void {
     payload: { kind: 'message', role: 'assistant', text },
     timestamp: Date.now(),
   })
+}
+
+function addToolCall(sessionId: string, name: string): void {
+  sessionsStore.addEvent({
+    type: 'activity',
+    sessionId,
+    payload: { kind: 'tool-call', name, status: 'done' },
+    timestamp: Date.now(),
+  })
+}
+
+function addFileChange(sessionId: string, filePath: string): void {
+  sessionsStore.addEvent({
+    type: 'activity',
+    sessionId,
+    payload: {
+      kind: 'file-change',
+      filePath,
+      changeType: 'modified',
+      additions: 2,
+      deletions: 1,
+      status: 'applied',
+    },
+    timestamp: Date.now(),
+  })
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }

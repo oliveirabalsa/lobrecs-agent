@@ -4,6 +4,7 @@ import { estimateCost } from '../cost'
 import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
 import { delegateTask } from '../modules/agents/application/delegateTask'
+import { automationSchedulerService } from '../modules/automations/application/automationSchedulerService'
 import { registerAutomationHandlers } from '../modules/automations/ipc/registerAutomationHandlers'
 import { registerCostHandlers } from '../modules/cost/ipc/registerCostHandlers'
 import { registerContextHandlers, repositoryContextService } from '../modules/context'
@@ -22,6 +23,7 @@ import { registerSessionHandlers } from '../modules/sessions/ipc/registerSession
 import { registerSettingsHandlers, settingsService } from '../modules/settings'
 import type { MainIpcContext } from '../modules/shared/ipcContext'
 import { registerSpecHandlers } from '../modules/specs/ipc/registerSpecHandlers'
+import { registerMultitaskHandlers } from '../modules/multitask/ipc/registerMultitaskHandlers'
 import { registerSwarmHandlers } from '../modules/swarms/ipc/registerSwarmHandlers'
 import { registerSystemHandlers } from '../modules/system/ipc/registerSystemHandlers'
 import { registerThreadHandlers } from '../modules/threads/ipc/registerThreadHandlers'
@@ -55,16 +57,17 @@ export function registerIpcHandlers(): void {
   configureNotifications(context)
 
   registerProjectHandlers()
-  registerReviewHandlers()
+  registerReviewHandlers(context)
   registerSessionHandlers()
   registerThreadHandlers()
   registerAgentHandlers(context)
   registerSwarmHandlers(context)
+  registerMultitaskHandlers(context)
   registerRoutingHandlers(context)
   registerFeedbackHandlers(context)
   registerCostHandlers(context)
   registerContextHandlers(context)
-  registerExtensionHandlers(extensionMarketplaceService)
+  registerExtensionHandlers(context)
   registerMemoryHandlers(context)
   registerAutomationHandlers(context)
   registerSpecHandlers(context)
@@ -84,6 +87,7 @@ function createMainIpcContext(): MainIpcContext {
     repositoryContext: repositoryContextService,
     sessionManager,
     settingsService,
+    extensionMarketplaceService,
     swarmOrchestrator,
     worktreeManager,
   }
@@ -91,6 +95,7 @@ function createMainIpcContext(): MainIpcContext {
 
 function configureNotifications(context: MainIpcContext): void {
   context.sessionManager.setNotifier((event) => {
+    automationSchedulerService.handleNotifierEvent(event)
     const dispatch = mapNotifierEventToDispatch(event)
     if (dispatch) context.notificationService.dispatch(dispatch)
   })
@@ -159,7 +164,31 @@ function configureSessionManager(context: MainIpcContext): void {
     estimateCost(model, tokensIn, tokensOut, context.settingsService.getGlobal().costs.pricing),
   )
   context.sessionManager.setContextResolver((input) =>
-    buildSessionContext(context, input.projectId, input.repoPath, input.prompt, input.baseContext),
+    buildSessionContext(
+      context,
+      input.projectId,
+      input.repoPath,
+      input.prompt,
+      input.baseContext,
+      input.planMode ?? false,
+    ),
+  )
+  context.sessionManager.setPromptDecorator((input) =>
+    context.extensionMarketplaceService.decoratePrompt({
+      projectId: input.projectId,
+      projectPath: input.repoPath,
+      prompt: input.prompt,
+      agentId: input.agentId,
+    }),
+  )
+  context.sessionManager.setRetryGate((input) =>
+    context.extensionMarketplaceService.shouldAllowRetry({
+      projectId: input.projectId,
+      projectPath: input.repoPath,
+      sessionId: input.sessionId,
+      reason: input.reason,
+      nextModel: input.nextModel,
+    }),
   )
   context.sessionManager.setQualityGateRunner((input) =>
     runQualityGate(input, {
@@ -178,6 +207,9 @@ function configureSessionManager(context: MainIpcContext): void {
         return { recipeId: last.recipeId, exitCode: last.exitCode, phase: last.phase }
       },
       isRepairInFlight: () => context.sessionManager.hasActiveRepairSession(),
+      observeQualityGate: (hookInput) =>
+        context.extensionMarketplaceService.observeQualityGate(hookInput),
+      gateRetry: (hookInput) => context.extensionMarketplaceService.shouldAllowRetry(hookInput),
       dispatchRepair: async (repairInput) => {
         const settings = context.settingsService.getEffective(repairInput.projectId).settings
         return context.sessionManager.dispatch({
@@ -254,12 +286,14 @@ async function buildSessionContext(
   repoPath: string,
   prompt: string,
   baseContext?: string | null,
+  planMode = false,
 ): Promise<string | null> {
   const projectContext = (baseContext ?? projectsStore.getContext(projectId))?.trim()
   const repositoryContext = await context.repositoryContext.buildPromptContext({
     projectId,
     repoPath,
     prompt,
+    freshness: planMode ? 'blocking' : 'opportunistic',
   })
   const memoryContext = await context.projectMemoryService.buildPromptContext({
     repoPath,
@@ -270,7 +304,13 @@ async function buildSessionContext(
     [
       { title: 'Project instructions:', content: projectContext, maxChars: 4_000 },
       { title: 'Project memory:', content: memoryContext, maxChars: 3_000 },
-      { title: 'Repository evidence:', content: repositoryContext, maxChars: 12_000 },
+      {
+        title: planMode
+          ? 'Plan-mode repository investigation:'
+          : 'Repository evidence:',
+        content: repositoryContext,
+        maxChars: 12_000,
+      },
       { title: 'Delegation guidance:', content: DELEGATION_CONTEXT, maxChars: 1_000 },
     ],
     { maxChars: 20_000 },

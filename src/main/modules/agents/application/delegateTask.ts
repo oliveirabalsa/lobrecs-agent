@@ -5,6 +5,10 @@ import { feedbackStore, projectsStore, sessionsStore } from '../../../store'
 import { requireProject } from '../../projects/application/requireProject'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import {
+  getAgentProfile,
+  promptWithAgentProfile,
+} from './agentProfileService'
+import {
   runtimeSettingsWithApprovalMode,
   runtimeSettingsWithThinkingLevel,
 } from '../domain/approvalMode'
@@ -32,7 +36,11 @@ export async function delegateTask(
   }
 
   const settings = context.settingsService.getEffective(project.id).settings
-  const prompt = buildDelegatedTaskPrompt(goal, params.context)
+  const profile = await getAgentProfile(project.id, params.profileId)
+  if (params.profileId && !profile) {
+    throw new Error(`Agent profile not found: ${params.profileId}`)
+  }
+  const prompt = promptWithAgentProfile(buildDelegatedTaskPrompt(goal, params.context), profile)
   const recentFailures = feedbackStore.getRecentFailures(project.id).map((failure) => ({
     prompt: failure.prompt,
     tier: modelTierFromModel(failure.model),
@@ -40,7 +48,8 @@ export async function delegateTask(
   }))
   const decision = await context.modelRouter.route({
     prompt,
-    preferredAgentId: settings.agents.defaultAgentId,
+    preferredAgentId: profile?.defaultAgentId ?? settings.agents.defaultAgentId,
+    modelOverride: profile?.defaultModel,
     projectId: project.id,
     recentFailures,
     autoAgentSelection: true,
@@ -49,9 +58,9 @@ export async function delegateTask(
     runtimeSettingsWithThinkingLevel(
       settings.agents.runtimes[decision.agentId],
       decision.agentId,
-      params.thinking,
+      params.thinking ?? profile?.thinking,
     ),
-    params.approvalMode ?? 'auto-safe',
+    params.approvalMode ?? profile?.approvalMode ?? 'auto-safe',
     settings.execution.defaultApprovalMode,
   )
   const delegationId = randomUUID()
@@ -104,6 +113,7 @@ export function buildDelegatedTaskPrompt(
     '- Return a concise final summary with concrete findings, decisions, or next steps.',
     '- Do not ask the user questions; state assumptions if the task is under-specified.',
     '- Do not modify files unless the delegated goal explicitly asks for code changes.',
+    '- When writing your final summary, describe only the changes you made during this task — do not cite git status counts, untracked totals, or aggregate working-tree numbers, since those reflect pre-existing state.',
   ]
 
   const trimmedContext = context?.trim()

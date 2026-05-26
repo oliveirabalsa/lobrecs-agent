@@ -6,7 +6,8 @@
  *  1. Planning — the agent receives the user's task as the task, with
  *     `buildPlanModeContext` appended to adapter context. Keeping the actual
  *     task in the prompt prevents the agent from planning how to create a
- *     plan.
+ *     plan. The planning agent may inspect the repository with read-only
+ *     commands, but must not make code changes.
  *  2. Execution — only after the user approves the plan, a second session is
  *     dispatched on the same thread with `buildPlanExecutionPrompt`. Because
  *     thread history is replayed into the adapter context (see
@@ -27,13 +28,41 @@ const PLAN_MODE_CONTEXT = [
   'actual work request, even if the UI says the user asked for a plan.',
   '',
   'Your response must be the implementation plan itself. Start directly with',
-  'the concrete implementation steps for the requested change, then list the',
-  'files you expect to create or modify, verification you will run, and any',
-  'real risks worth flagging.',
+  'the concrete implementation plan for the requested change. The plan must',
+  'be detailed enough that an implementation agent can execute it without',
+  'creating another plan first.',
   '',
-  'This phase is read-only. Do NOT edit files. Do NOT run commands, and do not',
-  'produce patch hunks, code blocks, or implementation output. If the request needs code',
-  'changes, describe them in the plan and stop there.',
+  'The app may have injected project instructions, a repository symbol map,',
+  'retrieved snippets, current file structure, and thread history. Treat that',
+  'context as starting evidence, not a substitute for live investigation.',
+  'Before writing the plan, actively inspect the repository structure, search',
+  'for owning files and APIs, read the relevant files, and run targeted',
+  'read-only diagnostic commands when they improve the plan. Prefer fast',
+  'commands such as `rg`, `rg --files`, `sed`, `git status --short`, or',
+  'package-script discovery. Do not invent filenames, functions, IPC channels,',
+  'UI components, or tests that are not supported by injected or live evidence.',
+  'If evidence is incomplete after inspection, state the exact area the',
+  'implementation phase must inspect next and why.',
+  '',
+  'Use this structure:',
+  '1. Goal and expected behavior change.',
+  '2. Current-state diagnosis from the available project context and thread',
+  '   history. Name the likely owning files, functions, contracts, or UI',
+  '   components when they are known.',
+  '3. File-by-file implementation steps with concrete logic, state, IPC, data',
+  '   flow, or UI changes to make.',
+  '4. Focused tests and verification commands to run after implementation.',
+  '5. Risks, edge cases, and any migration or follow-up notes.',
+  '',
+  'Keep every step actionable. Do not make the plan a generic discovery plan.',
+  'If more inspection will be needed during implementation, name the exact area',
+  'to inspect and why, then continue with the expected code change.',
+  '',
+  'This phase is read-only and investigative. Do NOT edit files, write files,',
+  'apply patches, run formatters, run code generation, install dependencies,',
+  'change git state, or execute mutating commands. Do not produce patch hunks,',
+  'code blocks, or implementation output. If the request needs code changes,',
+  'describe them in the plan and stop there.',
   '',
   'If you have ANY clarifying question whose answer would change the plan',
   '(naming, scope, UX trade-offs, ambiguous requirements), you MUST call the',
@@ -47,10 +76,11 @@ const PLAN_MODE_CONTEXT = [
   'collecting approval, or planning the planning process. Do not answer with',
   '"I will create a plan", "first I will understand the request", or other',
   'meta-planning steps unless they are concrete implementation work for the',
-  'user prompt. This response is the plan.',
+  'user prompt. Do not include "wait for approval" as an implementation step;',
+  'the app handles approval after this response. This response is the plan.',
   '',
-  'Do NOT edit files, run commands, or make any repository changes in this',
-  'phase. Present the plan, then stop and wait for approval.',
+  'Do NOT edit files or make any repository changes in this phase. Present the',
+  'plan, then stop and wait for approval.',
 ].join('\n')
 
 /**

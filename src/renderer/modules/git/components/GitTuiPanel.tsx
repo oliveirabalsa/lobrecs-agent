@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Project } from '../../../../shared/types'
+import { GitBranchCreateModal } from './GitBranchCreateModal'
 import { GitBranchesPanel } from './GitBranchesPanel'
 import { GitCommandBar } from './GitCommandBar'
 import { GitCommandPalette } from './GitCommandPalette'
@@ -30,9 +31,10 @@ import {
 
 interface GitTuiPanelProps {
   project: Project | null
+  onBranchChanged?: () => void
 }
 
-export function GitTuiPanel({ project }: GitTuiPanelProps) {
+export function GitTuiPanel({ project, onBranchChanged }: GitTuiPanelProps) {
   const { snapshot, loading, error, operation, detail, refresh, runAction, generateCommitMessage } =
     useGitTuiData(project)
   const [activePanel, setActivePanel] = useState<GitTuiPanelId>('files')
@@ -41,6 +43,7 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
   const [helpOpen, setHelpOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [commitOpen, setCommitOpen] = useState(false)
+  const [branchCreateOpen, setBranchCreateOpen] = useState(false)
   const [filterOpen, setFilterOpen] = useState(false)
   const [filter, setFilter] = useState('')
 
@@ -61,10 +64,18 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
 
   const dispatchAction = useCallback(
     async (action: GitTuiAction) => {
+      if (action.type === 'create-branch' && !action.branchName?.trim()) {
+        setActivePanel('branches')
+        setBranchCreateOpen(true)
+        return
+      }
       if (requiresConfirmation(action) && !window.confirm(confirmMessage(action))) return
-      await runAction(action)
+      const result = await runAction(action)
+      if (result?.exitCode === 0 && changesCurrentBranch(action)) {
+        onBranchChanged?.()
+      }
     },
-    [runAction],
+    [onBranchChanged, runAction],
   )
 
   const handleCommand = useCallback(
@@ -89,6 +100,7 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
         setHelpOpen(false)
         setPaletteOpen(false)
         setCommitOpen(false)
+        setBranchCreateOpen(false)
         setFilterOpen(false)
         return
       }
@@ -146,7 +158,7 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
   )
 
   useGitTuiKeyboard({
-    enabled: !helpOpen && !paletteOpen && !commitOpen,
+    enabled: !helpOpen && !paletteOpen && !commitOpen && !branchCreateOpen,
     onCommand: handleCommand,
   })
 
@@ -183,6 +195,19 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
           <span className="hidden truncate text-[11px] text-muted sm:inline">
             {project.repoPath}
           </span>
+          {snapshot?.branch?.currentBranch ? (
+            <span className="flex items-center gap-1 text-[11px] text-accent-primary font-medium shrink-0">
+              <BranchIcon />
+              <span className="truncate max-w-[120px] sm:max-w-[200px]">
+                {snapshot.branch.currentBranch}
+              </span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[11px] text-accent-del font-medium shrink-0">
+              <BranchIcon />
+              <span>detached</span>
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted">
           <span>h/l panels</span>
@@ -286,6 +311,11 @@ export function GitTuiPanel({ project }: GitTuiPanelProps) {
         onClose={() => setPaletteOpen(false)}
         onAction={(action) => void dispatchAction(action)}
       />
+      <GitBranchCreateModal
+        open={branchCreateOpen}
+        onClose={() => setBranchCreateOpen(false)}
+        onCreate={(branchName) => void dispatchAction({ type: 'create-branch', branchName })}
+      />
       <GitCommitModal
         open={commitOpen}
         onClose={() => setCommitOpen(false)}
@@ -323,6 +353,10 @@ function requiresConfirmation(action: GitTuiAction): boolean {
   )
 }
 
+function changesCurrentBranch(action: GitTuiAction): boolean {
+  return action.type === 'checkout-branch' || action.type === 'create-branch'
+}
+
 function confirmMessage(action: GitTuiAction): string {
   switch (action.type) {
     case 'discard-file':
@@ -338,4 +372,26 @@ function confirmMessage(action: GitTuiAction): string {
 
 export function panelIndex(panelId: GitTuiPanelId): number {
   return GIT_TUI_PANEL_ORDER.indexOf(panelId)
+}
+
+function BranchIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  )
 }

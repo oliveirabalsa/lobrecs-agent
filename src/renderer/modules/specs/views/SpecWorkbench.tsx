@@ -10,18 +10,21 @@ import {
 import { AGENT_LABELS } from '../../../../shared/types'
 import type {
   AdapterCapability,
+  AgentProfile,
   CreateSpecInput,
   Project,
   RunAuditPhase,
   RunAuditRecord,
   RunMode,
   Spec,
+  SpecArtifact,
   SpecSettings,
   SpecRun,
   SpecRunComparison,
   SupportedAgentId,
   VerificationRecipe,
 } from '../../../../shared/types'
+import { MarkdownContent } from '../../workspace/components/MarkdownContent'
 
 interface SpecWorkbenchProps {
   project: Project
@@ -37,8 +40,11 @@ type SpecDraft = {
   requirements: string
   acceptanceCriteria: string
   selectedAgents: SupportedAgentId[]
+  selectedAgentProfiles: string[]
   runMode: RunMode
 }
+
+type WorkbenchTab = 'details' | 'artifacts'
 
 const emptyDraft: SpecDraft = {
   title: '',
@@ -50,6 +56,7 @@ const emptyDraft: SpecDraft = {
   requirements: '',
   acceptanceCriteria: '',
   selectedAgents: ['codex'],
+  selectedAgentProfiles: [],
   runMode: 'local',
 }
 
@@ -69,10 +76,18 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   const [selectedSpecId, setSelectedSpecId] = useState<string | null>(null)
   const [draft, setDraft] = useState<SpecDraft>(emptyDraft)
   const [capabilities, setCapabilities] = useState<AdapterCapability[]>([])
+  const [profiles, setProfiles] = useState<AgentProfile[]>([])
+  const [profileIssues, setProfileIssues] = useState(0)
   const [recipes, setRecipes] = useState<VerificationRecipe[]>([])
   const [specSettings, setSpecSettings] = useState<SpecSettings | null>(null)
   const [comparison, setComparison] = useState<SpecRunComparison | null>(null)
   const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
+  const [activeTab, setActiveTab] = useState<WorkbenchTab>('details')
+  const [artifacts, setArtifacts] = useState<SpecArtifact[]>([])
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
+  const [artifactMarkdown, setArtifactMarkdown] = useState('')
+  const [artifactsLoading, setArtifactsLoading] = useState(false)
+  const [artifactSaving, setArtifactSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
@@ -85,6 +100,10 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
     () => specs.find((spec) => spec.id === selectedSpecId) ?? null,
     [selectedSpecId, specs],
   )
+  const selectedArtifact = useMemo(
+    () => artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null,
+    [artifacts, selectedArtifactId],
+  )
   const latestRun = useMemo(
     () => [...(comparison?.runs ?? [])].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null,
     [comparison],
@@ -93,7 +112,7 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
     () =>
       capabilities.length > 0
         ? capabilities
-        : fallbackCapabilities(project.agentId === 'cursor' ? 'codex' : project.agentId),
+        : fallbackCapabilities(project.agentId),
     [capabilities, project.agentId],
   )
 
@@ -107,16 +126,19 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
       setComparison(null)
 
       try {
-        const [loadedSpecs, loadedCapabilities, loadedRecipes, effectiveSettings] = await Promise.all([
+        const [loadedSpecs, loadedCapabilities, loadedRecipes, effectiveSettings, profileResult] = await Promise.all([
           window.agentforge.specs.list(project.id),
           window.agentforge.system.listCapabilities(),
           window.agentforge.system.listVerificationRecipes(project.id),
           window.agentforge.settings.getEffective(project.id),
+          window.agentforge.agent.listProfiles(project.id),
         ])
         if (cancelled) return
 
         setSpecs(loadedSpecs)
         setCapabilities(loadedCapabilities)
+        setProfiles(profileResult.profiles)
+        setProfileIssues(profileResult.issues.length)
         setRecipes(loadedRecipes)
         setSpecSettings(effectiveSettings.settings.specs)
         setSelectedSpecId((current) => current ?? loadedSpecs[0]?.id ?? null)
@@ -124,6 +146,7 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
           setDraft({
             ...emptyDraft,
             selectedAgents: defaultSpecAgents(effectiveSettings.settings.specs, project),
+            selectedAgentProfiles: [],
           })
         }
       } catch (reason) {
@@ -147,6 +170,15 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
     void refreshComparison(selectedSpec.id)
   }, [selectedSpec])
 
+  useEffect(() => {
+    if (!selectedSpec || activeTab !== 'artifacts') return
+    void refreshArtifacts(selectedSpec.id)
+  }, [activeTab, selectedSpec])
+
+  useEffect(() => {
+    setArtifactMarkdown(selectedArtifact?.markdown ?? '')
+  }, [selectedArtifact])
+
   async function refreshSpecs(nextSelectedId?: string) {
     const loadedSpecs = await window.agentforge.specs.list(project.id)
     setSpecs(loadedSpecs)
@@ -167,6 +199,76 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
       }
     } else {
       setAuditRecords([])
+    }
+  }
+
+  async function refreshArtifacts(specId: string, nextSelectedId?: string) {
+    setArtifactsLoading(true)
+    setError(null)
+
+    try {
+      const loadedArtifacts = await window.agentforge.specs.listArtifacts(specId)
+      setArtifacts(loadedArtifacts)
+      setSelectedArtifactId((current) => {
+        if (nextSelectedId && loadedArtifacts.some((artifact) => artifact.id === nextSelectedId)) {
+          return nextSelectedId
+        }
+        if (current && loadedArtifacts.some((artifact) => artifact.id === current)) return current
+        return loadedArtifacts[0]?.id ?? null
+      })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to load workflow artifacts')
+    } finally {
+      setArtifactsLoading(false)
+    }
+  }
+
+  async function saveArtifact() {
+    if (!selectedSpec || !selectedArtifact) return
+
+    setArtifactSaving(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const saved = await window.agentforge.specs.writeArtifact({
+        specId: selectedSpec.id,
+        artifactId: selectedArtifact.id,
+        kind: selectedArtifact.kind,
+        title: selectedArtifact.title,
+        markdown: artifactMarkdown,
+      })
+      await refreshArtifacts(selectedSpec.id, saved.id)
+      setNotice(`${saved.title} saved to ${saved.relativePath}.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to save workflow artifact')
+    } finally {
+      setArtifactSaving(false)
+    }
+  }
+
+  async function createReviewArtifact() {
+    if (!selectedSpec) return
+
+    setArtifactSaving(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const reviewCount = artifacts.filter((artifact) => artifact.kind === 'review').length + 1
+      const saved = await window.agentforge.specs.writeArtifact({
+        specId: selectedSpec.id,
+        kind: 'review',
+        title: `Review Round ${reviewCount}`,
+        markdown: `# Review Round ${reviewCount}\n\n## Findings\n\n- `,
+      })
+      await refreshArtifacts(selectedSpec.id, saved.id)
+      setActiveTab('artifacts')
+      setNotice(`Review artifact created at ${saved.relativePath}.`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Failed to create review artifact')
+    } finally {
+      setArtifactSaving(false)
     }
   }
 
@@ -287,6 +389,10 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   function newSpec() {
     setSelectedSpecId(null)
     setComparison(null)
+    setArtifacts([])
+    setSelectedArtifactId(null)
+    setArtifactMarkdown('')
+    setActiveTab('details')
     setDraft({
       ...emptyDraft,
       selectedAgents: defaultSpecAgents(specSettings, project),
@@ -317,6 +423,25 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
               New spec
             </button>
           </div>
+        </div>
+        <div className="mt-4 flex gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 p-1">
+          {[
+            { id: 'details' as const, label: 'Spec' },
+            { id: 'artifacts' as const, label: 'Artifacts' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                activeTab === tab.id
+                  ? 'bg-zinc-100 text-zinc-950'
+                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
         <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
           {phaseLabels.map((label, index) => (
@@ -388,8 +513,9 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
           </div>
         </aside>
 
-        <form onSubmit={(event) => void saveSpec(event)} className="min-h-0 overflow-auto">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-5">
+        {activeTab === 'details' ? (
+          <form onSubmit={(event) => void saveSpec(event)} className="min-h-0 overflow-auto">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-5">
             <Field label="Title">
               <input
                 value={draft.title}
@@ -495,6 +621,39 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
 
             <div className="grid gap-4 lg:grid-cols-[1fr_14rem]">
               <Field label="Agents">
+                {profiles.length > 0 ? (
+                  <div className="mb-3 rounded-md border border-zinc-800 bg-zinc-900/60 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase text-zinc-500">
+                        Profiles
+                      </span>
+                      {profileIssues > 0 ? (
+                        <span className="text-[11px] text-amber-300">
+                          {profileIssues} doctor issue{profileIssues === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {profiles.map((profile) => {
+                        const selected = draft.selectedAgentProfiles.includes(profile.id)
+                        return (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            onClick={() => toggleProfile(profile, profiles, setDraft)}
+                            className={`rounded-md border px-3 py-1.5 text-xs transition ${
+                              selected
+                                ? 'border-blue-500/50 bg-blue-500/10 text-blue-100'
+                                : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:bg-zinc-900'
+                            }`}
+                          >
+                            {profile.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="grid gap-2 sm:grid-cols-3">
                   {selectedAgents.map((capability) => (
                     <label
@@ -553,8 +712,22 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
                 {running ? 'Starting...' : 'Start Run'}
               </button>
             </div>
-          </div>
-        </form>
+            </div>
+          </form>
+        ) : (
+          <ArtifactsPanel
+            artifacts={artifacts}
+            loading={artifactsLoading}
+            selectedArtifact={selectedArtifact}
+            markdown={artifactMarkdown}
+            saving={artifactSaving}
+            disabled={!selectedSpec}
+            onSelect={setSelectedArtifactId}
+            onChange={setArtifactMarkdown}
+            onSave={() => void saveArtifact()}
+            onCreateReview={() => void createReviewArtifact()}
+          />
+        )}
 
         <aside className="min-h-[320px] border-t border-zinc-800 bg-zinc-950 xl:min-h-0 xl:border-l xl:border-t-0">
           <div className="flex h-full min-h-0 flex-col">
@@ -603,6 +776,137 @@ export function SpecWorkbench({ project }: SpecWorkbenchProps) {
   )
 }
 
+function ArtifactsPanel({
+  artifacts,
+  loading,
+  selectedArtifact,
+  markdown,
+  saving,
+  disabled,
+  onSelect,
+  onChange,
+  onSave,
+  onCreateReview,
+}: {
+  artifacts: SpecArtifact[]
+  loading: boolean
+  selectedArtifact: SpecArtifact | null
+  markdown: string
+  saving: boolean
+  disabled: boolean
+  onSelect: (artifactId: string) => void
+  onChange: (markdown: string) => void
+  onSave: () => void
+  onCreateReview: () => void
+}) {
+  return (
+    <div className="grid min-h-0 overflow-hidden lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <aside className="min-h-[180px] border-b border-zinc-800 bg-zinc-950/80 p-3 lg:min-h-0 lg:border-b-0 lg:border-r">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs font-semibold uppercase text-zinc-500">Artifacts</div>
+          <button
+            type="button"
+            onClick={onCreateReview}
+            disabled={disabled || saving}
+            className="rounded border border-zinc-700 px-2 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            New review
+          </button>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-2">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="h-14 animate-pulse rounded-md bg-zinc-900" />
+            ))
+          ) : artifacts.length === 0 ? (
+            <div className="rounded-md border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-500">
+              Select a saved spec to create workflow artifacts.
+            </div>
+          ) : (
+            artifacts.map((artifact) => (
+              <button
+                key={artifact.id}
+                type="button"
+                onClick={() => onSelect(artifact.id)}
+                className={`rounded-md border px-3 py-2 text-left transition ${
+                  artifact.id === selectedArtifact?.id
+                    ? 'border-blue-500/50 bg-blue-500/10'
+                    : 'border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900'
+                }`}
+              >
+                <span className="block truncate text-sm font-medium text-zinc-100">
+                  {artifact.title}
+                </span>
+                <span className="mt-1 block truncate text-[11px] text-zinc-500">
+                  {artifactKindLabel(artifact.kind)} · v{artifact.version}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+
+      <div className="min-h-0 overflow-auto">
+        {selectedArtifact ? (
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-semibold text-zinc-100">
+                  {selectedArtifact.title}
+                </h3>
+                <p className="mt-1 truncate text-xs text-zinc-500">
+                  {selectedArtifact.relativePath}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving}
+                className="rounded-md bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : 'Save artifact'}
+              </button>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <label className="block min-w-0">
+                <span className="mb-2 block text-xs font-semibold uppercase text-zinc-500">
+                  Markdown
+                </span>
+                <textarea
+                  value={markdown}
+                  onChange={(event) => onChange(event.target.value)}
+                  className="min-h-[28rem] w-full resize-y rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-xs leading-6 text-zinc-100 outline-none focus:border-blue-500"
+                  spellCheck={false}
+                />
+              </label>
+
+              <div className="min-w-0">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold uppercase text-zinc-500">Preview</span>
+                  <span className="truncate text-[11px] text-zinc-600">
+                    {Object.entries(selectedArtifact.frontmatter)
+                      .map(([key, value]) => `${key}:${String(value)}`)
+                      .join(' · ')}
+                  </span>
+                </div>
+                <div className="min-h-[28rem] overflow-auto rounded-md border border-zinc-800 bg-zinc-900/70 p-4">
+                  <MarkdownContent text={markdown || '_Empty artifact_'} variant="assistant" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full min-h-[320px] items-center justify-center px-4 text-sm text-zinc-500">
+            No artifact selected.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
@@ -610,6 +914,21 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </label>
   )
+}
+
+function artifactKindLabel(kind: SpecArtifact['kind']): string {
+  switch (kind) {
+    case 'prd':
+      return 'PRD'
+    case 'techspec':
+      return 'Tech spec'
+    case 'tasks':
+      return 'Tasks'
+    case 'review':
+      return 'Review'
+    case 'memory':
+      return 'Memory'
+  }
 }
 
 function RunSummary({
@@ -685,6 +1004,8 @@ const phaseLabel: Record<RunAuditPhase, string> = {
   'recipe-started': 'Started',
   'recipe-passed': 'Passed',
   'recipe-failed': 'Failed',
+  'visual-captured': 'Visual captured',
+  'visual-failed': 'Visual failed',
   'repair-dispatched': 'Repair started',
   'repair-skipped': 'Skipped',
   'gate-passed': 'QA done',
@@ -695,6 +1016,8 @@ const phaseTone: Record<RunAuditPhase, string> = {
   'recipe-started': 'border-zinc-700 bg-zinc-900 text-zinc-300',
   'recipe-passed': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
   'recipe-failed': 'border-red-500/40 bg-red-500/10 text-red-200',
+  'visual-captured': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+  'visual-failed': 'border-red-500/40 bg-red-500/10 text-red-200',
   'repair-dispatched': 'border-violet-500/40 bg-violet-500/10 text-violet-200',
   'repair-skipped': 'border-zinc-700 bg-zinc-900 text-zinc-400',
   'gate-passed': 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
@@ -769,9 +1092,10 @@ function inputFromDraft(projectId: string, draft: SpecDraft): CreateSpecInput {
     context: draft.context,
     constraints: draft.constraints,
     doneWhen: draft.doneWhen,
-    targetFiles: linesFromText(draft.targetFiles),
-    selectedAgents: draft.selectedAgents.length > 0 ? draft.selectedAgents : ['codex'],
-    runMode: 'local',
+      targetFiles: linesFromText(draft.targetFiles),
+      selectedAgents: draft.selectedAgents.length > 0 ? draft.selectedAgents : ['codex'],
+      selectedAgentProfiles: draft.selectedAgentProfiles,
+      runMode: 'local',
     requirements: linesFromText(draft.requirements),
     acceptanceCriteria: linesFromText(draft.acceptanceCriteria),
   }
@@ -788,6 +1112,7 @@ function draftFromSpec(spec: Spec): SpecDraft {
     requirements: spec.requirements.map((item) => item.body).join('\n'),
     acceptanceCriteria: spec.acceptanceCriteria.map((item) => item.body).join('\n'),
     selectedAgents: spec.selectedAgents.length > 0 ? spec.selectedAgents : ['codex'],
+    selectedAgentProfiles: spec.selectedAgentProfiles ?? [],
     runMode: 'local',
   }
 }
@@ -807,7 +1132,7 @@ function defaultSpecAgents(
     return settings.defaultAgentIds
   }
 
-  return [project.agentId === 'cursor' ? 'codex' : project.agentId]
+  return [project.agentId]
 }
 
 function setDraftField<K extends keyof SpecDraft>(
@@ -830,6 +1155,32 @@ function toggleAgent(
     return {
       ...current,
       selectedAgents: nextAgents.length > 0 ? nextAgents : current.selectedAgents,
+    }
+  })
+}
+
+function toggleProfile(
+  profile: AgentProfile,
+  profiles: AgentProfile[],
+  setDraft: Dispatch<SetStateAction<SpecDraft>>,
+) {
+  setDraft((current) => {
+    const selected = current.selectedAgentProfiles.includes(profile.id)
+    const selectedAgentProfiles = selected
+      ? current.selectedAgentProfiles.filter((item) => item !== profile.id)
+      : [...current.selectedAgentProfiles, profile.id]
+    const profileAgents = selectedAgentProfiles
+      .map((profileId) => profiles.find((item) => item.id === profileId)?.defaultAgentId)
+      .filter((agentId): agentId is SupportedAgentId => Boolean(agentId))
+    const manualAgents = current.selectedAgents.filter(
+      (agentId) => !profileAgents.includes(agentId),
+    )
+    const selectedAgents = [...profileAgents, ...manualAgents]
+
+    return {
+      ...current,
+      selectedAgentProfiles,
+      selectedAgents: selectedAgents.length > 0 ? selectedAgents : current.selectedAgents,
     }
   })
 }

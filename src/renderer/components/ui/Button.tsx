@@ -16,6 +16,7 @@ export type ButtonProps = {
   className?: string
   children?: ReactNode
   'aria-label'?: string
+  title?: string
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -91,6 +92,7 @@ export function Button({
   className,
   children,
   'aria-label': ariaLabel,
+  title,
 }: ButtonProps) {
   const isDisabled = disabled || loading
   const textPresent = hasTextContent(children)
@@ -128,6 +130,7 @@ export function Button({
       disabled={isDisabled}
       aria-label={ariaLabel}
       aria-busy={loading || undefined}
+      title={title}
       className={composed}
     >
       {leading != null && (

@@ -29,6 +29,7 @@ type SessionRow = {
   created_at: number
   completed_at: number | null
   thread_id: string | null
+  assistant_summary: string | null
 }
 
 type SessionEventRow = {
@@ -154,9 +155,24 @@ export const sessionsStore = {
           ? Date.now()
           : null
 
-    getDb()
-      .prepare('UPDATE sessions SET status = ?, completed_at = ? WHERE id = ?')
-      .run(status, nextCompletedAt, id)
+    const isTerminal = terminalStatuses.has(status)
+    const assistantSummary = isTerminal
+      ? sessionsStore.getAssistantSummary(id)
+      : null
+
+    if (isTerminal && assistantSummary === null) {
+      const events = sessionsStore.listEvents(id)
+      const summary = extractSessionOutput(events, { maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS })
+      getDb()
+        .prepare(
+          'UPDATE sessions SET status = ?, completed_at = ?, assistant_summary = ? WHERE id = ?',
+        )
+        .run(status, nextCompletedAt, summary ?? null, id)
+    } else {
+      getDb()
+        .prepare('UPDATE sessions SET status = ?, completed_at = ? WHERE id = ?')
+        .run(status, nextCompletedAt, id)
+    }
 
     return requireSession(id)
   },
@@ -190,7 +206,8 @@ export const sessionsStore = {
   },
 
   addEvent(event: AgentEvent): void {
-    getDb()
+    const db = getDb()
+    db
       .prepare(
         `
           INSERT INTO session_events (session_id, event_type, payload, created_at)
@@ -198,6 +215,16 @@ export const sessionsStore = {
         `,
       )
       .run(event.sessionId, event.type, JSON.stringify(event.payload ?? null), event.timestamp)
+
+    if (isAssistantMessageEvent(event)) {
+      const summary = extractSessionOutput(sessionsStore.listEvents(event.sessionId), {
+        maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS,
+      })
+      db.prepare('UPDATE sessions SET assistant_summary = ? WHERE id = ?').run(
+        summary ?? null,
+        event.sessionId,
+      )
+    }
   },
 
   listEvents(sessionId: string): AgentEvent[] {
@@ -213,6 +240,74 @@ export const sessionsStore = {
     }))
   },
 
+  listEventsForSessions(sessionIds: string[]): Map<string, AgentEvent[]> {
+    if (sessionIds.length === 0) return new Map()
+
+    const placeholders = sessionIds.map(() => '?').join(',')
+    const rows = getDb()
+      .prepare(
+        `SELECT * FROM session_events
+         WHERE session_id IN (${placeholders})
+         ORDER BY session_id, id ASC`,
+      )
+      .all(...sessionIds) as SessionEventRow[]
+
+    const eventsBySession = new Map<string, AgentEvent[]>()
+    for (const id of sessionIds) {
+      eventsBySession.set(id, [])
+    }
+    for (const row of rows) {
+      const event: AgentEvent = {
+        type: row.event_type,
+        sessionId: row.session_id,
+        payload: JSON.parse(row.payload) as unknown,
+        timestamp: row.created_at,
+      }
+      eventsBySession.get(row.session_id)!.push(event)
+    }
+    return eventsBySession
+  },
+
+  backfillAssistantSummary(sessionId: string): string | undefined {
+    const events = sessionsStore.listEvents(sessionId)
+    const summary = extractSessionOutput(events, { maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS })
+    if (summary !== undefined) {
+      getDb()
+        .prepare('UPDATE sessions SET assistant_summary = ? WHERE id = ?')
+        .run(summary, sessionId)
+    }
+    return summary
+  },
+
+  getAssistantSummary(sessionId: string): string | null {
+    const row = getDb()
+      .prepare('SELECT assistant_summary FROM sessions WHERE id = ?')
+      .get(sessionId) as { assistant_summary: string | null } | undefined
+    return row?.assistant_summary ?? null
+  },
+
+  updateAssistantSummary(sessionId: string, summary: string): void {
+    getDb()
+      .prepare('UPDATE sessions SET assistant_summary = ? WHERE id = ?')
+      .run(summary, sessionId)
+  },
+
+  finalizeSession(id: string): void {
+    const row = getDb()
+      .prepare('SELECT status, assistant_summary FROM sessions WHERE id = ?')
+      .get(id) as { status: SessionStatus; assistant_summary: string | null } | undefined
+    if (!row || !terminalStatuses.has(row.status)) return
+    if (row.assistant_summary !== null) return
+
+    const events = sessionsStore.listEvents(id)
+    const summary = extractSessionOutput(events, { maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS })
+    if (summary !== undefined) {
+      getDb()
+        .prepare('UPDATE sessions SET assistant_summary = ? WHERE id = ?')
+        .run(summary, id)
+    }
+  },
+
   listThreadTranscript(
     threadId: string,
     options: ListThreadTranscriptOptions = {},
@@ -221,6 +316,9 @@ export const sessionsStore = {
     const params: unknown[] = [threadId]
     const excludeSession = options.excludeSessionId?.trim()
     const excludeSql = excludeSession ? 'AND id != ?' : ''
+    const excludeSpawnedSql = options.excludeSpawnedAgents
+      ? 'AND spawned_agent_kind IS NULL'
+      : ''
 
     if (excludeSession) {
       params.push(excludeSession)
@@ -234,22 +332,38 @@ export const sessionsStore = {
           FROM sessions
           WHERE thread_id = ?
           ${excludeSql}
+          ${excludeSpawnedSql}
           ORDER BY created_at DESC, id DESC
           LIMIT ?
         `,
       )
       .all(...params) as SessionRow[]
 
+    if (rows.length === 0) return []
+
+    const sessionIds = rows.map((row) => row.id)
+    const eventsBySession = sessionsStore.listEventsForSessions(sessionIds)
+
     return rows.reverse().map((row) => {
       const session = rowToSession(row)
+      const events = eventsBySession.get(row.id) ?? []
+      let assistantText: string | undefined
+
+      if (row.assistant_summary !== null) {
+        assistantText = row.assistant_summary
+      } else if (terminalStatuses.has(row.status)) {
+        assistantText = sessionsStore.backfillAssistantSummary(row.id)
+      } else {
+        assistantText = extractSessionOutput(events, { maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS })
+      }
+
       return {
         sessionId: session.id,
         threadId,
         prompt: session.prompt,
         imageAttachments: session.imageAttachments,
-        assistantText: extractSessionOutput(sessionsStore.listEvents(row.id), {
-          maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS,
-        }),
+        events,
+        assistantText,
         status: session.status,
         createdAt: session.createdAt,
         completedAt: session.completedAt,
@@ -317,6 +431,20 @@ function isImageAttachment(value: unknown): value is ImageAttachment {
       typeof record.mimeType === 'string') &&
     (!('size' in record) || record.size === undefined || typeof record.size === 'number')
   )
+}
+
+function isAssistantMessageEvent(event: AgentEvent): boolean {
+  if (event.type !== 'activity' || !isRecord(event.payload)) return false
+  const payload = event.payload
+  return (
+    payload.kind === 'message' &&
+    payload.role === 'assistant' &&
+    typeof payload.text === 'string'
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function requireSession(id: string): Session {

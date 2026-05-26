@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import type { AgentActivity } from '../../../../shared/types'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import type { AgentActivity, DiffProposal } from '../../../../shared/types'
 import { Divider } from '../../../components/ui'
 import { groupTurns, type StreamItem, type Turn, type TurnUserMessage } from '../lib/groupTurns'
 import {
@@ -12,7 +12,6 @@ import { AssistantMessage } from './AssistantMessage'
 import { UserMessage } from './UserMessage'
 import { WorkingState } from './WorkingState'
 import { matchingDiffProposals } from '../lib/diffProposalMatching'
-import type { DiffProposal } from '../../../../shared/types'
 
 export interface MessageStreamProps {
   activities: AgentActivity[]
@@ -21,9 +20,12 @@ export interface MessageStreamProps {
   running?: boolean
   sessionId: string | null
   seedUserMessage?: TurnUserMessage
+  showAssistantActions?: boolean
+  canRestoreUserMessage?: boolean
+  onRestoreUserMessage?: (text: string) => void
   /**
    * Live state + callbacks the inline artifacts need (diff proposals,
-   * approval handlers, right-panel toggle). Threaded into the dispatch table
+   * approval handlers). Threaded into the dispatch table
    * so each artifact stays a pure presentation component.
    */
   streamHandlers?: Omit<RendererContext, 'sessionId' | 'running'>
@@ -32,18 +34,18 @@ export interface MessageStreamProps {
 const STICKY_THRESHOLD_PX = 80
 const EDITED_FILES_CARD_ID = 'edited-files'
 
-interface AutoPinState {
-  loading: boolean
-  running: boolean
-  sticky: boolean
-}
-
 type CodeChangeFallback = NonNullable<EditedFilesCardProps['fallbackFiles']>[number]
 
 interface EditedFileCardModel {
   id: string
   proposals: DiffProposal[]
   fallbackFiles: CodeChangeFallback[]
+}
+
+interface AutoPinState {
+  loading: boolean
+  running: boolean
+  sticky: boolean
 }
 
 export function shouldPinMessageStream({
@@ -81,8 +83,6 @@ export function flattenCodeChangeFallbacks(
 ): CodeChangeFallback[] {
   const files = new Map<string, CodeChangeFallback>()
 
-  // The same file can be edited several times in one turn — accumulate the
-  // per-edit `+/-` counts so the card shows the turn's running total.
   const accumulate = (change: CodeChangeFallback): void => {
     const existing = files.get(change.filePath)
     if (!existing) {
@@ -94,6 +94,7 @@ export function flattenCodeChangeFallbacks(
       })
       return
     }
+
     existing.additions = (existing.additions ?? 0) + (change.additions ?? 0)
     existing.deletions = (existing.deletions ?? 0) + (change.deletions ?? 0)
     existing.changeType = change.changeType
@@ -113,25 +114,6 @@ export function flattenCodeChangeFallbacks(
   }
 
   return [...files.values()]
-}
-
-export function visibleProposalsForFallbackFiles(
-  liveProposals: readonly DiffProposal[],
-  fallbackFiles: readonly CodeChangeFallback[],
-): DiffProposal[] {
-  if (fallbackFiles.length === 0) return []
-
-  const byPath = new Map<string, DiffProposal>()
-  for (const file of fallbackFiles) {
-    const matches = matchingDiffProposals(liveProposals, file.filePath)
-    if (matches.length === 0) return []
-
-    for (const proposal of matches) {
-      byPath.set(proposal.filePath, proposal)
-    }
-  }
-
-  return [...byPath.values()]
 }
 
 export function editedFileCardsForFallbackFiles(
@@ -161,28 +143,6 @@ export function editedFileCardsForFallbackFiles(
   ]
 }
 
-/**
- * Card models for a turn's trailing "Edited files" section.
- *
- * A turn's edits are described by two streams that rarely line up perfectly:
- *
- *  - `fallbackFiles` — one row per `file-change` activity the agent emitted.
- *    Turn-scoped and ordered, but some agents (notably Codex `apply_patch`)
- *    never emit a `file-change` for an edit, so this set can miss files.
- *  - `liveProposals` — whole-file diffs the main process computes against the
- *    repo baseline. Authoritative about *content*, but global to the session,
- *    so a proposal cannot be attributed to a single turn on its own.
- *
- * `editedFileCardsForFallbackFiles` already covers the first stream. When a
- * turn has no file-change rows at all, this function adds the missing half: a
- * proposal-only card. Once a turn has concrete file-change rows, unmatched
- * proposals are ignored because `liveProposals` may include earlier thread
- * sessions and cannot be safely attributed to this turn.
- *
- * `includeUnmatchedProposals` gates the proposal-only cards. `liveProposals`
- * is session-global, so if every turn appended them the same file would
- * render once per turn — the caller passes `true` for a single turn only.
- */
 export function editedFileCards(
   liveProposals: readonly DiffProposal[],
   fallbackFiles: readonly CodeChangeFallback[],
@@ -192,12 +152,7 @@ export function editedFileCards(
   if (!options.includeUnmatchedProposals) return fallbackCards
   if (fallbackFiles.length > 0) return fallbackCards
 
-  const coveredProposalPaths = new Set(
-    fallbackCards.flatMap((card) => card.proposals.map((proposal) => proposal.filePath)),
-  )
-  const unmatchedProposals = liveProposals.filter(
-    (proposal) => !coveredProposalPaths.has(proposal.filePath),
-  )
+  const unmatchedProposals = [...liveProposals]
   if (unmatchedProposals.length === 0) return fallbackCards
 
   return [
@@ -223,6 +178,9 @@ export function MessageStream({
   running = false,
   sessionId,
   seedUserMessage,
+  showAssistantActions = true,
+  canRestoreUserMessage = false,
+  onRestoreUserMessage,
   streamHandlers,
 }: MessageStreamProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -336,6 +294,8 @@ export function MessageStream({
         const isLastTurn = index === turns.length - 1
         const isRunning = isLastTurn ? running : false
         const ctx: RendererContext = {
+          projectId: streamHandlers?.projectId ?? null,
+          threadId: streamHandlers?.threadId,
           sessionId,
           running: isRunning,
           ...(streamHandlers ?? {}),
@@ -348,6 +308,9 @@ export function MessageStream({
             running={isRunning}
             ctx={ctx}
             turnIndex={index}
+            showAssistantActions={showAssistantActions}
+            canRestoreUserMessage={canRestoreUserMessage}
+            onRestoreUserMessage={onRestoreUserMessage}
           />
         )
       })}
@@ -355,18 +318,24 @@ export function MessageStream({
   )
 }
 
-function TurnBlock({
+const TurnBlock = memo(function TurnBlock({
   turn,
   isLast,
   running,
   ctx,
   turnIndex,
+  showAssistantActions,
+  canRestoreUserMessage,
+  onRestoreUserMessage,
 }: {
   turn: Turn
   isLast: boolean
   running: boolean
   ctx: RendererContext
   turnIndex: number
+  showAssistantActions: boolean
+  canRestoreUserMessage: boolean
+  onRestoreUserMessage?: (text: string) => void
 }) {
   const isCompactionTurn =
     turn.streamItems.length === 1 && turn.streamItems[0].kind === 'compaction'
@@ -375,7 +344,7 @@ function TurnBlock({
     return <Divider label="Context automatically compacted" />
   }
 
-  const { renderable, finalAssistantText, trailingCodeChanges, planReviewItems } =
+  const { renderable, finalAssistantText, planReviewItems } =
     splitFinalAssistant(turn.streamItems, {
       separateFinalAssistant: !running && turn.completion !== undefined,
     })
@@ -405,6 +374,13 @@ function TurnBlock({
               | undefined
           }
           onOpenMarkdown={ctx.onOpenMarkdown}
+          onRestoreDraft={
+            isLast &&
+            (turn.status === 'cancelled' || canRestoreUserMessage) &&
+            turn.userMessage.text.trim()
+              ? onRestoreUserMessage
+              : undefined
+          }
         />
       ) : null}
 
@@ -419,7 +395,7 @@ function TurnBlock({
               {renderStreamItem(item, `${turn.id}-${idx}`, {
                 ...ctx,
                 running: streamItemReceivesRunningState(
-                  [...renderable, ...trailingCodeChanges],
+                  renderable,
                   idx,
                   running,
                 ),
@@ -433,10 +409,10 @@ function TurnBlock({
         <WorkingState startedAt={turn.startedAt} running={running} totalMs={totalMs} />
       ) : null}
 
-      {finalAssistantText !== undefined ? (
+      {finalAssistantText !== undefined && finalAssistantText.trim() ? (
         <AssistantMessage
           text={finalAssistantText}
-          showActions={isLast && !running}
+          showActions={showAssistantActions && isLast && !running}
           onOpenMarkdown={ctx.onOpenMarkdown}
           onPreviewMarkdown={ctx.onPreviewMarkdown}
         />
@@ -451,10 +427,10 @@ function TurnBlock({
         </div>
       ))}
 
-      <TrailingEditedFilesCard
+      <ProposalOnlyEditedFilesCard
         isLast={isLast}
         ctx={ctx}
-        trailingCodeChanges={trailingCodeChanges}
+        turnItems={turn.streamItems}
       />
 
       {hasCompletionMetrics ? (
@@ -467,25 +443,23 @@ function TurnBlock({
       ) : null}
     </section>
   )
-}
+})
 
-function TrailingEditedFilesCard({
+function ProposalOnlyEditedFilesCard({
   isLast,
   ctx,
-  trailingCodeChanges,
+  turnItems,
 }: {
   isLast: boolean
   ctx: RendererContext
-  trailingCodeChanges: StreamItem[]
+  turnItems: readonly StreamItem[]
 }) {
   if (!isLast) return null
 
   const liveProposals = ctx.diffProposals ?? []
-  const fallbackFiles = flattenCodeChangeFallbacks(trailingCodeChanges)
+  const fallbackFiles = flattenCodeChangeFallbacks(turnItems)
+  if (fallbackFiles.length > 0) return null
 
-  // `liveProposals` is session-global; only the last turn surfaces proposals
-  // that lack a `file-change` activity, so the same file is not rendered once
-  // per turn.
   const cards = editedFileCards(liveProposals, fallbackFiles, {
     includeUnmatchedProposals: true,
   })
@@ -498,7 +472,6 @@ function TrailingEditedFilesCard({
           key={card.id}
           proposals={card.proposals}
           fallbackFiles={card.fallbackFiles}
-          onReview={card.proposals.length > 0 ? ctx.onReviewFile : undefined}
         />
       ))}
     </Fragment>
@@ -537,7 +510,6 @@ function isProgressBoundary(item: StreamItem): boolean {
 interface FinalAssistantSplit {
   renderable: StreamItem[]
   finalAssistantText?: string
-  trailingCodeChanges: StreamItem[]
   /**
    * `plan-review` markers, pulled out so they render *beneath* the final
    * assistant message (the proposed plan) rather than above it.
@@ -562,16 +534,14 @@ export function splitFinalAssistant(
   const completionlessItems = items.filter((item) => item.kind !== 'completion')
   const planReviewItems = completionlessItems.filter((item) => item.kind === 'plan-review')
   const reviewlessItems = completionlessItems.filter((item) => item.kind !== 'plan-review')
-  const trailingCodeChanges = reviewlessItems.filter(isCodeChangeItem)
-  const assistantCandidates = reviewlessItems.filter((item) => !isCodeChangeItem(item))
   if (options.separateFinalAssistant === false) {
-    return { renderable: assistantCandidates, trailingCodeChanges, planReviewItems }
+    return { renderable: reviewlessItems, planReviewItems }
   }
 
   let lastAssistantIndex = -1
   let lastAssistantText: string | undefined
-  for (let i = assistantCandidates.length - 1; i >= 0; i -= 1) {
-    const item = assistantCandidates[i]
+  for (let i = reviewlessItems.length - 1; i >= 0; i -= 1) {
+    const item = reviewlessItems[i]
     if (item.kind === 'message' && item.role === 'assistant') {
       lastAssistantIndex = i
       lastAssistantText = item.text
@@ -581,27 +551,17 @@ export function splitFinalAssistant(
 
   if (lastAssistantIndex === -1) {
     return {
-      renderable: assistantCandidates,
-      trailingCodeChanges,
+      renderable: reviewlessItems,
       planReviewItems,
     }
   }
 
-  const renderable = assistantCandidates.filter((_, index) => index !== lastAssistantIndex)
+  const renderable = reviewlessItems.filter((_, index) => index !== lastAssistantIndex)
   return {
     renderable,
     finalAssistantText: lastAssistantText,
-    trailingCodeChanges,
     planReviewItems,
   }
-}
-
-function isCodeChangeItem(item: StreamItem): boolean {
-  return (
-    item.kind === 'file-change' ||
-    item.kind === 'edited-files-group' ||
-    item.kind === 'diff-summary'
-  )
 }
 
 function StreamSkeleton() {

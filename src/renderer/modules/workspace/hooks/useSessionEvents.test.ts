@@ -2,11 +2,40 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../../../shared/types'
 import {
   deriveSessionActivities,
+  deriveTimedSessionActivities,
   latestHistoricalLiveDiffProposals,
   shouldReplayHistoricalSessionEvent,
 } from './useSessionEvents'
 
 describe('deriveSessionActivities', () => {
+  it('keeps activity timestamps available for replayed message streams', () => {
+    expect(
+      deriveTimedSessionActivities([
+        {
+          type: 'activity',
+          sessionId: 'session-1',
+          payload: { kind: 'tool-call', name: 'git status', status: 'done' },
+          timestamp: 10,
+        },
+        {
+          type: 'session-complete',
+          sessionId: 'session-1',
+          payload: { status: 'done' },
+          timestamp: 40,
+        },
+      ]),
+    ).toEqual([
+      {
+        activity: { kind: 'tool-call', name: 'git status', status: 'done' },
+        at: 10,
+      },
+      {
+        activity: { kind: 'completion', status: 'done', summary: 'Session complete' },
+        at: 40,
+      },
+    ])
+  })
+
   it('uses explicit process warning activities instead of duplicating raw stderr', () => {
     const events: AgentEvent[] = [
       stderrEvent('session-1', 'same warning\n', 1),
@@ -277,6 +306,84 @@ describe('deriveSessionActivities', () => {
     }
 
     expect(latestHistoricalLiveDiffProposals([liveDiff, emptyCompletionDiff])).toEqual([])
+  })
+})
+
+describe('bounded window derivation', () => {
+  it('derives timed activities correctly for large event lists', () => {
+    const events: AgentEvent[] = Array.from({ length: 200 }, (_, i) => ({
+      type: 'activity',
+      sessionId: 'session-1',
+      payload: { kind: 'step', title: `Step ${i}`, status: 'done' as const },
+      timestamp: i * 10,
+    }))
+    events.push({
+      type: 'session-complete',
+      sessionId: 'session-1',
+      payload: { status: 'done' },
+      timestamp: 2000,
+    })
+
+    const timedActivities = deriveTimedSessionActivities(events)
+    expect(timedActivities).toHaveLength(201)
+    expect(timedActivities[0].activity.kind).toBe('step')
+    expect(timedActivities[timedActivities.length - 1].activity.kind).toBe('completion')
+  })
+
+  it('can window timed activities to the most recent N entries', () => {
+    const events: AgentEvent[] = Array.from({ length: 150 }, (_, i) => ({
+      type: 'activity',
+      sessionId: 'session-1',
+      payload: { kind: 'tool-call', name: `cmd-${i}`, status: 'done' as const },
+      timestamp: i * 10,
+    }))
+    events.push({
+      type: 'session-complete',
+      sessionId: 'session-1',
+      payload: { status: 'done' },
+      timestamp: 1500,
+    })
+
+    const timedActivities = deriveTimedSessionActivities(events)
+    const maxActivities = 120
+    const bounded = timedActivities.length > maxActivities
+      ? timedActivities.slice(timedActivities.length - maxActivities)
+      : timedActivities
+
+    expect(bounded).toHaveLength(120)
+    expect(bounded[0].activity).toEqual({ kind: 'tool-call', name: 'cmd-31', status: 'done' })
+    expect(bounded[bounded.length - 1].activity.kind).toBe('completion')
+  })
+
+  it('preserves pending prompts when using bounded window on recent activities', () => {
+    const stepEvents: AgentEvent[] = Array.from({ length: 100 }, (_, i) => ({
+      type: 'activity',
+      sessionId: 'session-1',
+      payload: { kind: 'step', title: `Step ${i}`, status: 'done' as const },
+      timestamp: i * 10,
+    } satisfies AgentEvent))
+    const events: AgentEvent[] = [
+      ...stepEvents,
+      {
+        type: 'activity',
+        sessionId: 'session-1',
+        payload: {
+          kind: 'user-question',
+          promptId: 'question-1',
+          questions: [{ header: 'Test', question: 'Which option?', options: [] }],
+        },
+        timestamp: 1000,
+      } satisfies AgentEvent,
+    ]
+
+    const timedActivities = deriveTimedSessionActivities(events)
+    const maxActivities = 50
+    const boundedTimedActivities = timedActivities.length > maxActivities
+      ? timedActivities.slice(timedActivities.length - maxActivities)
+      : timedActivities
+
+    const lastActivity = boundedTimedActivities[boundedTimedActivities.length - 1]
+    expect(lastActivity.activity.kind).toBe('user-question')
   })
 })
 

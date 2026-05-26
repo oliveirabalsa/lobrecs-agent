@@ -23,6 +23,7 @@ type SpecRow = {
   done_when: string
   target_files: string
   selected_agents: string
+  agent_profile_ids: string
   run_mode: RunMode
   status: SpecStatus
   approved_at: number | null
@@ -81,6 +82,7 @@ function rowToSpec(
     doneWhen: row.done_when,
     targetFiles: readStringArray(row.target_files),
     selectedAgents: readSupportedAgents(row.selected_agents),
+    selectedAgentProfiles: readStringArray(row.agent_profile_ids ?? '[]'),
     runMode: localRunMode(),
     status: row.status,
     approvedAt: row.approved_at ?? undefined,
@@ -118,9 +120,9 @@ export const specsStore = {
         `
           INSERT INTO specs (
             id, project_id, title, goal, context, constraints, done_when,
-            target_files, selected_agents, run_mode, status, approved_at, created_at, updated_at
+            target_files, selected_agents, agent_profile_ids, run_mode, status, approved_at, created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?)
         `,
       ).run(
         id,
@@ -132,6 +134,7 @@ export const specsStore = {
         data.doneWhen?.trim() ?? '',
         JSON.stringify(data.targetFiles ?? []),
         JSON.stringify(data.selectedAgents ?? ['codex']),
+        JSON.stringify(data.selectedAgentProfiles ?? []),
         localRunMode(),
         now,
         now,
@@ -178,6 +181,10 @@ export const specsStore = {
       if (data.selectedAgents !== undefined) {
         fields.push('selected_agents = ?')
         values.push(JSON.stringify(data.selectedAgents))
+      }
+      if (data.selectedAgentProfiles !== undefined) {
+        fields.push('agent_profile_ids = ?')
+        values.push(JSON.stringify(data.selectedAgentProfiles))
       }
       if (data.runMode !== undefined) {
         fields.push('run_mode = ?')

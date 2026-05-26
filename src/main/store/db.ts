@@ -363,6 +363,93 @@ const migrations: Migration[] = [
         ON review_issues(spec_run_id, updated_at DESC);
     `,
   },
+  {
+    version: 15,
+    up: `
+      CREATE TABLE IF NOT EXISTS project_context_candidates (
+        project_id         TEXT NOT NULL,
+        path               TEXT NOT NULL,
+        file_modified_at   INTEGER NOT NULL,
+        path_tokens        TEXT NOT NULL,
+        content_tokens     TEXT NOT NULL,
+        PRIMARY KEY (project_id, path)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_candidates_project_tokens
+        ON project_context_candidates(project_id, path_tokens);
+      CREATE INDEX IF NOT EXISTS idx_candidates_content_tokens
+        ON project_context_candidates(project_id, content_tokens);
+    `,
+  },
+  {
+    version: 16,
+    up: `
+      ALTER TABLE sessions ADD COLUMN assistant_summary TEXT;
+    `,
+  },
+  {
+    version: 17,
+    up: `
+      ALTER TABLE review_issues ADD COLUMN round_number INTEGER;
+      ALTER TABLE review_issues ADD COLUMN provider_ref TEXT;
+      ALTER TABLE review_issues ADD COLUMN batch_status TEXT;
+    `,
+  },
+  {
+    version: 18,
+    up: `
+      ALTER TABLE extension_installations ADD COLUMN executable_manifest TEXT;
+      ALTER TABLE extension_installations ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0 CHECK (trusted IN (0, 1));
+      ALTER TABLE extension_installations ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1));
+      ALTER TABLE extension_installations ADD COLUMN doctor_result TEXT;
+      ALTER TABLE extension_installations ADD COLUMN updated_at INTEGER;
+    `,
+  },
+  {
+    version: 19,
+    up: `
+      ALTER TABLE specs ADD COLUMN agent_profile_ids TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
+  {
+    version: 20,
+    up: `
+      ALTER TABLE automations ADD COLUMN next_run_at INTEGER;
+      ALTER TABLE automations ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled';
+      ALTER TABLE automations ADD COLUMN review_state TEXT NOT NULL DEFAULT 'reviewed';
+      ALTER TABLE automations ADD COLUMN unread_run_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE automations ADD COLUMN project_ids TEXT;
+
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id             TEXT PRIMARY KEY,
+        automation_id  TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        session_id     TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        trigger        TEXT NOT NULL CHECK (trigger IN ('schedule', 'manual', 'retry')),
+        status         TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+        review_state   TEXT NOT NULL DEFAULT 'unread' CHECK (review_state IN ('unread', 'acknowledged', 'reviewed')),
+        unread         INTEGER NOT NULL DEFAULT 1 CHECK (unread IN (0, 1)),
+        attempt        INTEGER NOT NULL DEFAULT 1,
+        error          TEXT,
+        created_at     INTEGER NOT NULL,
+        started_at     INTEGER,
+        completed_at   INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_automation
+        ON automation_runs(automation_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_project
+        ON automation_runs(project_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_session
+        ON automation_runs(session_id);
+    `,
+  },
+  {
+    version: 21,
+    up: `
+      ALTER TABLE run_audit_records ADD COLUMN visual_evidence TEXT;
+    `,
+  },
 ]
 
 export function getDb(): Database.Database {
@@ -403,6 +490,8 @@ export function runMigrations(db: Database.Database): void {
   // SQLite ADD COLUMN is not idempotent; wrap in try/catch so re-running on an
   // already-migrated database is safe regardless of schema_version state.
   ensureSessionsCompatibilityColumns(db)
+  ensureAutomationCompatibilityColumns(db)
+  ensureRunAuditCompatibilityColumns(db)
 }
 
 function ensureSessionsCompatibilityColumns(db: Database.Database): void {
@@ -463,6 +552,61 @@ function backfillSpawnedAgentMetadata(db: Database.Database): void {
     `)
   } catch {
     // `threads` is absent in some narrowly-scoped legacy migration tests.
+  }
+}
+
+function ensureAutomationCompatibilityColumns(db: Database.Database): void {
+  for (const statement of [
+    'ALTER TABLE automations ADD COLUMN next_run_at INTEGER',
+    "ALTER TABLE automations ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled'",
+    "ALTER TABLE automations ADD COLUMN review_state TEXT NOT NULL DEFAULT 'reviewed'",
+    'ALTER TABLE automations ADD COLUMN unread_run_count INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE automations ADD COLUMN project_ids TEXT',
+  ]) {
+    try {
+      db.exec(statement)
+    } catch {
+      // Column already exists or legacy ad-hoc schema is intentionally minimal.
+    }
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id             TEXT PRIMARY KEY,
+        automation_id  TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        session_id     TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        trigger        TEXT NOT NULL CHECK (trigger IN ('schedule', 'manual', 'retry')),
+        status         TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+        review_state   TEXT NOT NULL DEFAULT 'unread' CHECK (review_state IN ('unread', 'acknowledged', 'reviewed')),
+        unread         INTEGER NOT NULL DEFAULT 1 CHECK (unread IN (0, 1)),
+        attempt        INTEGER NOT NULL DEFAULT 1,
+        error          TEXT,
+        created_at     INTEGER NOT NULL,
+        started_at     INTEGER,
+        completed_at   INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_automation
+        ON automation_runs(automation_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_project
+        ON automation_runs(project_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_automation_runs_session
+        ON automation_runs(session_id);
+      CREATE INDEX IF NOT EXISTS idx_automations_next_run
+        ON automations(project_id, enabled, next_run_at);
+    `)
+  } catch {
+    // Older ad-hoc test schemas may omit the referenced tables.
+  }
+}
+
+function ensureRunAuditCompatibilityColumns(db: Database.Database): void {
+  try {
+    db.exec('ALTER TABLE run_audit_records ADD COLUMN visual_evidence TEXT')
+  } catch {
+    // Column already exists or legacy ad-hoc schema is intentionally minimal.
   }
 }
 

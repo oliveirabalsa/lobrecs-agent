@@ -81,6 +81,22 @@ describe('ModelRouter', () => {
     expect(decision.agentId).toBe('codex')
   })
 
+  it('honors explicit AUTO agent preference before the cheap balanced default', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ opencode: true, codex: true, 'claude-code': true }),
+    })
+    const decision = await router.route({
+      prompt: 'Add input validation for the registration form',
+      autoAgentSelection: true,
+      minimumTier: 'balanced',
+      agentPreference: ['codex', 'claude-code', 'opencode'],
+    })
+
+    expect(decision.tier).toBe('balanced')
+    expect(decision.agentId).toBe('codex')
+    expect(decision.model).toBe('gpt-5.3-codex')
+  })
+
   it('routes installed Antigravity preferences through the Antigravity model map', async () => {
     const router = new ModelRouter({
       adapterRegistry: createRegistry({ antigravity: true, 'claude-code': true }),
@@ -92,6 +108,35 @@ describe('ModelRouter', () => {
 
     expect(decision.agentId).toBe('antigravity')
     expect(decision.model).toBe('gemini-2.0-flash-lite')
+  })
+
+  it('routes manual Cursor selections when Cursor is installed', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ cursor: true, codex: true }),
+    })
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'cursor',
+      modelOverride: 'gpt-5',
+    })
+
+    expect(decision.agentId).toBe('cursor')
+    expect(decision.model).toBe('gpt-5')
+    expect(decision.reasoning).toContain('Manual override')
+  })
+
+  it('falls back from unavailable Cursor selections to an installed adapter', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: createRegistry({ cursor: false, codex: true, opencode: true }),
+    })
+    const decision = await router.route({
+      prompt: 'fix typo in README',
+      preferredAgentId: 'cursor',
+      modelOverride: 'gpt-5',
+    })
+
+    expect(decision.agentId).toBe('codex')
+    expect(decision.model).toBe('gpt-5.3-codex')
   })
 
   it('uses live Codex catalog models instead of stale static fallbacks', async () => {
@@ -167,6 +212,65 @@ describe('ModelRouter', () => {
     expect(decision.agentId).toBe('codex')
     expect(decision.model).toBe('gpt-5.3-codex')
     expect(decision.reasoning).toContain('not found')
+  })
+
+  it('keeps maintained Claude manual overrides ahead of older history entries', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: {
+        get(agentId) {
+          if (agentId !== 'claude-code') return { isInstalled: () => true }
+          return {
+            isInstalled: () => true,
+            listModels: async () => [
+              {
+                id: 'claude-sonnet-4-6',
+                label: 'claude-sonnet-4-6',
+                agentId: 'claude-code',
+                tier: 'balanced',
+                source: 'fallback',
+              },
+              {
+                id: 'claude-opus-4-7',
+                label: 'claude-opus-4-7',
+                agentId: 'claude-code',
+                tier: 'frontier',
+                source: 'fallback',
+              },
+              {
+                id: 'claude-sonnet-4-5-20250929',
+                label: 'claude-sonnet-4-5-20250929',
+                agentId: 'claude-code',
+                tier: 'balanced',
+                source: 'history',
+              },
+              {
+                id: 'claude-opus-4-6',
+                label: 'claude-opus-4-6',
+                agentId: 'claude-code',
+                tier: 'frontier',
+                source: 'history',
+              },
+            ],
+          }
+        },
+      },
+    })
+
+    const sonnet = await router.route({
+      prompt: 'fix the selected model',
+      preferredAgentId: 'claude-code',
+      modelOverride: 'claude-sonnet-4-6',
+    })
+    const opus = await router.route({
+      prompt: 'fix the selected model',
+      preferredAgentId: 'claude-code',
+      modelOverride: 'claude-opus-4-7',
+    })
+
+    expect(sonnet.model).toBe('claude-sonnet-4-6')
+    expect(sonnet.reasoning).toBe('Manual override')
+    expect(opus.model).toBe('claude-opus-4-7')
+    expect(opus.reasoning).toBe('Manual override')
   })
 
   it('falls back to claude-code when the preferred agent is unavailable', async () => {
@@ -367,6 +471,42 @@ describe('ModelRouter', () => {
 
       expect(decision.agentId).toBe('antigravity')
       expect(decision.model).toBe('gemini-2.0-flash-lite')
+    })
+
+    it('does not treat Cursor as image-capable even when its selected model name has vision-capable text', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          cursor: true,
+          codex: true,
+        }),
+      })
+
+      await expect(
+        router.route({
+          prompt: 'analyze UI layout',
+          preferredAgentId: 'cursor',
+          modelOverride: 'gpt-5',
+          requiresImageSupport: true,
+        }),
+      ).rejects.toThrow('Manual image-capable model required')
+    })
+
+    it('routes image-required Cursor preferences to a non-Cursor image-capable agent', async () => {
+      const router = new ModelRouter({
+        adapterRegistry: createRegistry({
+          cursor: true,
+          codex: true,
+        }),
+      })
+
+      const decision = await router.route({
+        prompt: 'analyze UI layout',
+        preferredAgentId: 'cursor',
+        requiresImageSupport: true,
+      })
+
+      expect(decision.agentId).toBe('codex')
+      expect(decision.model).toBe('gpt-5.3-codex-spark')
     })
   })
 })

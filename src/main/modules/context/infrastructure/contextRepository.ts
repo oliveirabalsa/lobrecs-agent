@@ -1,6 +1,7 @@
 import type { RepositoryContextChunk, RepositoryContextStatus } from '../../../../shared/types'
 import { getDb } from '../../../store'
 import type { TextEmbedding } from '../domain/embedding'
+import { tokenize } from '../domain/embedding'
 
 export interface StoredRepositoryContextChunk {
   projectId: string
@@ -23,6 +24,24 @@ interface ContextChunkRow {
   embedding: string
   updated_at: number
 }
+
+export interface CandidateFile {
+  projectId: string
+  path: string
+  fileModifiedAt: number
+  pathTokens: string
+  contentTokens: string
+}
+
+interface CandidateRow {
+  project_id: string
+  path: string
+  file_modified_at: number
+  path_tokens: string
+  content_tokens: string
+}
+
+const MAX_CANDIDATE_PATHS = 200
 
 export const contextRepository = {
   replaceProjectChunks(projectId: string, chunks: StoredRepositoryContextChunk[]): void {
@@ -68,6 +87,26 @@ export const contextRepository = {
     return rows.map(rowToStoredChunk)
   },
 
+  listProjectChunksByPaths(
+    projectId: string,
+    paths: string[],
+  ): StoredRepositoryContextChunk[] {
+    if (paths.length === 0) return []
+
+    const placeholders = paths.map(() => '?').join(',')
+    const rows = getDb()
+      .prepare(
+        `
+          SELECT * FROM project_context_chunks
+          WHERE project_id = ? AND path IN (${placeholders})
+          ORDER BY path ASC, start_line ASC
+        `,
+      )
+      .all(projectId, ...paths) as ContextChunkRow[]
+
+    return rows.map(rowToStoredChunk)
+  },
+
   status(projectId: string): RepositoryContextStatus {
     const row = getDb()
       .prepare(
@@ -94,6 +133,89 @@ export const contextRepository = {
       indexedFiles: row?.indexed_files ?? 0,
       updatedAt: row?.updated_at ?? null,
     }
+  },
+
+  replaceProjectCandidates(projectId: string, candidates: CandidateFile[]): void {
+    const db = getDb()
+    const replace = db.prepare(`
+      INSERT INTO project_context_candidates (
+        project_id, path, file_modified_at, path_tokens, content_tokens
+      )
+      VALUES (?, ?, ?, ?, ?)
+    `)
+
+    const write = db.transaction((items: CandidateFile[]) => {
+      db.prepare('DELETE FROM project_context_candidates WHERE project_id = ?').run(projectId)
+
+      for (const item of items) {
+        replace.run(
+          item.projectId,
+          item.path,
+          item.fileModifiedAt,
+          item.pathTokens,
+          item.contentTokens,
+        )
+      }
+    })
+
+    write(candidates)
+  },
+
+  findCandidatePaths(
+    projectId: string,
+    queryTokens: ReadonlySet<string>,
+    limit = MAX_CANDIDATE_PATHS,
+  ): string[] {
+    if (queryTokens.size === 0) return []
+
+    const db = getDb()
+    const tokenArray = [...queryTokens]
+
+    const matchingPaths = new Set<string>()
+    const pathTokenMatches = new Map<string, number>()
+
+    for (const token of tokenArray) {
+      const rows = db
+        .prepare(
+          `
+            SELECT path, path_tokens FROM project_context_candidates
+            WHERE project_id = ? AND path_tokens LIKE ?
+            LIMIT ?
+          `,
+        )
+        .all(projectId, `%${token}%`, Math.ceil(limit / tokenArray.length)) as Array<{
+        path: string
+        path_tokens: string
+      }>
+
+      for (const row of rows) {
+        const rowTokens = row.path_tokens.split(' ')
+        if (rowTokens.some((t) => queryTokens.has(t))) {
+          if (!pathTokenMatches.has(row.path)) {
+            pathTokenMatches.set(row.path, 0)
+          }
+          pathTokenMatches.set(
+            row.path,
+            (pathTokenMatches.get(row.path) ?? 0) + 1,
+          )
+        }
+      }
+    }
+
+    for (const [path, matchCount] of pathTokenMatches) {
+      if (matchCount > 0) {
+        matchingPaths.add(path)
+      }
+    }
+
+    const sortedPaths = [...matchingPaths].sort((left, right) => {
+      const leftMatches = pathTokenMatches.get(left) ?? 0
+      const rightMatches = pathTokenMatches.get(right) ?? 0
+      if (leftMatches !== rightMatches) return rightMatches - leftMatches
+      return left.localeCompare(right)
+    })
+
+    return sortedPaths.slice(0, limit)
   },
 }
 
@@ -133,4 +255,8 @@ function parseEmbedding(value: string): TextEmbedding {
   } catch {
     return []
   }
+}
+
+export function tokensToString(tokens: ReadonlySet<string>): string {
+  return [...tokens].sort().join(' ')
 }

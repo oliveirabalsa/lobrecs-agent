@@ -36,6 +36,9 @@ type ReviewIssueRow = {
   created_at: number
   updated_at: number
   resolved_at: number | null
+  round_number: number | null
+  provider_ref: string | null
+  batch_status: string | null
 }
 
 export interface SaveDiffReviewIssuesInput {
@@ -43,6 +46,15 @@ export interface SaveDiffReviewIssuesInput {
   sessionId?: string
   threadId?: string
   specRunId?: string
+}
+
+export interface SavePrReviewIssuesInput {
+  result: GitDiffReviewResult
+  prNumber: number
+  prUrl?: string
+  headSha: string
+  sessionId?: string
+  threadId?: string
 }
 
 export const reviewIssuesStore = {
@@ -69,6 +81,18 @@ export const reviewIssuesStore = {
     if (filter.specRunId) {
       clauses.push('spec_run_id = ?')
       values.push(filter.specRunId)
+    }
+    if (filter.roundNumber !== undefined) {
+      clauses.push('round_number = ?')
+      values.push(filter.roundNumber)
+    }
+    if (filter.provider && filter.provider !== 'all') {
+      clauses.push('provider = ?')
+      values.push(filter.provider)
+    }
+    if (filter.prNumber !== undefined) {
+      clauses.push('provider_ref = ?')
+      values.push(String(filter.prNumber))
     }
 
     const where = clauses.join(' AND ')
@@ -107,17 +131,23 @@ export const reviewIssuesStore = {
 
     const now = Date.now()
     const db = getDb()
+
+    const maxRoundRow = db
+      .prepare('SELECT COALESCE(MAX(round_number), 0) AS max_round FROM review_issues WHERE project_id = ?')
+      .get(input.result.projectId) as { max_round: number }
+    const roundNumber = maxRoundRow.max_round + 1
+
     const upsert = db.prepare(
       `
         INSERT INTO review_issues (
           id, project_id, provider, source_id, source_url, spec_run_id,
           session_id, thread_id, fingerprint, branch, severity, category,
           title, detail, file_path, line, recommendation, status,
-          fix_session_id, created_at, updated_at, resolved_at
+          fix_session_id, round_number, provider_ref, batch_status, created_at, updated_at, resolved_at
         )
         VALUES (
           ?, ?, 'local-diff-review', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          'open', NULL, ?, ?, NULL
+          'open', NULL, ?, NULL, NULL, ?, ?, NULL
         )
         ON CONFLICT(project_id, provider, source_id) DO UPDATE SET
           spec_run_id = COALESCE(excluded.spec_run_id, review_issues.spec_run_id),
@@ -132,6 +162,7 @@ export const reviewIssuesStore = {
           file_path = excluded.file_path,
           line = excluded.line,
           recommendation = excluded.recommendation,
+          round_number = COALESCE(review_issues.round_number, excluded.round_number),
           updated_at = excluded.updated_at
       `,
     )
@@ -154,6 +185,7 @@ export const reviewIssuesStore = {
           finding.filePath ?? null,
           finding.line ?? null,
           finding.recommendation?.trim() || null,
+          roundNumber,
           now,
           now,
         )
@@ -166,6 +198,169 @@ export const reviewIssuesStore = {
       status: 'active',
       sessionId: input.sessionId ?? input.result.analysis.sessionId,
     }).issues
+  },
+
+  savePrReviewIssues(input: SavePrReviewIssuesInput): ReviewIssue[] {
+    if (input.result.findings.length === 0) return []
+    if (!Number.isInteger(input.prNumber) || input.prNumber <= 0) {
+      throw new Error(`Invalid pull request number: ${input.prNumber}`)
+    }
+    if (!input.headSha) {
+      throw new Error('PR review requires a head sha for dedupe.')
+    }
+
+    const now = Date.now()
+    const db = getDb()
+    const prRef = String(input.prNumber)
+
+    const maxRoundRow = db
+      .prepare(
+        `SELECT COALESCE(MAX(round_number), 0) AS max_round
+           FROM review_issues
+          WHERE project_id = ? AND provider = 'github' AND provider_ref = ?`,
+      )
+      .get(input.result.projectId, prRef) as { max_round: number }
+    const roundNumber = maxRoundRow.max_round + 1
+
+    const upsert = db.prepare(
+      `
+        INSERT INTO review_issues (
+          id, project_id, provider, source_id, source_url, spec_run_id,
+          session_id, thread_id, fingerprint, branch, severity, category,
+          title, detail, file_path, line, recommendation, status,
+          fix_session_id, round_number, provider_ref, batch_status, created_at, updated_at, resolved_at
+        )
+        VALUES (
+          ?, ?, 'github', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          'open', NULL, ?, ?, NULL, ?, ?, NULL
+        )
+        ON CONFLICT(project_id, provider, source_id) DO UPDATE SET
+          source_url = COALESCE(excluded.source_url, review_issues.source_url),
+          session_id = COALESCE(excluded.session_id, review_issues.session_id),
+          thread_id = COALESCE(excluded.thread_id, review_issues.thread_id),
+          fingerprint = excluded.fingerprint,
+          branch = excluded.branch,
+          severity = excluded.severity,
+          category = excluded.category,
+          title = excluded.title,
+          detail = excluded.detail,
+          file_path = excluded.file_path,
+          line = excluded.line,
+          recommendation = excluded.recommendation,
+          round_number = COALESCE(review_issues.round_number, excluded.round_number),
+          provider_ref = excluded.provider_ref,
+          updated_at = excluded.updated_at
+      `,
+    )
+
+    const writeIssues = db.transaction(() => {
+      for (const finding of input.result.findings) {
+        upsert.run(
+          randomUUID(),
+          input.result.projectId,
+          prReviewSourceId(prRef, input.headSha, finding.id),
+          input.prUrl ?? null,
+          input.sessionId ?? input.result.analysis.sessionId ?? null,
+          input.threadId ?? null,
+          input.headSha,
+          input.result.branch,
+          finding.severity,
+          finding.category,
+          finding.title.trim(),
+          finding.detail.trim(),
+          finding.filePath ?? null,
+          finding.line ?? null,
+          finding.recommendation?.trim() || null,
+          roundNumber,
+          prRef,
+          now,
+          now,
+        )
+      }
+    })
+
+    writeIssues()
+    return this.list({
+      projectId: input.result.projectId,
+      status: 'active',
+      provider: 'github',
+      prNumber: input.prNumber,
+    }).issues
+  },
+
+  upsertIssues(projectId: string, issues: Array<Omit<ReviewIssue, 'id' | 'createdAt' | 'updatedAt'>>): ReviewIssue[] {
+    if (issues.length === 0) return []
+
+    const now = Date.now()
+    const db = getDb()
+
+    const upsert = db.prepare(
+      `
+        INSERT INTO review_issues (
+          id, project_id, provider, source_id, source_url, spec_run_id,
+          session_id, thread_id, fingerprint, branch, severity, category,
+          title, detail, file_path, line, recommendation, status,
+          fix_session_id, round_number, provider_ref, batch_status, created_at, updated_at, resolved_at
+        )
+        VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
+        ON CONFLICT(project_id, provider, source_id) DO UPDATE SET
+          source_url = COALESCE(excluded.source_url, review_issues.source_url),
+          spec_run_id = COALESCE(excluded.spec_run_id, review_issues.spec_run_id),
+          session_id = COALESCE(excluded.session_id, review_issues.session_id),
+          thread_id = COALESCE(excluded.thread_id, review_issues.thread_id),
+          fingerprint = COALESCE(excluded.fingerprint, review_issues.fingerprint),
+          branch = COALESCE(excluded.branch, review_issues.branch),
+          severity = excluded.severity,
+          category = excluded.category,
+          title = excluded.title,
+          detail = excluded.detail,
+          file_path = excluded.file_path,
+          line = excluded.line,
+          recommendation = excluded.recommendation,
+          status = COALESCE(review_issues.status, excluded.status),
+          round_number = COALESCE(review_issues.round_number, excluded.round_number),
+          provider_ref = COALESCE(review_issues.provider_ref, excluded.provider_ref),
+          batch_status = COALESCE(review_issues.batch_status, excluded.batch_status),
+          updated_at = excluded.updated_at
+      `,
+    )
+
+    const writeIssues = db.transaction(() => {
+      for (const issue of issues) {
+        upsert.run(
+          randomUUID(),
+          projectId,
+          issue.provider,
+          issue.sourceId,
+          issue.sourceUrl ?? null,
+          issue.specRunId ?? null,
+          issue.sessionId ?? null,
+          issue.threadId ?? null,
+          issue.fingerprint ?? null,
+          issue.branch ?? null,
+          issue.severity,
+          issue.category,
+          issue.title,
+          issue.detail,
+          issue.filePath ?? null,
+          issue.line ?? null,
+          issue.recommendation ?? null,
+          issue.status,
+          issue.fixSessionId ?? null,
+          issue.roundNumber ?? null,
+          issue.providerRef ?? null,
+          issue.batchStatus ?? null,
+          now,
+          now,
+          issue.resolvedAt ?? null,
+        )
+      }
+    })
+
+    writeIssues()
+    return this.list({ projectId }).issues
   },
 
   update(issueId: string, patch: ReviewIssuePatch): ReviewIssue {
@@ -183,6 +378,18 @@ export const reviewIssuesStore = {
     if (patch.fixSessionId !== undefined) {
       fields.push('fix_session_id = ?')
       values.push(patch.fixSessionId)
+    }
+    if (patch.roundNumber !== undefined) {
+      fields.push('round_number = ?')
+      values.push(patch.roundNumber)
+    }
+    if (patch.providerRef !== undefined) {
+      fields.push('provider_ref = ?')
+      values.push(patch.providerRef)
+    }
+    if (patch.batchStatus !== undefined) {
+      fields.push('batch_status = ?')
+      values.push(patch.batchStatus)
     }
 
     if (fields.length > 0) {
@@ -221,6 +428,9 @@ function rowToReviewIssue(row: ReviewIssueRow): ReviewIssue {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     resolvedAt: row.resolved_at ?? undefined,
+    roundNumber: row.round_number ?? undefined,
+    providerRef: row.provider_ref ?? undefined,
+    batchStatus: (row.batch_status as any) ?? undefined,
   }
 }
 
@@ -264,4 +474,8 @@ function countByStatus(projectId: string): ReviewIssueStatusCounts {
 
 function localDiffReviewSourceId(fingerprint: string, findingId: string): string {
   return `${fingerprint}:${findingId}`
+}
+
+function prReviewSourceId(prRef: string, headSha: string, findingId: string): string {
+  return `gh:${prRef}:${headSha}:${findingId}`
 }

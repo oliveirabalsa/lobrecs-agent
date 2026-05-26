@@ -63,6 +63,18 @@ describe('markdownDocument', () => {
     }
   })
 
+  it('rejects local markdown files without a selected project', async () => {
+    await expect(readMarkdownDocument({ href: '/tmp/notes.md' })).rejects.toThrow(
+      'requires a selected project',
+    )
+  })
+
+  it('rejects remote markdown URLs that target local networks', async () => {
+    await expect(
+      readMarkdownDocument({ href: 'http://127.0.0.1/readme.md' }),
+    ).rejects.toThrow('local network URLs')
+  })
+
   it('allows Antigravity generated markdown paths', () => {
     const generated = path.join(
       os.homedir(),

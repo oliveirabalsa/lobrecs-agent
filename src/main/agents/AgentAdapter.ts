@@ -1,5 +1,11 @@
 import type { EventEmitter } from 'node:events'
-import type { AgentEvent, AgentModel, AgentId, AgentRuntimeSettings } from '../../shared/types'
+import type {
+  AgentAccountInfo,
+  AgentEvent,
+  AgentModel,
+  AgentId,
+  AgentRuntimeSettings,
+} from '../../shared/types'
 import type { ImageAttachment } from '../../shared/types'
 
 export interface AgentSession {
@@ -26,6 +32,7 @@ export interface AgentAdapter {
   name: string
   isInstalled(): Promise<boolean>
   listModels?(): Promise<AgentModel[]>
+  getAccountInfo?(): Promise<AgentAccountInfo>
   dispatch(params: AgentDispatchParams): Promise<AgentSession>
 }
 

@@ -12,11 +12,20 @@ import type {
   SupportedAgentId,
   ThreadTranscriptTurn,
 } from '../../../../shared/types'
+import { ChatBackgroundLayer } from '../components/ChatBackgroundLayer'
 import { AssistantMessage } from '../components/AssistantMessage'
+import { BackgroundAgentsCard } from '../components/BackgroundAgentsCard'
+import type { BackgroundAgentsBlockingState } from '../components/BackgroundAgentsCard'
+import type { BackgroundAgentUserQuestion } from '../lib/backgroundAgents'
 import type { MarkdownLinkRequest } from '../components/MarkdownContent'
 import type { MarkdownPreviewDocument } from '../components/MarkdownPreviewer'
 import { MessageStream } from '../components/MessageStream'
 import {
+  isRunAuditUpdatedEvent,
+  RUN_AUDIT_UPDATED_EVENT,
+} from '../lib/runAuditEvents'
+import {
+  AnimatedDiffStat,
   DiffReviewCard,
   RunAuditTimelineCard,
 } from '../components/artifacts'
@@ -27,6 +36,7 @@ import {
   latestPlanReviewId,
   shouldContinuePlanModeAfterQuestionAnswer,
 } from '../components/Composer/planMode'
+import { formatModelLabel } from '../components/Composer/modelDisplay'
 import {
   formatUserQuestionPromptAnswers,
   UserQuestionPromptModal,
@@ -34,11 +44,25 @@ import {
 } from '../components/modals/UserQuestionPromptModal'
 import { UserMessage } from '../components/UserMessage'
 import { useAttentionSound } from '../hooks/useAttentionSound'
-import { useSessionEvents, type UserQuestionActivity } from '../hooks/useSessionEvents'
+import { useChatBackground } from '../hooks/useChatBackground'
+import {
+  deriveTimedSessionActivities,
+  useSessionEvents,
+  type UserQuestionActivity,
+} from '../hooks/useSessionEvents'
 import type { DiffProposalScope } from '../hooks/useWorkspaceController'
 import { buildUserQuestionFollowUpDispatchParams } from '../lib/userQuestionFollowUp'
 import type { StartedSessionSummary } from '../../sessions/types'
 import { Button, Modal } from '../../../components/ui'
+import {
+  getSessionChangedLineStats,
+  getSessionDiffReviewState,
+  isFinishedSessionStatus,
+  sessionHasCodeChanges,
+  type DiffReviewStateBySession,
+  type SessionChangedLineStats,
+  type SessionDiffReviewState,
+} from './runWorkspaceState'
 
 interface RunWorkspaceProps {
   project: Project
@@ -61,44 +85,29 @@ interface RunWorkspaceProps {
   onRejectApproval: () => void | Promise<void>
   onSessionStarted?: (session: StartedSessionSummary) => void
   /**
-   * Opens the workspace right panel in diff mode, optionally focusing a
-   * specific file. Lifted from `WorkspaceView` so per-file "Review" buttons
-   * inside `<EditedFilesCard>` jump straight to the matching diff tab.
+   * Opens the workspace right panel in diff mode after a run finishes.
+   * Lifted from `WorkspaceView` so the final review CTA can open the diff tab.
    */
   onReviewFile?: (filePath?: string) => void
   onOpenAgentPanel?: () => void
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
+  onRestorePrompt?: (prompt: string) => void
   /** Called with the context window percentage (0–100) after a session completes. */
   onContextPercent?: (percent: number | null) => void
+  onBackgroundBlockingChange?: (blocking: BackgroundAgentsBlockingState | null) => void
 }
 
-interface SessionDiffReviewState {
-  result: GitDiffReviewResult | null
-  loading: boolean
-  error: string | null
-}
-
-type DiffReviewStateBySession = Record<string, SessionDiffReviewState>
-
-const EMPTY_DIFF_REVIEW_STATE: SessionDiffReviewState = {
+const EMPTY_DIFF_REVIEW_STATE: SessionDiffReviewState<GitDiffReviewResult> = {
   result: null,
   loading: false,
   error: null,
 }
 
-export function getSessionDiffReviewState(
-  state: Readonly<DiffReviewStateBySession>,
-  sessionId: string | null,
-): SessionDiffReviewState {
-  if (!sessionId) return EMPTY_DIFF_REVIEW_STATE
-  return state[sessionId] ?? EMPTY_DIFF_REVIEW_STATE
-}
-
 function setSessionDiffReviewLoading(
-  state: Readonly<DiffReviewStateBySession>,
+  state: Readonly<DiffReviewStateBySession<GitDiffReviewResult>>,
   sessionId: string,
-): DiffReviewStateBySession {
+): DiffReviewStateBySession<GitDiffReviewResult> {
   const current = state[sessionId] ?? EMPTY_DIFF_REVIEW_STATE
   return {
     ...state,
@@ -111,10 +120,10 @@ function setSessionDiffReviewLoading(
 }
 
 function setSessionDiffReviewResult(
-  state: Readonly<DiffReviewStateBySession>,
+  state: Readonly<DiffReviewStateBySession<GitDiffReviewResult>>,
   sessionId: string,
   result: GitDiffReviewResult,
-): DiffReviewStateBySession {
+): DiffReviewStateBySession<GitDiffReviewResult> {
   return {
     ...state,
     [sessionId]: {
@@ -126,10 +135,10 @@ function setSessionDiffReviewResult(
 }
 
 function setSessionDiffReviewError(
-  state: Readonly<DiffReviewStateBySession>,
+  state: Readonly<DiffReviewStateBySession<GitDiffReviewResult>>,
   sessionId: string,
   error: string,
-): DiffReviewStateBySession {
+): DiffReviewStateBySession<GitDiffReviewResult> {
   return {
     ...state,
     [sessionId]: {
@@ -146,8 +155,8 @@ function setSessionDiffReviewError(
  * M4: the standalone `<DiffSummaryCard>` was removed — diff proposals now
  * surface inline via `<EditedFilesCard>`, which is rendered by the message
  * stream's dispatch table whenever an `edited-files-group` synthetic item
- * appears. The proposals + approve/reject callbacks travel down through
- * `streamHandlers` so the card stays a pure presentation component.
+ * appears. The proposals and approval callbacks travel down through
+ * `streamHandlers` so inline artifacts stay pure presentation components.
  */
 export function RunWorkspace({
   project,
@@ -173,12 +182,19 @@ export function RunWorkspace({
   onOpenAgentPanel,
   onOpenMarkdown,
   onPreviewMarkdown,
+  onRestorePrompt,
   onContextPercent,
+  onBackgroundBlockingChange,
 }: RunWorkspaceProps) {
   const [priorTurns, setPriorTurns] = useState<ThreadTranscriptTurn[]>([])
   const [auditRecords, setAuditRecords] = useState<RunAuditRecord[]>([])
-  const [diffReviewBySession, setDiffReviewBySession] = useState<DiffReviewStateBySession>({})
+  const [auditRefreshTrigger, setAuditRefreshTrigger] = useState(0)
+  const [diffReviewBySession, setDiffReviewBySession] = useState<
+    DiffReviewStateBySession<GitDiffReviewResult>
+  >({})
   const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
+  const [activeBackgroundUserQuestion, setActiveBackgroundUserQuestion] =
+    useState<BackgroundAgentUserQuestion | null>(null)
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
   const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
@@ -231,10 +247,12 @@ export function RunWorkspace({
   // Audible "agent needs you" alert — chimes on new questions, approvals, and
   // finished runs. Tune *when* it fires in src/renderer/lib/attentionSound.ts.
   useAttentionSound({
-    questionPromptId: pendingUserQuestion?.promptId ?? null,
+    questionPromptId: activeBackgroundUserQuestion?.key ?? pendingUserQuestion?.promptId ?? null,
     approvalPending: approvalRequest !== null,
     status,
   })
+
+  const chatBg = useChatBackground()
 
   useEffect(() => {
     setPriorTurns([])
@@ -245,6 +263,7 @@ export function RunWorkspace({
       .listThreadTranscript(threadId, {
         limit: 8,
         excludeSessionId: sessionId ?? undefined,
+        excludeSpawnedAgents: true,
       })
       .then((turns) => {
         if (!cancelled) setPriorTurns(turns)
@@ -260,6 +279,7 @@ export function RunWorkspace({
 
   useEffect(() => {
     setAuditRecords([])
+    setAuditRefreshTrigger((t) => t + 1)
   }, [sessionId])
 
   useEffect(() => {
@@ -279,7 +299,20 @@ export function RunWorkspace({
     return () => {
       cancelled = true
     }
-  }, [activities.length, sessionId, status])
+  }, [auditRefreshTrigger, sessionId])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    const handleAuditUpdated = (event: Event) => {
+      if (!isRunAuditUpdatedEvent(event)) return
+      if (event.detail.sessionId !== sessionId) return
+      setAuditRefreshTrigger((t) => t + 1)
+    }
+
+    window.addEventListener(RUN_AUDIT_UPDATED_EVENT, handleAuditUpdated)
+    return () => window.removeEventListener(RUN_AUDIT_UPDATED_EVENT, handleAuditUpdated)
+  }, [sessionId])
 
   // A pending agent question belongs to the *thread*, not one session run.
   // Queued follow-ups, steering, and answering all start a fresh `sessionId`
@@ -290,6 +323,7 @@ export function RunWorkspace({
   useEffect(() => {
     dismissedUserQuestionIdsRef.current = new Set()
     setActiveUserQuestion(null)
+    setActiveBackgroundUserQuestion(null)
     setQuestionSubmitError(null)
   }, [questionThreadKey])
 
@@ -309,18 +343,35 @@ export function RunWorkspace({
 
   useEffect(() => {
     if (!pendingUserQuestion || activeUserQuestion) return
-    if (dismissedUserQuestionIdsRef.current.has(pendingUserQuestion.promptId)) return
+    if (dismissedUserQuestionIdsRef.current.has(userQuestionKey(null, pendingUserQuestion.promptId))) return
 
     setActiveUserQuestion(pendingUserQuestion)
+    setActiveBackgroundUserQuestion(null)
     setQuestionSubmitError(null)
   }, [activeUserQuestion, pendingUserQuestion])
 
-  const pendingApprovals = approvalRequest ? 1 : 0
-  const pendingQuestions = pendingUserQuestion ? 1 : 0
   const effectiveStatus = status ?? (sessionId ? 'running' : null)
   const hasCodeChanges = sessionHasCodeChanges(activities, diffProposals)
+
+  // Refresh audit records when session reaches a terminal state.
+  useEffect(() => {
+    if (!sessionId) return
+    if (!effectiveStatus) return
+    if (!isFinishedSessionStatus(effectiveStatus)) return
+    setAuditRefreshTrigger((t) => t + 1)
+  }, [effectiveStatus, sessionId])
+
   const canReviewCurrentDiff =
     isFinishedSessionStatus(effectiveStatus) && hasCodeChanges
+  const changedLineStats = useMemo(
+    () => getSessionChangedLineStats(activities, diffProposals),
+    [activities, diffProposals],
+  )
+  const showFinalDiffReview =
+    canReviewCurrentDiff &&
+    onReviewFile !== undefined &&
+    changedLineStats !== null &&
+    changedLineStats.additions + changedLineStats.deletions > 0
   const showDiffReview =
     canReviewCurrentDiff ||
     diffReview !== null ||
@@ -337,16 +388,6 @@ export function RunWorkspace({
     }
     return { text: prompt, attachments: imageAttachments, at: startedAt }
   }, [imageAttachments, prompt, startedAt])
-
-  // Forward "Review" clicks from <EditedFilesCard> to the workspace shell so
-  // it can open the right-side diff panel and focus the requested file. When
-  // no handler is wired (legacy callers / tests), this falls back to a no-op.
-  const handleReviewFile = useCallback(
-    (filePath?: string) => {
-      onReviewFile?.(filePath)
-    },
-    [onReviewFile],
-  )
 
   const handleReviewCurrentDiff = useCallback(async () => {
     if (!sessionId) return
@@ -393,6 +434,8 @@ export function RunWorkspace({
 
   const streamHandlers = useMemo(
     () => ({
+      projectId: project.id,
+      threadId,
       // Source the proposals from the scoped prop (filtered per active
       // session+thread upstream) — never from local state. The previous
       // local merge surfaced edits from the prior thread in the new
@@ -400,12 +443,12 @@ export function RunWorkspace({
       diffProposals,
       approvalRequest,
       pendingUserQuestionPromptId: pendingUserQuestion?.promptId ?? null,
-      onReviewFile: handleReviewFile,
       onApproveApproval,
       onRejectApproval,
       onAnswerUserQuestion: (prompt: UserQuestionActivity) => {
-        dismissedUserQuestionIdsRef.current.delete(prompt.promptId)
+        dismissedUserQuestionIdsRef.current.delete(userQuestionKey(null, prompt.promptId))
         setActiveUserQuestion(prompt)
+        setActiveBackgroundUserQuestion(null)
         setQuestionSubmitError(null)
       },
       onSessionStarted,
@@ -416,12 +459,13 @@ export function RunWorkspace({
       diffProposals,
       approvalRequest,
       pendingUserQuestion?.promptId,
-      handleReviewFile,
       onApproveApproval,
       onRejectApproval,
       onSessionStarted,
       onOpenMarkdown,
       onPreviewMarkdown,
+      project.id,
+      threadId,
     ],
   )
 
@@ -448,7 +492,13 @@ export function RunWorkspace({
 
       setSubmittingQuestion(true)
       setQuestionSubmitError(null)
-      const followUpPrompt = formatUserQuestionPromptAnswers(activeUserQuestion, answers)
+      const followUpPrompt = activeBackgroundUserQuestion
+        ? formatBackgroundUserQuestionPromptAnswers(
+            activeBackgroundUserQuestion,
+            activeUserQuestion,
+            answers,
+          )
+        : formatUserQuestionPromptAnswers(activeUserQuestion, answers)
       const createdAt = Date.now()
 
       try {
@@ -473,9 +523,16 @@ export function RunWorkspace({
           planMode: planModeFollowUp,
           createdAt,
         })
-        resolveUserQuestion(activeUserQuestion.promptId)
-        dismissedUserQuestionIdsRef.current.add(activeUserQuestion.promptId)
+        const resolvedKey = userQuestionKey(
+          activeBackgroundUserQuestion?.session.id ?? null,
+          activeUserQuestion.promptId,
+        )
+        if (!activeBackgroundUserQuestion) {
+          resolveUserQuestion(activeUserQuestion.promptId)
+        }
+        dismissedUserQuestionIdsRef.current.add(resolvedKey)
         setActiveUserQuestion(null)
+        setActiveBackgroundUserQuestion(null)
       } catch (error: unknown) {
         setQuestionSubmitError(
           error instanceof Error ? error.message : 'Failed to send answers',
@@ -489,6 +546,7 @@ export function RunWorkspace({
       agentId,
       modelOverride,
       planMode,
+      activeBackgroundUserQuestion,
       onSessionStarted,
       project.id,
       resolveUserQuestion,
@@ -500,29 +558,62 @@ export function RunWorkspace({
   const closeUserQuestion = useCallback((open: boolean) => {
     if (open || !activeUserQuestion) return
 
-    dismissedUserQuestionIdsRef.current.add(activeUserQuestion.promptId)
+    dismissedUserQuestionIdsRef.current.add(
+      userQuestionKey(activeBackgroundUserQuestion?.session.id ?? null, activeUserQuestion.promptId),
+    )
     setActiveUserQuestion(null)
+    setActiveBackgroundUserQuestion(null)
     setQuestionSubmitError(null)
-  }, [activeUserQuestion])
+  }, [activeBackgroundUserQuestion, activeUserQuestion])
+
+  const handleBackgroundUserQuestion = useCallback(
+    (question: BackgroundAgentUserQuestion | null) => {
+      if (!question) {
+        if (activeBackgroundUserQuestion) {
+          setActiveUserQuestion(null)
+          setActiveBackgroundUserQuestion(null)
+          setQuestionSubmitError(null)
+        }
+        return
+      }
+      if (dismissedUserQuestionIdsRef.current.has(question.key)) return
+      if (activeBackgroundUserQuestion?.key === question.key) return
+      if (activeUserQuestion && !activeBackgroundUserQuestion) return
+
+      setActiveUserQuestion(question.prompt)
+      setActiveBackgroundUserQuestion(question)
+      setQuestionSubmitError(null)
+    },
+    [activeBackgroundUserQuestion, activeUserQuestion],
+  )
+
+  const handleBackgroundBlockingChange = useCallback(
+    (blocking: BackgroundAgentsBlockingState | null) => {
+      onBackgroundBlockingChange?.(blocking)
+    },
+    [onBackgroundBlockingChange],
+  )
 
   return (
     <div
       data-workspace-scroll="true"
-      className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-5 sm:px-4"
+      className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-5 sm:px-4"
     >
+      {chatBg.enabled && chatBg.dataUrl && (
+        <ChatBackgroundLayer dataUrl={chatBg.dataUrl} settings={chatBg.settings} />
+      )}
       {sessionId ? (
-        <div className="mx-auto flex min-h-full w-full max-w-conversation flex-col gap-4">
-          <RunSummary
-            prompt={prompt}
-            status={effectiveStatus}
-            model={model}
-            pendingApprovals={pendingApprovals}
-            pendingQuestions={pendingQuestions}
-          />
+        <div className="relative z-[1] mx-auto flex min-h-full w-full max-w-conversation flex-col gap-4">
           <PriorThreadMessages
             turns={priorTurns}
             onOpenMarkdown={onOpenMarkdown}
             onPreviewMarkdown={onPreviewMarkdown}
+          />
+          <BackgroundAgentsCard
+            projectId={project.id}
+            threadId={threadId}
+            onBlockingChange={handleBackgroundBlockingChange}
+            onUserQuestion={handleBackgroundUserQuestion}
           />
           <MessageStream
             activities={activities}
@@ -534,7 +625,15 @@ export function RunWorkspace({
             }
             seedUserMessage={seedUserMessage}
             streamHandlers={streamHandlers}
+            canRestoreUserMessage={effectiveStatus === 'cancelled'}
+            onRestoreUserMessage={onRestorePrompt}
           />
+          {showFinalDiffReview ? (
+            <FinalDiffReviewBar
+              stats={changedLineStats}
+              onReview={() => onReviewFile?.()}
+            />
+          ) : null}
           {showBottomFooter ? (
             <div className="flex flex-col gap-4">
               <RunAuditTimelineCard records={auditRecords} />
@@ -671,21 +770,6 @@ function defaultDiffReviewFixModel(
   return supportedAgentId && modelId ? { agentId: supportedAgentId, modelId } : null
 }
 
-function isFinishedSessionStatus(status: SessionStatus | null): boolean {
-  return status === 'done' || status === 'error' || status === 'cancelled'
-}
-
-export function sessionHasCodeChanges(
-  activities: readonly AgentActivity[],
-  diffProposals: readonly DiffProposal[],
-): boolean {
-  if (diffProposals.length > 0) return true
-
-  return activities.some(
-    (activity) => activity.kind === 'file-change' || activity.kind === 'diff-summary',
-  )
-}
-
 function formatDiffReviewError(error: unknown): string {
   const fallback = 'Failed to review current diff.'
   const message = error instanceof Error ? error.message : String(error || fallback)
@@ -728,6 +812,61 @@ function buildDiffReviewFixPrompt(review: GitDiffReviewResult): string {
   ].join('\n')
 }
 
+function userQuestionKey(sourceSessionId: string | null, promptId: string): string {
+  return `${sourceSessionId ?? 'main'}:${promptId}`
+}
+
+function formatBackgroundUserQuestionPromptAnswers(
+  source: BackgroundAgentUserQuestion,
+  prompt: UserQuestionActivity,
+  answers: readonly UserQuestionPromptAnswer[],
+): string {
+  return [
+    `Background agent "${source.session.spawnedAgent.role}" asked for input in the shared thread.`,
+    `Background session: ${source.session.id}`,
+    '',
+    formatUserQuestionPromptAnswers(prompt, answers),
+  ].join('\n')
+}
+
+function FinalDiffReviewBar({
+  stats,
+  onReview,
+}: {
+  stats: SessionChangedLineStats
+  onReview: () => void
+}) {
+  return (
+    <section className="sticky bottom-3 z-20">
+      <div className="flex items-center justify-between gap-3 rounded-card border border-hairline/80 bg-card-raised/95 px-3 py-2 shadow-lg shadow-black/10 backdrop-blur">
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-primary">
+            Edited {stats.filesChanged} file{stats.filesChanged === 1 ? '' : 's'}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted">
+            Final working-tree changes
+          </div>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={onReview}
+          trailingIcon={
+            <AnimatedDiffStat
+              additions={stats.additions}
+              deletions={stats.deletions}
+              variant="onAccent"
+              className="text-[11px]"
+            />
+          }
+        >
+          Review
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 function PriorThreadMessages({
   turns,
   onOpenMarkdown,
@@ -737,113 +876,84 @@ function PriorThreadMessages({
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
 }) {
-  const visibleTurns = turns.filter((turn) => turn.prompt.trim() || turn.assistantText?.trim())
+  const visibleTurns = turns.filter(
+    (turn) => turn.prompt.trim() || turn.events.length > 0 || turn.assistantText?.trim(),
+  )
   if (visibleTurns.length === 0) return null
 
   return (
     <div className="flex flex-col gap-4">
       {visibleTurns.map((turn) => (
-        <section key={turn.sessionId} className="flex flex-col gap-3">
-          {turn.prompt.trim() ? (
-            <UserMessage
-              text={turn.prompt}
-              attachments={turn.imageAttachments}
-              onOpenMarkdown={onOpenMarkdown}
-            />
-          ) : null}
-          {turn.assistantText?.trim() ? (
-            <AssistantMessage
-              text={turn.assistantText}
-              showActions={false}
-              onOpenMarkdown={onOpenMarkdown}
-              onPreviewMarkdown={onPreviewMarkdown}
-            />
-          ) : null}
-        </section>
+        <PriorThreadTurn
+          key={turn.sessionId}
+          turn={turn}
+          onOpenMarkdown={onOpenMarkdown}
+          onPreviewMarkdown={onPreviewMarkdown}
+        />
       ))}
     </div>
   )
 }
 
-function RunSummary({
-  prompt,
-  status,
-  model,
-  pendingApprovals,
-  pendingQuestions,
+function PriorThreadTurn({
+  turn,
+  onOpenMarkdown,
+  onPreviewMarkdown,
 }: {
-  prompt: string
-  status: SessionStatus | null
-  model?: string
-  pendingApprovals: number
-  pendingQuestions: number
+  turn: ThreadTranscriptTurn
+  onOpenMarkdown?: (request: MarkdownLinkRequest) => void
+  onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
 }) {
-  const [copied, setCopied] = useState(false)
-  const copyPrompt = useCallback(() => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      void navigator.clipboard.writeText(prompt)
-    }
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1_200)
-  }, [prompt])
+  const timedActivities = useMemo(
+    () => deriveTimedSessionActivities(turn.events),
+    [turn.events],
+  )
+  const activities = useMemo(
+    () => timedActivities.map(({ activity }) => activity),
+    [timedActivities],
+  )
+  const activityTimes = useMemo(
+    () => timedActivities.map(({ at }) => at),
+    [timedActivities],
+  )
+  const seedUserMessage = turn.prompt.trim()
+    ? {
+        text: turn.prompt,
+        attachments: turn.imageAttachments,
+        at: turn.createdAt,
+      }
+    : undefined
+
+  if (activities.length > 0 || seedUserMessage) {
+    return (
+      <MessageStream
+        activities={activities}
+        activityTimes={activityTimes}
+        sessionId={turn.sessionId}
+        running={false}
+        seedUserMessage={seedUserMessage}
+        showAssistantActions={false}
+        streamHandlers={{
+          onOpenMarkdown,
+          onPreviewMarkdown,
+        }}
+      />
+    )
+  }
+
+  if (!turn.assistantText?.trim()) return null
 
   return (
-    <div className="flex min-w-0 flex-col gap-3 border-b border-hairline pb-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0 flex-1">
-        {prompt ? (
-          <details className="group/prompt rounded-card border border-hairline bg-card/40">
-            <summary className="flex cursor-pointer list-none items-start gap-2 px-3 py-2 text-sm leading-6 text-primary">
-              <span className="min-w-0 flex-1 break-words">
-                {prompt}
-              </span>
-              <span className="mt-1 shrink-0 text-muted transition-transform group-open/prompt:rotate-90">
-                {iconChevronRight}
-              </span>
-            </summary>
-            <div className="border-t border-hairline px-3 py-2">
-              <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-primary">
-                {prompt}
-              </pre>
-              <div className="mt-2 flex justify-end">
-                <button
-                  type="button"
-                  onClick={copyPrompt}
-                  className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs text-secondary hover:bg-white/5 hover:text-primary"
-                >
-                  <span aria-hidden="true">{iconCopy}</span>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          </details>
-        ) : (
-          <div className="break-words text-sm leading-6 text-primary">
-            Ask an agent to start a coding session.
-          </div>
-        )}
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
-          <span className={statusClass(status)}>{statusLabel(status)}</span>
-          {model ? <span>{model}</span> : null}
-          {pendingApprovals > 0 ? <span>{pendingApprovals} approval request</span> : null}
-          {pendingQuestions > 0 ? <span>{pendingQuestions} question waiting</span> : null}
-        </div>
-      </div>
-    </div>
+    <section className="flex flex-col gap-3">
+      <AssistantMessage
+        text={turn.assistantText}
+        showActions={false}
+        onOpenMarkdown={onOpenMarkdown}
+        onPreviewMarkdown={onPreviewMarkdown}
+      />
+    </section>
   )
 }
-
-const iconCopy = (
-  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4">
-    <rect x="4" y="4" width="9" height="9" rx="1.5" />
-    <path d="M11 4V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1" />
-  </svg>
-)
-
-const iconChevronRight = (
-  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.6">
-    <path d="m6 4 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
 
 function ApprovalCallout({
   request,
@@ -898,30 +1008,4 @@ function EmptyRunState({ project }: { project: Project }) {
       </p>
     </div>
   )
-}
-
-function statusLabel(status: SessionStatus | null): string {
-  if (!status) return 'idle'
-  if (status === 'awaiting-approval') return 'awaiting review'
-  if (status === 'awaiting-input') return 'awaiting answer'
-  return status
-}
-
-function statusClass(status: SessionStatus | null): string {
-  switch (status) {
-    case 'running':
-      return 'rounded border border-accent-primary/40 bg-accent-primary/10 px-2 py-0.5 text-accent-primary'
-    case 'awaiting-approval':
-      return 'rounded border border-accent-warn/40 bg-accent-warn/10 px-2 py-0.5 text-accent-warn'
-    case 'awaiting-input':
-      return 'rounded border border-accent-primary/40 bg-accent-primary/10 px-2 py-0.5 text-accent-primary'
-    case 'done':
-      return 'rounded border border-accent-add/30 bg-accent-add/10 px-2 py-0.5 text-accent-add'
-    case 'error':
-      return 'rounded border border-accent-del/40 bg-accent-del/10 px-2 py-0.5 text-accent-del'
-    case 'cancelled':
-      return 'rounded border border-hairline bg-card px-2 py-0.5 text-muted'
-    default:
-      return 'rounded border border-hairline bg-card px-2 py-0.5 text-muted'
-  }
 }

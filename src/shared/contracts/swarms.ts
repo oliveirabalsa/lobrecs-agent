@@ -1,11 +1,12 @@
 import type { ImageAttachment, ModelTier, SupportedAgentId } from './agents'
 import type { SessionStatus } from './sessions'
 
-export const SWARM_STRATEGIES = ['managed', 'parallel', 'sequential', 'fan-out'] as const
+export const SWARM_STRATEGIES = ['managed', 'parallel', 'sequential', 'fan-out', 'multitask'] as const
 
 export type SwarmStrategy = (typeof SWARM_STRATEGIES)[number]
 
 export interface SwarmAgentConfig {
+  profileId?: string
   role: string
   agentId: SupportedAgentId
   modelOverride?: string

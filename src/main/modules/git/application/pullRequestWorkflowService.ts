@@ -4,6 +4,7 @@ import { requireProject } from '../../projects/application/requireProject'
 import { buildProcessEnvironment } from '../../../process/environment'
 import { runGit } from '../infrastructure/runGit'
 import { buildGhPrCreateArgs, resolveGhCommand } from '../infrastructure/githubCli'
+import { GitHubPrProvider } from '../infrastructure/githubPrProvider'
 import type {
   GitRemoteInfo,
   CreatePullRequestInput,
@@ -11,19 +12,28 @@ import type {
   CreatePullRequestResult,
   GeneratePullRequestDraftInput,
   GeneratePullRequestDraftResult,
+  GitDiffReviewResult,
   GitProviderType,
+  PullRequestDiffSnapshot,
+  ReviewPullRequestInput,
+  SyncPullRequestReviewInput,
 } from '../../../../shared/contracts/git'
 import { getProviderType, isGitHubRemote, isAzureRemote } from '../domain/pullRequest'
 import { buildPrDraftPrompt, createDraftTitle } from '../domain/prDraft'
+import { buildPrReviewPrompt } from '../domain/prReview'
+import { normalizeDiffReview } from '../domain/diffReview'
 import { loadPrTemplate } from '../domain/prTemplate'
 import { getModelForTier } from '../../../router/ModelRouter'
 import { deriveActivityEvents } from '../../../session/activity'
+import { reviewIssuesStore } from '../../../store'
 import type {
   AgentEvent,
   AgentRuntimeSettings,
   ModelTier,
   SupportedAgentId,
 } from '../../../../shared/types'
+
+const PR_REVIEW_TIMEOUT_MS = 180_000
 
 export class PullRequestWorkflowService {
   constructor(private readonly context: MainIpcContext) {}
@@ -134,6 +144,89 @@ export class PullRequestWorkflowService {
     })
   }
 
+  async reviewPullRequest(input: ReviewPullRequestInput): Promise<GitDiffReviewResult> {
+    const project = requireProject(input.projectId)
+    const remoteInfo = await this.getRemoteInfo(input.projectId)
+
+    if (remoteInfo.provider !== 'github') {
+      throw new Error('PR-native review is only supported for GitHub remotes today.')
+    }
+
+    const snapshot = await new GitHubPrProvider().fetchPullRequestDiff(
+      project.repoPath,
+      remoteInfo,
+      input.prNumber,
+    )
+
+    if (snapshot.changedFiles.length === 0) {
+      throw new Error('Pull request has no changed files to review.')
+    }
+
+    const prompt = buildPrReviewPrompt(snapshot)
+    const selection = await selectAnalysisAgent(this.context, input.projectId)
+    const responseText = await runPrDraftAgent(
+      this.context,
+      selection,
+      project.repoPath,
+      prompt,
+      {
+        sessionIdPrefix: 'git-pr-review',
+        timeoutMs: PR_REVIEW_TIMEOUT_MS,
+        timeoutMessage: 'Pull request review timed out.',
+      },
+    )
+
+    const review = normalizeDiffReview(responseText, snapshot.changedFiles)
+    const statusSummary = snapshot.diffStat
+      .split(/\r?\n/)
+      .filter((line) => line.trim())
+      .pop()
+      ?.trim() ?? `${snapshot.changedFiles.length} changed file${snapshot.changedFiles.length === 1 ? '' : 's'}`
+
+    const result: GitDiffReviewResult = {
+      projectId: input.projectId,
+      fingerprint: snapshot.headSha,
+      branch: snapshot.headBranch,
+      statusSummary,
+      changedFiles: snapshot.changedFiles,
+      summary: review.summary,
+      findings: review.findings,
+      rawOutput: review.rawOutput,
+      analysis: {
+        agentId: selection.agentId,
+        model: selection.model,
+      },
+      target: 'pull-request',
+      source: {
+        provider: 'github',
+        url: snapshot.url,
+        prNumber: snapshot.prNumber,
+        repoSlug: snapshot.repoSlug,
+        baseBranch: snapshot.baseBranch,
+        headBranch: snapshot.headBranch,
+        headSha: snapshot.headSha,
+      },
+    }
+
+    reviewIssuesStore.savePrReviewIssues({
+      result,
+      prNumber: snapshot.prNumber,
+      prUrl: snapshot.url,
+      headSha: snapshot.headSha,
+      threadId: input.threadId,
+    })
+
+    return result
+  }
+
+  async syncPrReview(input: SyncPullRequestReviewInput): Promise<GitDiffReviewResult> {
+    return this.reviewPullRequest({
+      projectId: input.projectId,
+      prNumber: input.prNumber,
+      threadId: input.threadId,
+    })
+  }
+
   async resolveTemplate(projectId: string): Promise<string> {
     const project = requireProject(projectId)
     const remoteInfo = await this.getRemoteInfo(projectId)
@@ -156,9 +249,9 @@ export class PullRequestWorkflowService {
     }
 
     if (providerType === 'azure') {
-      const httpsMatch = cleaned.match(/^https?:\/\/([^@]+)@?\.?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)/)
+      const httpsMatch = cleaned.match(/^https?:\/\/(?:[^@]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)/)
       if (httpsMatch) {
-        const [, , org, project, repo] = httpsMatch
+        const [, org, project, repo] = httpsMatch
         return { url: cleaned, provider: 'azure', owner: `${org}/${project}`, repo }
       }
 
@@ -303,8 +396,9 @@ export class PullRequestWorkflowService {
       throw new Error(`Azure DevOps API error: ${response.status} - ${error}`)
     }
 
-    const data = await response.json() as { pullRequestId: number; remoteUrl: string }
-    return { url: data.remoteUrl, number: data.pullRequestId }
+    const data = await response.json() as { pullRequestId: number }
+    const prUrl = `https://dev.azure.com/${org}/${project}/_git/${repo}/pullrequest/${data.pullRequestId}`
+    return { url: prUrl, number: data.pullRequestId }
   }
 
 }
@@ -381,11 +475,18 @@ async function selectAnalysisAgent(
   throw new Error('No lightweight analysis model is available. Enable Codex, Antigravity, or OpenCode first.')
 }
 
+interface PrAgentRunOptions {
+  sessionIdPrefix?: string
+  timeoutMs?: number
+  timeoutMessage?: string
+}
+
 async function runPrDraftAgent(
   context: MainIpcContext,
   selection: AnalysisAgentSelection,
   repoPath: string,
   prompt: string,
+  options: PrAgentRunOptions = {},
 ): Promise<string> {
   const adapter = context.adapters.get(selection.agentId)
   if (!adapter) {
@@ -393,7 +494,7 @@ async function runPrDraftAgent(
   }
 
   const session = await adapter.dispatch({
-    sessionId: `git-pr-draft-${randomUUID()}`,
+    sessionId: `${options.sessionIdPrefix ?? 'git-pr-draft'}-${randomUUID()}`,
     prompt,
     repoPath,
     model: selection.model,
@@ -410,8 +511,8 @@ async function runPrDraftAgent(
 
     const timeout = setTimeout(() => {
       session.cancel()
-      settleWithError(new Error('PR suggestion analysis timed out.'))
-    }, 45_000)
+      settleWithError(new Error(options.timeoutMessage ?? 'PR suggestion analysis timed out.'))
+    }, options.timeoutMs ?? 45_000)
 
     const settleWithError = (error: Error): void => {
       if (settled) return

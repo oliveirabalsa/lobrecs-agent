@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPlanReviewMultitaskRequest,
   buildPlanReviewDecisionPayload,
   findPlanReviewManualOption,
   normalizePlanReviewText,
   resolvePlanReviewOutcome,
   selectPlanReviewModel,
   toPlanReviewMarkdownDocument,
-} from './PlanReviewCard'
+} from './planReviewCardState'
 import type { ModelGroup, ModelSelection } from '../Composer/types'
 
 describe('resolvePlanReviewOutcome', () => {
@@ -176,6 +177,35 @@ describe('buildPlanReviewDecisionPayload', () => {
       reviewId: 'review-1',
       sessionId: 'session-1',
       decision: 'reject',
+    })
+  })
+})
+
+describe('buildPlanReviewMultitaskRequest', () => {
+  it('uses the owning project id and current thread instead of the planning session id', () => {
+    expect(
+      buildPlanReviewMultitaskRequest({
+        projectId: 'project-1',
+        threadId: 'thread-1',
+        planText: '1. Split implementation and tests',
+      }),
+    ).toEqual({
+      projectId: 'project-1',
+      threadId: 'thread-1',
+      prompt: '1. Split implementation and tests',
+    })
+  })
+
+  it('omits empty thread ids so main can create a thread when needed', () => {
+    expect(
+      buildPlanReviewMultitaskRequest({
+        projectId: 'project-1',
+        threadId: null,
+        planText: 'Run this as multitask',
+      }),
+    ).toEqual({
+      projectId: 'project-1',
+      prompt: 'Run this as multitask',
     })
   })
 })

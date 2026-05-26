@@ -1,8 +1,14 @@
 import { ipcMain } from 'electron'
-import { specsStore } from '../../../store'
+import { projectsStore, specsStore } from '../../../store'
 import type { CreateSpecInput, UpdateSpecInput } from '../../../../shared/types'
 import type { MainIpcContext } from '../../shared/ipcContext'
 import { suggestSpecDraft } from '../application/draftSuggestAgent'
+import { specArtifactService } from '../application/specArtifactService'
+import {
+  validateReadSpecArtifactInput,
+  validateSpecId,
+  validateWriteSpecArtifactInput,
+} from '../../../../shared/types'
 
 export function registerSpecHandlers(context: MainIpcContext): void {
   ipcMain.handle('specs:list', async (_event, projectId: string) => specsStore.list(projectId))
@@ -21,5 +27,28 @@ export function registerSpecHandlers(context: MainIpcContext): void {
     async (_event, { projectId, title, goal }: { projectId: string; title: string; goal: string }) =>
       suggestSpecDraft(context, projectId, title, goal),
   )
+  ipcMain.handle('specs:list-artifacts', async (_event, rawSpecId: unknown) => {
+    const { spec, repoPath } = requireSpecProject(validateSpecId(rawSpecId))
+    return specArtifactService.listArtifacts(spec, repoPath)
+  })
+  ipcMain.handle('specs:read-artifact', async (_event, rawInput: unknown) => {
+    const input = validateReadSpecArtifactInput(rawInput)
+    const { spec, repoPath } = requireSpecProject(input.specId)
+    return specArtifactService.readArtifact(spec, repoPath, input.artifactId)
+  })
+  ipcMain.handle('specs:write-artifact', async (_event, rawInput: unknown) => {
+    const input = validateWriteSpecArtifactInput(rawInput)
+    const { spec, repoPath } = requireSpecProject(input.specId)
+    return specArtifactService.writeArtifact(spec, repoPath, input)
+  })
 }
 
+function requireSpecProject(specId: string) {
+  const spec = specsStore.get(specId)
+  if (!spec) throw new Error(`Spec not found: ${specId}`)
+
+  const project = projectsStore.get(spec.projectId)
+  if (!project) throw new Error(`Project not found: ${spec.projectId}`)
+
+  return { spec, repoPath: project.repoPath }
+}

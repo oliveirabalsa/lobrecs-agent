@@ -175,6 +175,55 @@ describe('SessionManager', () => {
     expect(adapter.dispatchedParams?.context).toContain('[REDACTED_SECRET]')
   })
 
+  it('can return a durable session before slow context resolution finishes', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    let resolveContext!: (context: string) => void
+    const contextGate = new Promise<string>((resolve) => {
+      resolveContext = resolve
+    })
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+      resolveContext: async () => contextGate,
+    })
+
+    const { sessionId, threadId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'send immediately',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      returnAfterSessionCreated: true,
+    })
+
+    expect(typeof threadId).toBe('string')
+    expect(sessionsStore.get(sessionId)).toMatchObject({
+      prompt: 'send immediately',
+      status: 'running',
+      threadId,
+    })
+    expect(manager.isActive(sessionId)).toBe(true)
+    expect(adapter.dispatchedParams).toBeNull()
+    expect(
+      broadcasts.some(
+        (event) =>
+          event.sessionId === sessionId &&
+          event.type === 'activity' &&
+          (event.payload as { title?: string }).title === 'Preparing context',
+      ),
+    ).toBe(true)
+
+    resolveContext('resolved context')
+    await waitFor(() => adapter.dispatchedParams !== null)
+    expect(adapter.dispatchedParams).toMatchObject({
+      sessionId,
+      context: 'resolved context',
+    })
+  })
+
   it('deduplicates identical process warning activities while preserving stderr events', async () => {
     const project = createProject()
     const adapter = new FakeAdapter()
@@ -508,6 +557,52 @@ describe('SessionManager', () => {
       sessionId,
       model: 'gpt-5.3-codex',
       modelFallbacks: ['gpt-5.3-codex-spark'],
+    })
+  })
+
+  it('auto retries managed swarm sessions when a provider API reports model not found', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter('opencode')
+    const manager = new SessionManager({
+      adapters: [adapter],
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'finish the managed swarm task',
+      agentId: 'opencode',
+      model: 'minimax/broken-model',
+      modelFallbacks: ['qwen/qwen3-coder', 'anthropic/claude-sonnet-4.5'],
+      modelRecoveryMode: 'auto',
+      repoPath: project.repoPath,
+      spawnedAgent: { kind: 'swarm', role: 'implementer' },
+    })
+
+    adapter.emit({
+      type: 'error',
+      sessionId,
+      payload: {
+        name: 'APIError',
+        data: {
+          message: '404 Page not found',
+          statusCode: 404,
+          metadata: { url: 'https://api.minimaxi.chat/v1/messages' },
+        },
+        responseBody: '404 page not found',
+      },
+      timestamp: 10,
+    })
+
+    await waitFor(() => adapter.dispatches.length === 2)
+
+    expect(sessionsStore.get(sessionId)).toMatchObject({
+      status: 'running',
+      model: 'qwen/qwen3-coder',
+    })
+    expect(adapter.dispatches[1]).toMatchObject({
+      sessionId,
+      model: 'qwen/qwen3-coder',
+      modelFallbacks: ['anthropic/claude-sonnet-4.5'],
     })
   })
 
@@ -1400,6 +1495,71 @@ describe('SessionManager', () => {
     expect(storedTypes.indexOf('diff')).toBeLessThan(storedTypes.indexOf('session-complete'))
   })
 
+  it('keeps a thread-level worktree across sessions until it is brought back', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const thread = threadsStore.create({ projectId: project.id, title: 'Handoff thread' })
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+
+    const moved = await manager.moveThreadToWorktree(
+      { projectId: project.id, threadId: thread.id, cleanupPolicy: 'manual' },
+      repoPath,
+    )
+
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      threadId: thread.id,
+      prompt: 'edit in the handoff worktree',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath,
+    })
+
+    expect(adapter.dispatchedParams?.repoPath).toBe(moved.worktreePath)
+    await fs.writeFile(
+      path.join(adapter.dispatchedParams?.repoPath ?? '', 'existing.ts'),
+      'handoff edit\n',
+      'utf-8',
+    )
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 20,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'diff'))
+    expect(worktreeManager.getThreadWorktree(thread.id)?.worktreePath).toBe(moved.worktreePath)
+    await expect(fs.readFile(path.join(repoPath, 'existing.ts'), 'utf-8')).resolves.toBe(
+      'original\n',
+    )
+
+    const diffEvent = broadcasts.find((event) => event.type === 'diff')
+    expect(diffEvent?.payload).toEqual([
+      expect.objectContaining({
+        changeType: 'modified',
+        status: 'pending',
+      }),
+    ])
+
+    const broughtBack = await manager.bringThreadToLocal(
+      { projectId: project.id, threadId: thread.id },
+      repoPath,
+    )
+    await expect(fs.readFile(path.join(repoPath, 'existing.ts'), 'utf-8')).resolves.toBe(
+      'handoff edit\n',
+    )
+    expect(broughtBack.location).toBe('worktree')
+    expect(broughtBack.hasLocalChanges).toBe(true)
+  })
+
   it('runs the quality gate after applied diffs and before completion is emitted', async () => {
     const repoPath = await createGitRepo(tempDirs)
     const project = createProject(repoPath)
@@ -1462,6 +1622,87 @@ describe('SessionManager', () => {
     expect(qualityIndex).toBeGreaterThanOrEqual(0)
     expect(qualityIndex).toBeLessThan(
       broadcasts.findIndex((event) => event.type === 'session-complete'),
+    )
+  })
+
+  it.each([
+    { kind: 'swarm' as const, role: 'implementer' },
+    { kind: 'delegation' as const, role: 'multitask-decomposer' },
+  ])('skips the quality gate for $kind sessions after applied diffs', async (spawnedAgent) => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const qualityGateRunner = vi.fn(async () => undefined)
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      qualityGateRunner,
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'edit locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      spawnedAgent,
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated by spawned agent\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    expect(qualityGateRunner).not.toHaveBeenCalled()
+  })
+
+  it('keeps the quality gate enabled for QA repair sessions', async () => {
+    const repoPath = await createGitRepo(tempDirs)
+    const project = createProject(repoPath)
+    const adapter = new FakeAdapter()
+    const broadcasts: AgentEvent[] = []
+    const qualityGateRunner = vi.fn(async () => undefined)
+    const manager = new SessionManager({
+      adapters: [adapter],
+      broadcast: (event) => broadcasts.push(event),
+      qualityGateRunner,
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'repair locally',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+      qualityAttempt: 1,
+      spawnedAgent: { kind: 'quality-repair', role: 'QA repair agent' },
+    })
+
+    await fs.writeFile(path.join(repoPath, 'existing.ts'), 'updated by repair\n', 'utf-8')
+
+    adapter.emit({
+      type: 'session-complete',
+      sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+
+    await waitFor(() => broadcasts.some((event) => event.type === 'session-complete'))
+
+    expect(qualityGateRunner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId,
+        projectId: project.id,
+        repoPath,
+        attempt: 1,
+      }),
     )
   })
 
@@ -2079,13 +2320,13 @@ describe('SessionManager', () => {
     const project = createProject(await createGitRepo(tempDirs))
     const adapter = new FakeAdapter()
     const broadcasts: AgentEvent[] = []
-    const contextQueries: string[] = []
+    const contextRequests: Array<{ prompt: string; planMode?: boolean }> = []
     const manager = new SessionManager({
       adapters: [adapter],
       broadcast: (event) => broadcasts.push(event),
       worktreeIsolation: false,
-      resolveContext: async ({ prompt, baseContext }) => {
-        contextQueries.push(prompt)
+      resolveContext: async ({ prompt, baseContext, planMode }) => {
+        contextRequests.push({ prompt, planMode })
         return baseContext ?? null
       },
     })
@@ -2116,8 +2357,16 @@ describe('SessionManager', () => {
 
     // Both phases query repo context with the raw task — the execution phase
     // must NOT search with the generic "plan approved" prompt.
-    expect(contextQueries).toEqual(['add a settings page', 'add a settings page'])
-    expect(contextQueries[1]).not.toMatch(/approved/i)
+    expect(contextRequests).toEqual([
+      { prompt: 'add a settings page', planMode: true },
+      { prompt: 'add a settings page', planMode: false },
+    ])
+    expect(contextRequests[1]?.prompt).not.toMatch(/approved/i)
+    const startupTitles = broadcasts
+      .filter(isStartupDiagnostic)
+      .map((event) => (event.payload as { title: string }).title)
+    expect(startupTitles).toContain('Investigating repository for plan mode')
+    expect(startupTitles).toContain('Plan-mode investigation ready')
   })
 
   it('leaves the queue intact when a plan is rejected while the thread is still busy', async () => {
@@ -2269,6 +2518,7 @@ describe('SessionManager', () => {
       },
     })
 
+    expect(threadsStore.get(parent.threadId)?.lastSessionId).toBe(parent.sessionId)
     expect(sessionsStore.get(child.sessionId)?.spawnedAgent).toEqual({
       kind: 'delegation',
       role: 'Research Hermes delegation',
@@ -2304,6 +2554,147 @@ describe('SessionManager', () => {
       status: 'done',
       summary: 'Hermes child agents use isolated context.',
     })
+  })
+
+  it('does not make spawned background sessions the visible thread session', async () => {
+    const project = createProject()
+    const parentAdapter = new ScopedFakeAdapter('claude-code')
+    const childAdapter = new ScopedFakeAdapter('codex')
+    const manager = new SessionManager({
+      adapters: [parentAdapter, childAdapter],
+    })
+
+    const parent = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'Implement the workflow',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    const child = await manager.dispatch({
+      projectId: project.id,
+      prompt: '[Background task]\nInspect output handling',
+      agentId: 'codex',
+      model: 'gpt-5-codex',
+      repoPath: project.repoPath,
+      threadId: parent.threadId,
+      spawnedAgent: { kind: 'swarm', role: 'Inspect output handling' },
+    })
+
+    expect(threadsStore.get(parent.threadId)?.lastSessionId).toBe(parent.sessionId)
+    expect(sessionsStore.get(child.sessionId)?.spawnedAgent).toEqual({
+      kind: 'swarm',
+      role: 'Inspect output handling',
+    })
+  })
+
+  it('queues one main-agent handoff after the parent and all delegated children finish', async () => {
+    const project = createProject()
+    const parentAdapter = new ScopedFakeAdapter('claude-code')
+    const childAdapter = new ScopedFakeAdapter('codex')
+    const manager = new SessionManager({
+      adapters: [parentAdapter, childAdapter],
+    })
+
+    const parent = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'Implement the delegated workflow',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    const childOne = await manager.dispatch({
+      projectId: project.id,
+      prompt: '[Delegated task]\nInspect output handling',
+      agentId: 'codex',
+      model: 'gpt-5-codex',
+      repoPath: project.repoPath,
+      threadId: parent.threadId,
+      spawnedAgent: { kind: 'delegation', role: 'Inspect output handling' },
+      delegatedTask: {
+        delegationId: 'delegate-1',
+        parentSessionId: parent.sessionId,
+        goal: 'Inspect output handling',
+      },
+    })
+    const childTwo = await manager.dispatch({
+      projectId: project.id,
+      prompt: '[Delegated task]\nInspect edited files',
+      agentId: 'codex',
+      model: 'gpt-5-codex',
+      repoPath: project.repoPath,
+      threadId: parent.threadId,
+      spawnedAgent: { kind: 'delegation', role: 'Inspect edited files' },
+      delegatedTask: {
+        delegationId: 'delegate-2',
+        parentSessionId: parent.sessionId,
+        goal: 'Inspect edited files',
+      },
+    })
+
+    parentAdapter.emit({
+      type: 'session-complete',
+      sessionId: parent.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 10,
+    })
+    await waitFor(() => sessionsStore.get(parent.sessionId)?.status === 'done')
+    expect(parentAdapter.dispatches).toHaveLength(1)
+
+    childAdapter.emit({
+      type: 'stdout',
+      sessionId: childOne.sessionId,
+      payload: { text: 'Collected background output.' },
+      timestamp: 20,
+    })
+    childAdapter.emit({
+      type: 'diff',
+      sessionId: childOne.sessionId,
+      payload: [
+        {
+          filePath: `${project.repoPath}/src/background.ts`,
+          changeType: 'modified',
+          additions: 4,
+          deletions: 1,
+          status: 'applied',
+        },
+      ],
+      timestamp: 21,
+    })
+    childAdapter.emit({
+      type: 'session-complete',
+      sessionId: childOne.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 22,
+    })
+    await waitFor(() => sessionsStore.get(childOne.sessionId)?.status === 'done')
+    expect(parentAdapter.dispatches).toHaveLength(1)
+
+    childAdapter.emit({
+      type: 'stdout',
+      sessionId: childTwo.sessionId,
+      payload: { text: 'Edited file summary is ready.' },
+      timestamp: 30,
+    })
+    childAdapter.emit({
+      type: 'session-complete',
+      sessionId: childTwo.sessionId,
+      payload: { exitCode: 0 },
+      timestamp: 31,
+    })
+
+    await waitFor(() => parentAdapter.dispatches.length === 2)
+    expect(parentAdapter.dispatches[1]).toMatchObject({
+      sessionId: expect.any(String),
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('[Background agent handoff]')
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('Inspect output handling')
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('Collected background output.')
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('src/background.ts')
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('Inspect edited files')
+    expect(parentAdapter.dispatches[1]?.prompt).toContain('Edited file summary is ready.')
   })
 
   it('runs delegate-task tool calls through the configured background runner', async () => {
@@ -2444,7 +2835,9 @@ function isStartupDiagnostic(event: AgentEvent): boolean {
   const title = (event.payload as { title?: unknown }).title
   return (
     title === 'Preparing context' ||
+    title === 'Investigating repository for plan mode' ||
     title === 'Context ready' ||
+    title === 'Plan-mode investigation ready' ||
     title === 'Starting agent process' ||
     title === 'Agent process started'
   )
@@ -2500,7 +2893,7 @@ async function git(cwd: string, args: string[]): Promise<void> {
 }
 
 async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
     if (await predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }

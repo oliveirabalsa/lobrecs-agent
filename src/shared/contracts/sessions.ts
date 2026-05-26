@@ -1,5 +1,6 @@
-import type { AgentId, ImageAttachment } from './agents'
+import type { AgentId, ImageAttachment, SupportedAgentId } from './agents'
 import type { ApprovalRequest } from './diffs'
+import type { MultitaskTask } from './multitask'
 
 export type SessionStatus =
   | 'running'
@@ -200,6 +201,14 @@ export type AgentActivity =
       error?: string
     }
   | {
+      kind: 'multitask-plan'
+      planId: string
+      tasks: MultitaskTask[]
+      totalEstimatedCostUsd: number
+      decomposedBy: { agentId: SupportedAgentId; model: string }
+      originalPrompt: string
+    }
+  | {
       kind: 'todo-list'
       items: TodoItem[]
     }
@@ -235,6 +244,7 @@ export interface ThreadTranscriptTurn {
   threadId: string
   prompt: string
   imageAttachments?: ImageAttachment[]
+  events: AgentEvent[]
   assistantText?: string
   status: SessionStatus
   createdAt: number
@@ -244,4 +254,5 @@ export interface ThreadTranscriptTurn {
 export interface ListThreadTranscriptOptions {
   limit?: number
   excludeSessionId?: string
+  excludeSpawnedAgents?: boolean
 }

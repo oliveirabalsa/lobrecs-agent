@@ -204,7 +204,7 @@ export class CliEditorTerminalService {
         editorId: SHELL_TERMINAL_EDITOR_ID,
         editorName: SHELL_TERMINAL_NAME,
         command: userShell,
-        args: ['-i', '-l'],
+        args: ['-i'],
         env: { ZDOTDIR: integrationDir },
         integrationDir,
       }
@@ -298,10 +298,6 @@ async function createZshIntegrationDir(): Promise<string> {
   const directory = await fs.mkdtemp(path.join(tmpdir(), 'lobrecs-agent-zsh-'))
   const home = homedir()
 
-  await fs.writeFile(
-    path.join(directory, '.zprofile'),
-    sourceIfReadable(path.join(home, '.zprofile')),
-  )
   await fs.writeFile(
     path.join(directory, '.zshrc'),
     [

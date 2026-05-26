@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildManagerPrompt, parseManagerPlan } from './managerPrompt'
 
 const INPUT = {
-  supportedAgentIds: ['claude-code', 'codex', 'opencode', 'antigravity'] as const,
+  supportedAgentIds: ['claude-code', 'codex', 'opencode', 'antigravity', 'cursor'] as const,
   maxAgents: 5,
 }
 

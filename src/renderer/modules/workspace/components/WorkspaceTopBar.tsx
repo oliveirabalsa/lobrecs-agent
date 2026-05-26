@@ -2,12 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import type { EditorInfo } from '../../../../shared/types'
 import { Pill } from '../../../components/ui'
 import { OpenInEditorMenu } from './OpenInEditorMenu'
+import { BranchDropdown } from './BranchDropdown'
 
-export type RightPanelMode = 'diff' | 'terminal' | 'swarm' | 'context' | 'reviews'
+export type RightPanelMode =
+  | 'diff'
+  | 'terminal'
+  | 'swarm'
+  | 'context'
+  | 'reviews'
+  | 'doctor'
+  | 'evidence'
 
 interface WorkspaceTopBarProps {
   title: string
   model?: string
+  branchName?: string | null
   rightPanelOpen: boolean
   rightPanelMode: RightPanelMode
   hasDiff: boolean
@@ -27,6 +36,9 @@ interface WorkspaceTopBarProps {
   onOpenCliEditor?: (editor: EditorInfo) => void
   sidebarCollapsed?: boolean
   onToggleSidebar?: () => void
+  projectId?: string
+  onBranchesClick?: () => void
+  onBranchChanged?: () => void
 }
 
 /**
@@ -38,6 +50,7 @@ interface WorkspaceTopBarProps {
 export function WorkspaceTopBar({
   title,
   model,
+  branchName,
   rightPanelOpen,
   rightPanelMode,
   hasDiff,
@@ -56,6 +69,9 @@ export function WorkspaceTopBar({
   onOpenCliEditor,
   sidebarCollapsed = false,
   onToggleSidebar,
+  projectId,
+  onBranchesClick,
+  onBranchChanged,
 }: WorkspaceTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -115,6 +131,9 @@ export function WorkspaceTopBar({
   const swarmActive = rightPanelOpen && rightPanelMode === 'swarm'
   const contextActive = rightPanelOpen && rightPanelMode === 'context'
   const reviewsActive = rightPanelOpen && rightPanelMode === 'reviews'
+  const doctorActive = rightPanelOpen && rightPanelMode === 'doctor'
+  const evidenceActive = rightPanelOpen && rightPanelMode === 'evidence'
+  const branchLabel = branchName?.trim()
   const leftInsetClass = reserveTrafficLightInset
     ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
     : 'pl-2 md:pl-4'
@@ -245,6 +264,23 @@ export function WorkspaceTopBar({
           {model ? model : 'auto'}
         </Pill>
 
+        {branchLabel && projectId ? (
+          <BranchDropdown
+            projectId={projectId}
+            currentBranch={branchLabel}
+            onBranchChanged={onBranchChanged}
+            onBranchesClick={onBranchesClick}
+          />
+        ) : branchLabel ? (
+          <Pill
+            tone="info"
+            leadingIcon={<BranchIcon />}
+            className="max-w-[120px] sm:max-w-[220px] inline-flex"
+          >
+            {branchLabel}
+          </Pill>
+        ) : null}
+
         {repoPath ? (
           <OpenInEditorMenu
             repoPath={repoPath}
@@ -355,6 +391,42 @@ export function WorkspaceTopBar({
                 role="menuitem"
                 onClick={() => {
                   setPanelMenuOpen(false)
+                  onToggleRightPanel('evidence')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+              >
+                <EvidenceIcon />
+                <span className="flex-1">Evidence</span>
+                {evidenceActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPanelMenuOpen(false)
+                  onToggleRightPanel('doctor')
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+              >
+                <DoctorIcon />
+                <span className="flex-1">Doctor</span>
+                {doctorActive ? (
+                  <span className="text-accent-primary">
+                    <CheckIcon />
+                  </span>
+                ) : null}
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPanelMenuOpen(false)
                   onToggleRightPanel('terminal')
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
@@ -446,6 +518,27 @@ function PlayIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <polygon points="6 4 20 12 6 20" />
+    </svg>
+  )
+}
+
+function BranchIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
     </svg>
   )
 }
@@ -553,6 +646,36 @@ function ReviewInboxIcon() {
       <path d="M8 9h8" />
       <path d="M8 14h5" />
       <path d="m15 14 1.5 1.5L20 12" />
+    </svg>
+  )
+}
+
+function DoctorIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+      <path d="M9 12l2 2 4-5" />
+    </svg>
+  )
+}
+
+function EvidenceIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="m21 15-4.5-4.5L7 20" />
+      <path d="M14 20l3.5-3.5L21 20" />
     </svg>
   )
 }

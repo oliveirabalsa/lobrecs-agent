@@ -396,6 +396,7 @@ function normalizeAssistantTimeline(
 
       flushPendingStream()
       const key = normalizeAssistantText(activity.text)
+      if (!key) return
       if (seenAssistantTexts.has(key)) return
 
       seenAssistantTexts.add(key)

@@ -88,7 +88,7 @@ export type GitTuiAction =
   | { type: 'discard-file'; path?: string }
   | { type: 'checkout-branch'; branchName?: string }
   | { type: 'delete-branch'; branchName?: string }
-  | { type: 'create-branch' }
+  | { type: 'create-branch'; branchName?: string }
   | { type: 'apply-stash'; stashId?: string }
   | { type: 'drop-stash'; stashId?: string }
   | { type: 'open-file-diff'; path?: string }

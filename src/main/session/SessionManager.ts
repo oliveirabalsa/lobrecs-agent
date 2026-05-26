@@ -1,6 +1,6 @@
 import type { EventEmitter } from 'node:events'
 import { createRequire } from 'node:module'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type {
   AgentActivity,
   AgentApprovalMode,
@@ -10,11 +10,8 @@ import type {
   AgentPlanReviewDecisionPayload,
   AgentRuntimeSettings,
   QueuedMessage,
-  QueueStatusEvent,
   Session,
   SpawnedAgentSession,
-  ThreadTranscriptTurn,
-  SessionStatus,
   SupportedAgentId,
   Thread,
   ThreadUpdatedEvent,
@@ -22,22 +19,51 @@ import type {
 import { processWarningKey } from '../../shared/contracts/agentOutput'
 import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
-import { promptEvidenceStore, sessionsStore, threadsStore } from '../store'
+import { runGit } from '../modules/git/infrastructure/runGit'
+import { validateBranchName } from '../modules/git/application/gitWorkspaceService'
+import { parseStatusPorcelain } from '../modules/git/domain/gitWorkspaceParsers'
+import { projectsStore, promptEvidenceStore, sessionsStore, threadsStore } from '../store'
 import { deriveActivityEvents } from './activity'
 import { buildPlanExecutionPrompt, buildPlanModeContext } from './planModePrompt'
-import { buildBoundedPromptContext, truncateForContext } from '../modules/context/application/contextBudget'
-import { redactSensitiveText } from '../modules/context/domain/secretRedaction'
-import {
-  buildLocalDiffProposals,
-  captureLocalChangeBaseline,
-  type LocalChangeBaseline,
-} from './localDiff'
-import {
-  filterProposalsToTouchedFiles,
-  noteTouchedFilesFromActivity,
-} from './fileTouchTracking'
+import { captureLocalChangeBaseline, type LocalChangeBaseline } from './localDiff'
 import { buildDiffProposals } from './worktreeDiff'
+import { filterProposalsToTouchedFiles } from './fileTouchTracking'
 import type { DiffProposal, ImageAttachment } from '../../shared/types'
+import type {
+  BringThreadToLocalInput,
+  CreateBranchHereInput,
+  GitChangedFile,
+  GitFileEntry,
+  MoveThreadToWorktreeInput,
+  WorktreeDiffPreview,
+  WorktreeHandoffRequest,
+  WorktreeHandoffState,
+} from '../../shared/contracts/git'
+import { SessionDispatchBootstrapService } from '../modules/sessions/application/sessionDispatchBootstrapService'
+import {
+  SessionLivenessService,
+  shouldTriggerLiveLocalDiff,
+} from '../modules/sessions/application/sessionLivenessService'
+import { SessionCompletionService } from '../modules/sessions/application/sessionCompletionService'
+import { SessionQueueService } from '../modules/sessions/application/sessionQueueService'
+import { SessionRecoveryDelegationService } from '../modules/sessions/application/sessionRecoveryDelegationService'
+import {
+  TERMINAL_SESSION_STATUSES,
+  isUserQuestionActivity,
+  type ActiveSession,
+  type DelegatedTaskRecord,
+  type ModelRecoveryRecord,
+  type PendingQueuedMessage,
+  type PlanReviewRecord,
+} from '../modules/sessions/application/sessionWorkflowTypes'
+import {
+  completionStatus,
+  errorMessage,
+  objectPayload,
+  readNumber,
+  textFromUnknownPayload,
+  withCompletionStatus,
+} from '../modules/sessions/application/sessionWorkflowUtils'
 
 const require = createRequire(import.meta.url)
 
@@ -103,6 +129,12 @@ export type DispatchSessionParams = {
     parentSessionId: string
     goal: string
   }
+  /**
+   * Return after the durable session/thread exists, while context resolution and
+   * process startup continue asynchronously. Used by the interactive composer so
+   * the user's message can render immediately.
+   */
+  returnAfterSessionCreated?: boolean
 }
 
 export type DispatchSessionResult = {
@@ -118,7 +150,24 @@ export type SessionContextResolver = (input: {
   repoPath: string
   prompt: string
   baseContext?: string | null
+  planMode?: boolean
 }) => Promise<string | null>
+export type SessionPromptDecorator = (input: {
+  projectId: string
+  repoPath: string
+  threadId: string
+  sessionId: string
+  prompt: string
+  agentId: AgentId
+}) => Promise<string>
+export type SessionRetryGate = (input: {
+  projectId: string
+  repoPath: string
+  threadId: string
+  sessionId: string
+  reason: string
+  nextModel?: string
+}) => Promise<{ allow: boolean; reason?: string }>
 export type QualityGateRunner = (input: {
   sessionId: string
   threadId: string
@@ -164,62 +213,6 @@ export type NotifierEvent =
 
 export type NotifierCallback = (event: NotifierEvent) => void
 
-type ActiveSession = Pick<AgentSession, 'approve' | 'reject' | 'cancel'> & {
-  repoPath: string
-  threadId: string
-  worktreePath: string | null
-  localBaseline: LocalChangeBaseline | null
-  localTouchedFiles: Set<string>
-  sharedLocalRepo: boolean
-  liveDiffTimer?: ReturnType<typeof setTimeout>
-  liveDiffSignature?: string
-  lastAgentEventAt: number
-  lastIdleHeartbeatAt: number
-  idleHeartbeatTimer?: ReturnType<typeof setTimeout>
-  qualityAttempt: number
-  /** True when this session was dispatched as the planning phase of plan mode. */
-  planMode: boolean
-  /** Carried so the gated execution session can re-dispatch with the same config. */
-  isolate: boolean
-  runtimeSettings?: AgentRuntimeSettings
-  /** Raw project context — carried so a gated execution session resolves with parity. */
-  baseContext?: string | null
-  /** Context retrieval query to preserve when a paused run is continued. */
-  contextQuery?: string
-  prompt: string
-  agentId: AgentId
-  modelFallbacks: string[]
-  imageAttachments?: ImageAttachment[]
-  adapterContext?: string | null
-  modelRecoveryMode: 'prompt' | 'auto'
-  /** Last provider-limit/capacity message observed before terminal failure. */
-  providerLimitReason?: string
-}
-
-/**
- * A plan awaiting the user's Approve/Reject decision. Holds everything needed
- * to dispatch the execution session once `resolvePlanReview` is called.
- */
-type PlanReviewRecord = {
-  reviewId: string
-  planningSessionId: string
-  projectId: string
-  threadId: string
-  repoPath: string
-  agentId: AgentId
-  model: string
-  isolate: boolean
-  runtimeSettings?: AgentRuntimeSettings
-  /**
-   * The original user task. Used as the execution session's context-retrieval
-   * query so repo context stays task-relevant — the agent prompt itself is the
-   * generic `buildPlanExecutionPrompt()` string, which is useless as a query.
-   */
-  taskPrompt: string
-  /** The planning session's raw project context, replayed for the execution session. */
-  baseContext?: string | null
-}
-
 export type PlanReviewSnapshot = Pick<
   PlanReviewRecord,
   'reviewId' | 'planningSessionId' | 'projectId' | 'agentId' | 'model'
@@ -232,54 +225,11 @@ export type PlanReviewExecutionOptions = {
   modelFallbacks?: string[]
 }
 
-type ModelRecoveryRecord = {
-  recoveryId: string
-  sourceSessionId: string
-  projectId: string
-  threadId: string
-  repoPath: string
-  prompt: string
-  agentId: AgentId
-  model: string
-  isolate: boolean
-  runtimeSettings?: AgentRuntimeSettings
-  baseContext?: string | null
-  contextQuery?: string
-  imageAttachments?: ImageAttachment[]
-  planMode: boolean
-  requiresImageSupport: boolean
-  reason: string
-}
-
 export type ModelRecoveryExecutionOptions = {
   runtimeSettings?: AgentRuntimeSettings
   modelFallbacks?: string[]
   validateSelection?: (agentId: SupportedAgentId, model: string) => void
 }
-
-type PendingQueuedMessage = QueuedMessage & {
-  runtimeSettings?: AgentRuntimeSettings
-}
-
-type DelegatedTaskRecord = {
-  delegationId: string
-  parentSessionId: string
-  childSessionId: string
-  childThreadId: string
-  goal: string
-  agentId: AgentId
-  model: string
-  lastOutput?: string
-}
-
-const terminalSessionStatuses = new Set<SessionStatus>(['done', 'error', 'cancelled'])
-const THREAD_CONTEXT_SESSION_LIMIT = 6
-const THREAD_CONTEXT_RECENT_TURNS = 2
-const THREAD_CONTEXT_PROMPT_CHARS = 1_200
-const THREAD_CONTEXT_ASSISTANT_CHARS = 2_000
-const THREAD_CONTEXT_SUMMARY_CHARS = 350
-const MAX_ADAPTER_CONTEXT_CHARS = 24_000
-const LIVE_DIFF_DEBOUNCE_MS = 120
 
 export type SessionManagerOptions = {
   adapters?: Iterable<AgentAdapter>
@@ -288,6 +238,8 @@ export type SessionManagerOptions = {
   estimateCost?: CostEstimator
   worktreeIsolation?: boolean
   resolveContext?: SessionContextResolver
+  decoratePrompt?: SessionPromptDecorator
+  gateRetry?: SessionRetryGate
   qualityGateRunner?: QualityGateRunner
   delegateTaskRunner?: DelegateTaskRunner
   notifier?: NotifierCallback
@@ -310,14 +262,23 @@ export class SessionManager {
   private readonly pendingModelRecoveries = new Map<string, ModelRecoveryRecord>()
   /** Background child sessions mirrored into their parent stream. */
   private readonly delegatedTasksByChildSession = new Map<string, DelegatedTaskRecord>()
+  private readonly completedDelegationsByParentSession = new Map<string, DelegatedTaskRecord[]>()
+  private readonly queuedDelegationHandoffs = new Set<string>()
   private readonly processedDelegationRequests = new Set<string>()
   private estimateCost: CostEstimator
   private resolveContext?: SessionContextResolver
+  private decoratePrompt?: SessionPromptDecorator
+  private gateRetry?: SessionRetryGate
   private qualityGateRunner?: QualityGateRunner
   private delegateTaskRunner?: DelegateTaskRunner
   private notifier?: NotifierCallback
   private readonly idleHeartbeatMs: number | false
   private readonly maxStallMs: number | false
+  private readonly dispatchBootstrapService: SessionDispatchBootstrapService
+  private readonly livenessService: SessionLivenessService
+  private readonly completionService: SessionCompletionService
+  private readonly queueService: SessionQueueService
+  private readonly recoveryDelegationService: SessionRecoveryDelegationService
 
   constructor(options: SessionManagerOptions = {}) {
     this.adapterResolver = options.adapterResolver
@@ -325,11 +286,49 @@ export class SessionManager {
     this.worktreeIsolation = options.worktreeIsolation ?? false
     this.estimateCost = options.estimateCost ?? (() => 0)
     this.resolveContext = options.resolveContext
+    this.decoratePrompt = options.decoratePrompt
+    this.gateRetry = options.gateRetry
     this.qualityGateRunner = options.qualityGateRunner
     this.delegateTaskRunner = options.delegateTaskRunner
     this.notifier = options.notifier
     this.idleHeartbeatMs = options.idleHeartbeatMs ?? 45_000
     this.maxStallMs = options.maxStallMs ?? 300_000
+    this.dispatchBootstrapService = new SessionDispatchBootstrapService({
+      broadcastThreadUpdated,
+      getContextResolver: () => this.resolveContext,
+    })
+    this.livenessService = new SessionLivenessService({
+      activeSessions: this.activeSessions,
+      idleHeartbeatMs: this.idleHeartbeatMs,
+      maxStallMs: this.maxStallMs,
+      recordEvent: (event) => this.recordEvent(event),
+      cancel: (sessionId) => this.cancel(sessionId),
+      handleAgentEvent: (event) => this.handleAgentEvent(event),
+      filterLocalDiffProposals: (active, proposals) =>
+        this.filterLocalDiffProposals(active, proposals),
+    })
+    this.completionService = new SessionCompletionService({
+      getCostEstimator: () => this.estimateCost,
+      getQualityGateRunner: () => this.qualityGateRunner,
+      recordEvent: (event) => this.recordEvent(event),
+      handleAgentEvent: (event) => this.handleAgentEvent(event),
+      emitNotifierEvent: (event) => this.emitNotifierEvent(event),
+      stopLiveDiff: (sessionId) => this.stopLiveDiff(sessionId),
+      filterLocalDiffProposals: (active, proposals) =>
+        this.filterLocalDiffProposals(active, proposals),
+    })
+    this.queueService = new SessionQueueService({
+      activeSessions: this.activeSessions,
+      pendingQueues: this.pendingQueues,
+      dispatch: (params) => this.dispatch(params),
+    })
+    this.recoveryDelegationService = new SessionRecoveryDelegationService({
+      delegatedTasksByChildSession: this.delegatedTasksByChildSession,
+      processedDelegationRequests: this.processedDelegationRequests,
+      getDelegateTaskRunner: () => this.delegateTaskRunner,
+      getThreadId: (sessionId) => this.activeSessions.get(sessionId)?.threadId,
+      recordEvent: (event) => this.recordEvent(event),
+    })
 
     for (const adapter of options.adapters ?? []) {
       this.registerAdapter(adapter)
@@ -346,6 +345,14 @@ export class SessionManager {
 
   setContextResolver(resolveContext: SessionContextResolver): void {
     this.resolveContext = resolveContext
+  }
+
+  setPromptDecorator(decoratePrompt: SessionPromptDecorator | undefined): void {
+    this.decoratePrompt = decoratePrompt
+  }
+
+  setRetryGate(gateRetry: SessionRetryGate | undefined): void {
+    this.gateRetry = gateRetry
   }
 
   setQualityGateRunner(runner: QualityGateRunner | undefined): void {
@@ -372,11 +379,15 @@ export class SessionManager {
   async dispatch(params: DispatchSessionParams): Promise<DispatchSessionResult> {
     const shouldIsolate = params.isolate ?? this.worktreeIsolation
     const planModeSandbox = params.planMode === true
-    const shouldCreateWorktree = shouldIsolate || planModeSandbox
 
-    const threadId = this.resolveOrCreateThread(params)
+    const threadId = this.dispatchBootstrapService.resolveOrCreateThread(params)
+    const persistentThreadWorktreePath = planModeSandbox
+      ? null
+      : worktreeManager.getThreadWorktreePath(threadId) ?? null
+    const shouldCreateWorktree = !persistentThreadWorktreePath && (shouldIsolate || planModeSandbox)
     const sessionId = randomUUID()
     let sessionCreated = false
+    let startupCancelled = false
 
     try {
       const session = sessionsStore.create({
@@ -393,39 +404,144 @@ export class SessionManager {
       })
       sessionCreated = true
 
-      // Link the thread to the new session and bump updated_at so the sidebar
-      // bubbles this thread to the top of its project list.
-      const linkedThread = threadsStore.linkSession(threadId, session.id)
-      broadcastThreadUpdated(linkedThread)
-
-      this.emitSyntheticEvent(session.id, {
-        kind: 'step',
-        title: 'Preparing context',
-        detail: 'Selecting memory, repository snippets, and recent thread history.',
-        status: 'running',
-      })
-      const contextStartedAt = Date.now()
-      const baseContext = await this.resolveDispatchContext(params)
-      const context = buildAdapterContext(
-        baseContext,
-        sessionsStore.listThreadTranscript(threadId, {
-          limit: THREAD_CONTEXT_SESSION_LIMIT,
-          excludeSessionId: session.id,
-        }),
-      )
-      this.emitSyntheticEvent(session.id, {
-        kind: 'step',
-        title: 'Context ready',
-        detail: `${formatMs(Date.now() - contextStartedAt)} · ${context?.length ?? 0} chars`,
-        status: 'done',
-      })
-
-      const adapter = this.resolveAdapter(params.agentId)
-      if (!adapter) {
-        throw new Error(`Adapter not found: ${params.agentId}`)
+      // Link only user-facing sessions to the thread. Spawned background
+      // sessions have their own output surfaces and must not replace the
+      // visible parent/finalizer session as `last_session_id`.
+      if (!params.spawnedAgent) {
+        const linkedThread = threadsStore.linkSession(threadId, session.id)
+        broadcastThreadUpdated(linkedThread)
+      } else {
+        const thread = threadsStore.get(threadId)
+        if (thread) broadcastThreadUpdated(thread)
       }
 
-      let worktreePath: string | null = null
+      this.activeSessions.set(session.id, {
+        approve: () => undefined,
+        reject: () => undefined,
+        cancel: () => {
+          startupCancelled = true
+        },
+        repoPath: params.repoPath,
+        threadId,
+        worktreePath: persistentThreadWorktreePath,
+        persistentWorktree: Boolean(persistentThreadWorktreePath),
+        localBaseline: null,
+        localTouchedFiles: new Set(),
+        sharedLocalRepo: false,
+        lastAgentEventAt: Date.now(),
+        lastIdleHeartbeatAt: 0,
+        qualityAttempt: params.qualityAttempt ?? 0,
+        planMode: params.planMode ?? false,
+        isolate: shouldIsolate,
+        runtimeSettings: params.runtimeSettings,
+        baseContext: params.context,
+        contextQuery: params.contextQuery,
+        prompt: params.prompt,
+        agentId: params.agentId,
+        modelFallbacks: params.modelFallbacks ?? [],
+        imageAttachments: params.imageAttachments,
+        modelRecoveryMode: params.modelRecoveryMode ?? 'prompt',
+      })
+
+      const startup = this.startDispatchedSession({
+        params,
+        session,
+        threadId,
+        shouldIsolate,
+        shouldCreateWorktree,
+        persistentThreadWorktreePath,
+        isStartupCancelled: () => startupCancelled,
+      }).catch(async (error: unknown) => {
+        if (!persistentThreadWorktreePath) {
+          await worktreeManager.remove(session.id, params.repoPath)
+        }
+        if (!this.isTerminalSession(session.id)) {
+          this.failSession(session.id, error)
+        }
+        if (!params.returnAfterSessionCreated) throw error
+      })
+
+      if (params.returnAfterSessionCreated) {
+        void startup
+        return { sessionId: session.id, threadId }
+      }
+
+      await startup
+      return { sessionId: session.id, threadId }
+    } catch (error) {
+      if (!persistentThreadWorktreePath) {
+        await worktreeManager.remove(sessionId, params.repoPath)
+      }
+      if (sessionCreated && !this.isTerminalSession(sessionId)) {
+        this.failSession(sessionId, error)
+      }
+      throw error
+    }
+  }
+
+  private async startDispatchedSession({
+    params,
+    session,
+    threadId,
+    shouldIsolate,
+    shouldCreateWorktree,
+    persistentThreadWorktreePath,
+    isStartupCancelled,
+  }: {
+    params: DispatchSessionParams
+    session: Session
+    threadId: string
+    shouldIsolate: boolean
+    shouldCreateWorktree: boolean
+    persistentThreadWorktreePath: string | null
+    isStartupCancelled: () => boolean
+  }): Promise<void> {
+    const planModeSandbox = params.planMode === true
+    const hasStartupCancelled = (): boolean =>
+      isStartupCancelled() || this.isTerminalSession(session.id)
+
+    const cleanupIfCancelled = async (): Promise<boolean> => {
+      if (!hasStartupCancelled()) return false
+      if (!persistentThreadWorktreePath) {
+        await worktreeManager.remove(session.id, params.repoPath)
+      }
+      return true
+    }
+
+    const contextStepTitle = params.planMode
+      ? 'Investigating repository for plan mode'
+      : 'Preparing context'
+    const contextStepDetail = params.planMode
+      ? 'Building current file structure, symbols, memory, and relevant snippets before planning.'
+      : 'Selecting memory, repository snippets, and recent thread history.'
+
+    this.emitSyntheticEvent(session.id, {
+      kind: 'step',
+      title: contextStepTitle,
+      detail: contextStepDetail,
+      status: 'running',
+    })
+    const contextStartedAt = Date.now()
+    const baseContext = await this.dispatchBootstrapService.resolveDispatchContext(params)
+    if (await cleanupIfCancelled()) return
+    const context = this.dispatchBootstrapService.buildAdapterContext(
+      baseContext,
+      threadId,
+      session.id,
+    )
+    this.emitSyntheticEvent(session.id, {
+      kind: 'step',
+      title: params.planMode ? 'Plan-mode investigation ready' : 'Context ready',
+      detail: `${formatMs(Date.now() - contextStartedAt)} · ${context?.length ?? 0} chars`,
+      status: 'done',
+    })
+
+    const adapter = this.resolveAdapter(params.agentId)
+    if (!adapter) {
+      throw new Error(`Adapter not found: ${params.agentId}`)
+    }
+
+      let worktreePath: string | null = persistentThreadWorktreePath
       let localBaseline: LocalChangeBaseline | null = null
 
       // Plan mode prefers a disposable checkout so planning edits cannot leak
@@ -450,11 +566,14 @@ export class SessionManager {
       if (!worktreePath) {
         localBaseline = await captureLocalChangeBaseline(params.repoPath)
       }
+      if (await cleanupIfCancelled()) return
 
       if (worktreePath) {
         this.emitSyntheticEvent(session.id, {
           kind: 'step',
-          title: 'Created isolated worktree',
+          title: persistentThreadWorktreePath
+            ? 'Using thread worktree'
+            : 'Created isolated worktree',
           detail: worktreePath,
           status: 'done',
         })
@@ -467,6 +586,14 @@ export class SessionManager {
       const adapterContext = params.planMode
         ? buildPlanModeContext(context)
         : context
+      const adapterPrompt = await this.decorateAdapterPrompt({
+        projectId: params.projectId,
+        repoPath: params.repoPath,
+        threadId,
+        sessionId: session.id,
+        prompt: params.prompt,
+        agentId: params.agentId,
+      })
 
       promptEvidenceStore.create({
         sessionId: session.id,
@@ -474,7 +601,7 @@ export class SessionManager {
         threadId,
         agentId: params.agentId,
         model: params.model,
-        prompt: params.prompt,
+        prompt: adapterPrompt,
         resolvedContext: context,
         adapterContext,
       })
@@ -488,7 +615,7 @@ export class SessionManager {
       const adapterStartedAt = Date.now()
       const agentSession = await adapter.dispatch({
         sessionId: session.id,
-        prompt: params.prompt,
+        prompt: adapterPrompt,
         repoPath: worktreePath ?? params.repoPath,
         model: params.model,
         modelFallbacks: params.modelFallbacks,
@@ -496,6 +623,10 @@ export class SessionManager {
         imageAttachments: params.imageAttachments,
         runtimeSettings: params.runtimeSettings,
       })
+      if (await cleanupIfCancelled()) {
+        agentSession.cancel()
+        return
+      }
       this.emitSyntheticEvent(session.id, {
         kind: 'step',
         title: 'Agent process started',
@@ -510,6 +641,7 @@ export class SessionManager {
         repoPath: params.repoPath,
         threadId,
         worktreePath,
+        persistentWorktree: Boolean(persistentThreadWorktreePath),
         localBaseline,
         localTouchedFiles: new Set(),
         sharedLocalRepo: false,
@@ -521,7 +653,7 @@ export class SessionManager {
         runtimeSettings: params.runtimeSettings,
         baseContext: params.context,
         contextQuery: params.contextQuery,
-        prompt: params.prompt,
+        prompt: adapterPrompt,
         agentId: params.agentId,
         modelFallbacks: params.modelFallbacks ?? [],
         imageAttachments: params.imageAttachments,
@@ -546,15 +678,6 @@ export class SessionManager {
           model: params.model,
         })
       }
-
-      return { sessionId: session.id, threadId }
-    } catch (error) {
-      await worktreeManager.remove(sessionId, params.repoPath)
-      if (sessionCreated) {
-        this.failSession(sessionId, error)
-      }
-      throw error
-    }
   }
 
   approve(sessionId: string): void {
@@ -563,6 +686,29 @@ export class SessionManager {
     if (session?.status === 'awaiting-approval') {
       sessionsStore.updateStatus(sessionId, 'running')
       this.noteAgentEvent(sessionId)
+    }
+  }
+
+  private async decorateAdapterPrompt(input: {
+    projectId: string
+    repoPath: string
+    threadId: string
+    sessionId: string
+    prompt: string
+    agentId: AgentId
+  }): Promise<string> {
+    if (!this.decoratePrompt) return input.prompt
+    try {
+      const decorated = await this.decoratePrompt(input)
+      return decorated.trim() ? decorated : input.prompt
+    } catch (error) {
+      this.emitSyntheticEvent(input.sessionId, {
+        kind: 'step',
+        title: 'Extension prompt hook skipped',
+        detail: errorMessage(error),
+        status: 'error',
+      })
+      return input.prompt
     }
   }
 
@@ -585,7 +731,7 @@ export class SessionManager {
     this.dropModelRecoveriesForSession(sessionId)
     const session = sessionsStore.get(sessionId)
 
-    if (session && !terminalSessionStatuses.has(session.status)) {
+    if (session && !TERMINAL_SESSION_STATUSES.has(session.status)) {
       sessionsStore.updateStatus(sessionId, 'cancelled')
 
       // Emit a synthetic completion so subscribers (sidebar spinner, tab
@@ -601,7 +747,9 @@ export class SessionManager {
     }
 
     active?.cancel()
-    void worktreeManager.remove(sessionId, active?.repoPath)
+    if (!active?.persistentWorktree) {
+      void worktreeManager.remove(sessionId, active?.repoPath)
+    }
   }
 
   cancelAll(): void {
@@ -626,54 +774,159 @@ export class SessionManager {
       prompt: string
       agentId: AgentId
       model: string
+      profileId?: QueuedMessage['profileId']
       approvalMode?: AgentApprovalMode
       thinking?: QueuedMessage['thinking']
       runtimeSettings?: AgentRuntimeSettings
     },
     threadId: string,
   ): QueuedMessage {
-    const message: PendingQueuedMessage = {
-      id: randomUUID(),
-      prompt: params.prompt,
-      agentId: params.agentId,
-      model: params.model,
-      approvalMode: params.approvalMode,
-      thinking: params.thinking,
-      runtimeSettings: params.runtimeSettings,
-      createdAt: Date.now(),
-    }
-
-    const queue = this.pendingQueues.get(threadId) ?? []
-    const updated = [...queue, message]
-    this.pendingQueues.set(threadId, updated)
-    broadcastQueueUpdated(threadId, publicQueuedMessages(updated))
-    return publicQueuedMessage(message)
+    return this.queueService.enqueueMessage(params, threadId)
   }
 
   getQueue(threadId: string): QueuedMessage[] {
-    return publicQueuedMessages(this.pendingQueues.get(threadId) ?? [])
+    return this.queueService.getQueue(threadId)
   }
 
   removeQueueItem(threadId: string, messageId: string): void {
-    const queue = this.pendingQueues.get(threadId)
-    if (!queue) return
-
-    const updated = queue.filter((message) => message.id !== messageId)
-    if (updated.length === queue.length) return
-
-    if (updated.length === 0) {
-      this.pendingQueues.delete(threadId)
-    } else {
-      this.pendingQueues.set(threadId, updated)
-    }
-    broadcastQueueUpdated(threadId, publicQueuedMessages(updated))
+    this.queueService.removeQueueItem(threadId, messageId)
   }
 
   clearQueue(threadId: string): void {
-    if (!this.pendingQueues.has(threadId)) return
+    this.queueService.clearQueue(threadId)
+  }
 
-    this.pendingQueues.delete(threadId)
-    broadcastQueueUpdated(threadId, [])
+  async getWorktreeHandoffState(
+    input: WorktreeHandoffRequest,
+    repoPath: string,
+  ): Promise<WorktreeHandoffState> {
+    this.assertThreadProject(input)
+    return this.buildWorktreeHandoffState(input, repoPath)
+  }
+
+  async moveThreadToWorktree(
+    input: MoveThreadToWorktreeInput,
+    repoPath: string,
+  ): Promise<WorktreeHandoffState> {
+    this.assertThreadProject(input)
+    if (this.isThreadBusy(input.threadId)) {
+      throw new Error('Move to worktree is only available when this thread is idle.')
+    }
+
+    await worktreeManager.createThreadWorktree({
+      projectId: input.projectId,
+      threadId: input.threadId,
+      repoPath,
+      cleanupPolicy: input.cleanupPolicy,
+    })
+    return this.buildWorktreeHandoffState(input, repoPath, 'move-to-worktree')
+  }
+
+  async previewWorktreeHandoff(
+    input: WorktreeHandoffRequest,
+    repoPath: string,
+  ): Promise<WorktreeDiffPreview> {
+    this.assertThreadProject(input)
+    const metadata = worktreeManager.getThreadWorktree(input.threadId)
+    const targetPath = metadata?.worktreePath ?? repoPath
+    const [status, diff, localDirty] = await Promise.all([
+      runGit(['status', '--porcelain=v1', '--untracked-files=all'], targetPath),
+      runGit(['diff', '--patch', '--binary', 'HEAD'], targetPath),
+      this.hasLocalChanges(repoPath),
+    ])
+    const parsedStatus = status.exitCode === 0 ? parseStatusPorcelain(status.stdout) : null
+    const changedFiles = parsedStatus ? gitChangedFiles(parsedStatus.files) : []
+
+    return {
+      projectId: input.projectId,
+      threadId: input.threadId,
+      location: metadata?.location ?? 'local',
+      worktreePath: metadata?.worktreePath,
+      branch: metadata?.branch,
+      baseBranch: metadata?.baseBranch,
+      baseCommit: metadata?.baseCommit,
+      snapshotStatus: metadata?.snapshotStatus ?? (changedFiles.length > 0 ? 'dirty' : 'clean'),
+      cleanupPolicy: metadata?.cleanupPolicy ?? 'manual',
+      changedFiles,
+      patch: diff.exitCode === 0 ? diff.stdout : '',
+      hasLocalChanges: localDirty,
+      hasConflicts: parsedStatus?.files.some((file) => file.conflict) ?? false,
+    }
+  }
+
+  async bringThreadToLocal(
+    input: BringThreadToLocalInput,
+    repoPath: string,
+  ): Promise<WorktreeHandoffState> {
+    this.assertThreadProject(input)
+    if (this.isThreadBusy(input.threadId)) {
+      throw new Error('Bring to local is only available when this thread is idle.')
+    }
+
+    const metadata = worktreeManager.getThreadWorktree(input.threadId)
+    if (!metadata?.worktreePath) {
+      return this.buildWorktreeHandoffState(input, repoPath, 'bring-to-local')
+    }
+
+    if (await this.hasLocalChanges(repoPath)) {
+      return this.buildWorktreeHandoffState(input, repoPath, 'bring-to-local')
+    }
+
+    const proposals = await buildDiffProposals(metadata.worktreePath, repoPath)
+    for (const proposal of proposals) {
+      await applyDiffContent(
+        proposal.filePath,
+        proposal.proposedContent,
+        proposal.originalContent,
+      )
+    }
+
+    if (
+      input.removeAfterApply === true ||
+      metadata.cleanupPolicy === 'remove-after-bring-back'
+    ) {
+      await worktreeManager.removeThread(input.threadId, repoPath)
+    } else {
+      await worktreeManager.refreshThreadSnapshotStatus(input.threadId)
+    }
+
+    return this.buildWorktreeHandoffState(input, repoPath, 'bring-to-local')
+  }
+
+  async createBranchHere(
+    input: CreateBranchHereInput,
+    repoPath: string,
+  ): Promise<WorktreeHandoffState> {
+    this.assertThreadProject(input)
+    if (this.isThreadBusy(input.threadId)) {
+      throw new Error('Create branch here is only available when this thread is idle.')
+    }
+
+    const branchName = await validateBranchName(input.branchName, repoPath)
+    const metadata = worktreeManager.getThreadWorktree(input.threadId)
+    if (metadata?.worktreePath) {
+      await worktreeManager.createBranchForThread(input.threadId, branchName)
+    } else {
+      const result = await runGit(['switch', '-c', branchName], repoPath)
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr.trim() || result.stdout.trim() || 'Failed to create branch.')
+      }
+    }
+
+    return this.buildWorktreeHandoffState(input, repoPath, 'create-branch-here')
+  }
+
+  async restoreWorktreeSnapshot(
+    input: WorktreeHandoffRequest,
+    repoPath: string,
+  ): Promise<WorktreeHandoffState> {
+    this.assertThreadProject(input)
+    if (this.isThreadBusy(input.threadId)) {
+      throw new Error('Restore snapshot is only available when this thread is idle.')
+    }
+
+    await worktreeManager.restoreThreadSnapshot(input.threadId)
+    return this.buildWorktreeHandoffState(input, repoPath, 'restore-snapshot')
   }
 
   async steer(params: {
@@ -924,6 +1177,63 @@ export class SessionManager {
     }
   }
 
+  private assertThreadProject(input: WorktreeHandoffRequest): void {
+    const thread = threadsStore.get(input.threadId)
+    if (!thread || thread.projectId !== input.projectId) {
+      throw new Error('Thread does not belong to this project.')
+    }
+  }
+
+  private async buildWorktreeHandoffState(
+    input: WorktreeHandoffRequest,
+    repoPath: string,
+    command?: WorktreeHandoffState['command'],
+  ): Promise<WorktreeHandoffState> {
+    const metadata = worktreeManager.getThreadWorktree(input.threadId)
+    if (metadata?.worktreePath) {
+      const [snapshotStatus, worktreeChanges, localChanges] = await Promise.all([
+        worktreeManager.refreshThreadSnapshotStatus(input.threadId),
+        this.changedFileCount(metadata.worktreePath),
+        this.changedFileCount(repoPath),
+      ])
+
+      return {
+        ...metadata,
+        command,
+        snapshotStatus: snapshotStatus ?? metadata.snapshotStatus,
+        pendingChangeCount: worktreeChanges,
+        hasLocalChanges: localChanges > 0,
+        hasWorktreeChanges: worktreeChanges > 0,
+        conflictCheck: localChanges > 0 ? 'local-dirty' : 'clean',
+      }
+    }
+
+    const localChanges = await this.changedFileCount(repoPath)
+    return {
+      projectId: input.projectId,
+      threadId: input.threadId,
+      location: 'local',
+      snapshotStatus: localChanges > 0 ? 'dirty' : 'clean',
+      cleanupPolicy: 'manual',
+      updatedAt: Date.now(),
+      command,
+      pendingChangeCount: localChanges,
+      hasLocalChanges: localChanges > 0,
+      hasWorktreeChanges: false,
+      conflictCheck: 'clean',
+    }
+  }
+
+  private async changedFileCount(repoPath: string): Promise<number> {
+    const status = await runGit(['status', '--porcelain=v1', '--untracked-files=all'], repoPath)
+    if (status.exitCode !== 0) return 0
+    return status.stdout.split(/\r?\n/).filter((line) => line.trim()).length
+  }
+
+  private async hasLocalChanges(repoPath: string): Promise<boolean> {
+    return (await this.changedFileCount(repoPath)) > 0
+  }
+
   private resolveAdapter(agentId: AgentId): AgentAdapter | undefined {
     return this.adapterResolver?.(agentId) ?? this.adapters.get(agentId)
   }
@@ -931,36 +1241,11 @@ export class SessionManager {
   private async resolveDispatchContext(
     params: DispatchSessionParams,
   ): Promise<string | null | undefined> {
-    if (!this.resolveContext) return params.context
-
-    return this.resolveContext({
-      projectId: params.projectId,
-      repoPath: params.repoPath,
-      // `contextQuery` lets a caller decouple the retrieval query from the
-      // prompt the agent receives (see plan mode's execution session).
-      prompt: params.contextQuery ?? params.prompt,
-      baseContext: params.context,
-    })
+    return this.dispatchBootstrapService.resolveDispatchContext(params)
   }
 
   private resolveOrCreateThread(params: DispatchSessionParams): string {
-    if (params.threadId) {
-      const existing = threadsStore.get(params.threadId)
-      if (!existing) {
-        throw new Error(`Thread not found: ${params.threadId}`)
-      }
-      if (existing.projectId !== params.projectId) {
-        throw new Error(
-          `Thread ${params.threadId} belongs to a different project (${existing.projectId})`,
-        )
-      }
-      return existing.id
-    }
-
-    const title = params.prompt.trim().slice(0, 60) || 'Untitled thread'
-    const created = threadsStore.create({ projectId: params.projectId, title })
-    broadcastThreadUpdated(created)
-    return created.id
+    return this.dispatchBootstrapService.resolveOrCreateThread(params)
   }
 
   private handleAgentEvent(event: AgentEvent): void {
@@ -1069,6 +1354,9 @@ export class SessionManager {
     }
 
     void this.emitCompletionDiffs(event.sessionId, active, event).then(() => {
+      if (!sessionsStore.get(event.sessionId)) return
+
+      this.queueDelegationHandoffIfReady(event.sessionId)
       this.emitTerminalNotifierEvent(event.sessionId, active, event)
 
       if (status !== 'done') return
@@ -1085,6 +1373,11 @@ export class SessionManager {
         projectId: session.projectId,
         repoPath: active.repoPath,
       })
+    }).catch((error: unknown) => {
+      console.error(
+        `[session] completion finalization failed for ${event.sessionId}:`,
+        errorMessage(error),
+      )
     })
   }
 
@@ -1157,6 +1450,7 @@ export class SessionManager {
 
     const nextModel = active.modelFallbacks.find((model) => model && model !== session.model)
     if (!nextModel) return false
+    if (!(await this.isRetryAllowed(sessionId, active, session, reason, nextModel))) return false
 
     const remainingFallbacks = active.modelFallbacks.filter(
       (model) => model !== nextModel && model !== session.model,
@@ -1173,8 +1467,8 @@ export class SessionManager {
       sessionId,
       payload: {
         kind: 'step',
-        title: 'Model limit reached; switching model',
-        detail: `${session.model} hit a provider limit (${reason}). Managed swarm is continuing with ${nextModel}.`,
+        title: 'Model unavailable; switching model',
+        detail: `${session.model} failed (${reason}). Continuing with ${nextModel}.`,
         status: 'running',
       },
       timestamp: Date.now(),
@@ -1209,6 +1503,52 @@ export class SessionManager {
     }
   }
 
+  private async isRetryAllowed(
+    sessionId: string,
+    active: ActiveSession,
+    session: Session,
+    reason: string,
+    nextModel: string,
+  ): Promise<boolean> {
+    if (!this.gateRetry) return true
+    try {
+      const result = await this.gateRetry({
+        projectId: session.projectId,
+        repoPath: active.repoPath,
+        threadId: active.threadId,
+        sessionId,
+        reason,
+        nextModel,
+      })
+      if (result.allow) return true
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Model retry blocked',
+          detail: result.reason ?? 'An extension retry gate blocked the retry.',
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
+      return false
+    } catch (error) {
+      this.recordEvent({
+        type: 'activity',
+        sessionId,
+        payload: {
+          kind: 'step',
+          title: 'Model retry blocked',
+          detail: `Extension retry gate failed: ${errorMessage(error)}`,
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
+      return false
+    }
+  }
+
   private recordSessionErrorEvent(
     event: AgentEvent,
     active: ActiveSession | undefined,
@@ -1239,103 +1579,27 @@ export class SessionManager {
   }
 
   private noteAgentEvent(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active) return
-
-    active.lastAgentEventAt = Date.now()
-    this.scheduleIdleHeartbeat(sessionId)
+    this.livenessService.noteAgentEvent(sessionId)
   }
 
   private markSharedLocalRepoSessions(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active || active.worktreePath || !active.localBaseline) return
-
-    for (const [otherSessionId, other] of this.activeSessions) {
-      if (otherSessionId === sessionId) continue
-      if (other.worktreePath || !other.localBaseline) continue
-      if (other.repoPath !== active.repoPath) continue
-
-      active.sharedLocalRepo = true
-      other.sharedLocalRepo = true
-    }
+    this.livenessService.markSharedLocalRepoSessions(sessionId)
   }
 
   private noteTouchedFiles(sessionId: string, activity: AgentActivity): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.localBaseline || active.worktreePath) return
-
-    noteTouchedFilesFromActivity(active.localTouchedFiles, active.repoPath, activity)
+    this.livenessService.noteTouchedFiles(sessionId, activity)
   }
 
   private scheduleIdleHeartbeat(sessionId: string): void {
-    if (this.idleHeartbeatMs === false) return
-
-    const active = this.activeSessions.get(sessionId)
-    if (!active) return
-
-    if (active.idleHeartbeatTimer) {
-      clearTimeout(active.idleHeartbeatTimer)
-    }
-
-    active.idleHeartbeatTimer = setTimeout(() => {
-      this.emitIdleHeartbeat(sessionId)
-    }, this.idleHeartbeatMs)
-    active.idleHeartbeatTimer.unref?.()
+    this.livenessService.scheduleIdleHeartbeat(sessionId)
   }
 
   private emitIdleHeartbeat(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active || this.idleHeartbeatMs === false) return
-
-    const session = sessionsStore.get(sessionId)
-    if (!session || session.status !== 'running') return
-
-    const now = Date.now()
-    if (now - active.lastIdleHeartbeatAt < this.idleHeartbeatMs) {
-      this.scheduleIdleHeartbeat(sessionId)
-      return
-    }
-
-    const stallDuration = now - active.lastAgentEventAt
-    if (this.maxStallMs !== false && stallDuration >= this.maxStallMs) {
-      const stallSeconds = Math.round(stallDuration / 1000)
-      this.recordEvent({
-        type: 'activity',
-        sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Agent process stalled',
-          detail: `No output for ${stallSeconds}s — force-completing the session.`,
-          status: 'error',
-        },
-        timestamp: now,
-      })
-      this.cancel(sessionId)
-      return
-    }
-
-    active.lastIdleHeartbeatAt = now
-    const idleSeconds = Math.max(1, Math.round(stallDuration / 1000))
-    this.recordEvent({
-      type: 'activity',
-      sessionId,
-      payload: {
-        kind: 'step',
-        title: 'Waiting for agent output',
-        detail: `The agent process is still running; no new stream events for ${idleSeconds}s.`,
-        status: 'running',
-      },
-      timestamp: now,
-    })
-    this.scheduleIdleHeartbeat(sessionId)
+    this.livenessService.emitIdleHeartbeat(sessionId)
   }
 
   private stopIdleHeartbeat(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.idleHeartbeatTimer) return
-
-    clearTimeout(active.idleHeartbeatTimer)
-    active.idleHeartbeatTimer = undefined
+    this.livenessService.stopIdleHeartbeat(sessionId)
   }
 
   private recordActivityEvents(event: AgentEvent): void {
@@ -1366,94 +1630,24 @@ export class SessionManager {
   }
 
   private maybeRunDelegateTask(activityEvent: AgentEvent): void {
-    if (!this.delegateTaskRunner) return
-    if (!isDelegateTaskToolCall(activityEvent.payload)) return
-
-    const session = sessionsStore.get(activityEvent.sessionId)
-    const threadId = session?.threadId ?? this.activeSessions.get(activityEvent.sessionId)?.threadId
-    if (!session || !threadId) return
-    if (session.spawnedAgent?.kind === 'delegation') return
-
-    const request = delegateTaskRequestFromToolCall(activityEvent.payload)
-    if (!request) return
-
-    const requestKey = delegationRequestKey(activityEvent.sessionId, request)
-    if (this.processedDelegationRequests.has(requestKey)) return
-    this.processedDelegationRequests.add(requestKey)
-
-    void this.delegateTaskRunner({
-      parentSessionId: activityEvent.sessionId,
-      projectId: session.projectId,
-      threadId,
-      goal: request.goal,
-      context: request.context,
-    }).catch((error) => {
-      this.recordEvent({
-        type: 'activity',
-        sessionId: activityEvent.sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Delegated task failed to start',
-          detail: errorMessage(error),
-          status: 'error',
-        },
-        timestamp: Date.now(),
-      })
-    })
+    this.recoveryDelegationService.maybeRunDelegateTask(activityEvent)
   }
 
   private scheduleLiveLocalDiff(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.localBaseline || active.planMode) return
-
-    if (active.liveDiffTimer) {
-      clearTimeout(active.liveDiffTimer)
-    }
-
-    active.liveDiffTimer = setTimeout(() => {
-      active.liveDiffTimer = undefined
-      void this.emitLiveLocalDiff(sessionId)
-    }, LIVE_DIFF_DEBOUNCE_MS)
-    active.liveDiffTimer.unref?.()
+    this.livenessService.scheduleLiveLocalDiff(sessionId)
   }
 
   private stopLiveDiff(sessionId: string): void {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.liveDiffTimer) return
-
-    clearTimeout(active.liveDiffTimer)
-    active.liveDiffTimer = undefined
+    this.livenessService.stopLiveDiff(sessionId)
   }
 
   private async emitLiveLocalDiff(sessionId: string): Promise<void> {
-    const active = this.activeSessions.get(sessionId)
-    if (!active?.localBaseline || active.planMode) return
-
-    try {
-      const proposals = this.filterLocalDiffProposals(
-        active,
-        await buildLocalDiffProposals(active.repoPath, active.localBaseline),
-      )
-      if (proposals.length === 0) return
-
-      const signature = diffProposalSignature(proposals)
-      if (signature === active.liveDiffSignature) return
-
-      active.liveDiffSignature = signature
-      this.handleAgentEvent({
-        type: 'diff',
-        sessionId,
-        payload: { proposals, live: true },
-        timestamp: Date.now(),
-      })
-    } catch {
-      // Live counters are best-effort; completion still performs the authoritative diff.
-    }
+    await this.livenessService.emitLiveLocalDiff(sessionId)
   }
 
   private pauseForUserInput(sessionId: string): void {
     const session = sessionsStore.get(sessionId)
-    if (!session || terminalSessionStatuses.has(session.status)) return
+    if (!session || TERMINAL_SESSION_STATUSES.has(session.status)) return
 
     sessionsStore.updateStatus(sessionId, 'awaiting-input')
     const active = this.activeSessions.get(sessionId)
@@ -1536,7 +1730,7 @@ export class SessionManager {
 
   private isTerminalSession(sessionId: string): boolean {
     const session = sessionsStore.get(sessionId)
-    return session ? terminalSessionStatuses.has(session.status) : false
+    return session ? TERMINAL_SESSION_STATUSES.has(session.status) : false
   }
 
   private emitSyntheticEvent(sessionId: string, payload: AgentEvent['payload']): void {
@@ -1553,86 +1747,7 @@ export class SessionManager {
     active: ActiveSession | undefined,
     finalEvent: AgentEvent,
   ): Promise<void> {
-    if (!active) {
-      this.recordEvent(finalEvent)
-      return
-    }
-
-    if (!active.worktreePath && !active.localBaseline) {
-      this.recordEvent(finalEvent)
-      return
-    }
-
-    let changedFiles: DiffProposal[] = []
-
-    try {
-      active.liveDiffSignature = undefined
-      const proposals = active.worktreePath
-        ? await buildDiffProposals(active.worktreePath, active.repoPath)
-        : active.localBaseline
-          ? this.filterLocalDiffProposals(
-              active,
-              await buildLocalDiffProposals(active.repoPath, active.localBaseline),
-            )
-          : []
-      if (proposals.length > 0) {
-        const reviewedProposals = active.worktreePath
-          ? await this.applyDiffProposals(sessionId, proposals)
-          : proposals
-        changedFiles = reviewedProposals.filter((proposal) => proposal.status === 'applied')
-        this.handleAgentEvent({
-          type: 'diff',
-          sessionId,
-          payload: reviewedProposals,
-          timestamp: Date.now(),
-        })
-        const sessionForDiff = sessionsStore.get(sessionId)
-        if (sessionForDiff) {
-          this.emitNotifierEvent({
-            type: 'diff.ready',
-            sessionId,
-            projectId: sessionForDiff.projectId,
-            threadId: active.threadId,
-            count: reviewedProposals.length,
-            spawnedAgent: sessionForDiff.spawnedAgent,
-          })
-        }
-      } else if (active.localBaseline) {
-        this.recordEvent({
-          type: 'activity',
-          sessionId,
-          payload: {
-            kind: 'step',
-            title: 'No code changes detected',
-            detail: 'Agent finished without modifying tracked files.',
-            status: 'done',
-          },
-          timestamp: Date.now(),
-        })
-      }
-    } catch (error) {
-      this.recordEvent({
-        type: 'activity',
-        sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Review preparation failed',
-          detail: errorMessage(error),
-          status: 'error',
-        },
-        timestamp: Date.now(),
-      })
-    } finally {
-      try {
-        await this.removeWorktree(sessionId, active)
-      } finally {
-        const status = completionStatus(finalEvent)
-        if (status === 'done') {
-          await this.runQualityGate(sessionId, active, changedFiles)
-        }
-        this.recordEvent(finalEvent)
-      }
-    }
+    await this.completionService.emitCompletionDiffs(sessionId, active, finalEvent)
   }
 
   private filterLocalDiffProposals(
@@ -1653,32 +1768,7 @@ export class SessionManager {
     active: ActiveSession | undefined,
     finalEvent: AgentEvent,
   ): void {
-    const status = completionStatus(finalEvent)
-    if (status !== 'done' && status !== 'error') return
-
-    const completedSession = sessionsStore.get(sessionId)
-    const threadId = active?.threadId ?? completedSession?.threadId
-    if (!completedSession || !threadId) return
-
-    if (status === 'done') {
-      this.emitNotifierEvent({
-        type: 'session.done',
-        sessionId,
-        projectId: completedSession.projectId,
-        threadId,
-        spawnedAgent: completedSession.spawnedAgent,
-      })
-      return
-    }
-
-    this.emitNotifierEvent({
-      type: 'session.error',
-      sessionId,
-      projectId: completedSession.projectId,
-      threadId,
-      message: textFromUnknownPayload(finalEvent.payload) || 'Session error',
-      spawnedAgent: completedSession.spawnedAgent,
-    })
+    this.completionService.emitTerminalNotifierEvent(sessionId, active, finalEvent)
   }
 
   private async runQualityGate(
@@ -1686,118 +1776,25 @@ export class SessionManager {
     active: ActiveSession,
     changedFiles: DiffProposal[],
   ): Promise<void> {
-    if (!this.qualityGateRunner || changedFiles.length === 0) return
-
-    const session = sessionsStore.get(sessionId)
-    if (!session) return
-
-    try {
-      await this.qualityGateRunner({
-        sessionId,
-        threadId: active.threadId,
-        projectId: session.projectId,
-        repoPath: active.repoPath,
-        changedFiles,
-        attempt: active.qualityAttempt,
-        emitActivity: (payload) => {
-          this.recordEvent({
-            type: 'activity',
-            sessionId,
-            payload,
-            timestamp: Date.now(),
-          })
-        },
-      })
-    } catch (error) {
-      this.recordEvent({
-        type: 'activity',
-        sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Automated QA failed to run',
-          detail: errorMessage(error),
-          status: 'error',
-        },
-        timestamp: Date.now(),
-      })
-    }
+    await this.completionService.runQualityGate(sessionId, active, changedFiles)
   }
 
   private async applyDiffProposals(
     sessionId: string,
     proposals: DiffProposal[],
   ): Promise<DiffProposal[]> {
-    const reviewedProposals: DiffProposal[] = []
-    const conflicts: string[] = []
-
-    for (const proposal of proposals) {
-      try {
-        await applyDiffContent(
-          proposal.filePath,
-          proposal.proposedContent,
-          proposal.originalContent,
-        )
-        reviewedProposals.push({ ...proposal, status: 'applied' })
-      } catch (error) {
-        conflicts.push(`${proposal.filePath}: ${errorMessage(error)}`)
-        reviewedProposals.push({ ...proposal, status: 'conflict' })
-      }
-    }
-
-    const appliedCount = reviewedProposals.filter(
-      (proposal) => proposal.status === 'applied',
-    ).length
-
-    if (appliedCount > 0) {
-      this.recordEvent({
-        type: 'activity',
-        sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Applied code changes',
-          detail: `${appliedCount} file${appliedCount === 1 ? '' : 's'} applied automatically.`,
-          status: 'done',
-        },
-        timestamp: Date.now(),
-      })
-    }
-
-    if (conflicts.length > 0) {
-      this.recordEvent({
-        type: 'activity',
-        sessionId,
-        payload: {
-          kind: 'step',
-          title: 'Some code changes could not be applied',
-          detail: conflicts.join('\n'),
-          status: 'error',
-        },
-        timestamp: Date.now(),
-      })
-    }
-
-    return reviewedProposals
+    return this.completionService.applyDiffProposals(sessionId, proposals)
   }
 
   private async removeWorktree(
     sessionId: string,
     active = this.activeSessions.get(sessionId),
   ): Promise<void> {
-    this.stopLiveDiff(sessionId)
-    await worktreeManager.remove(sessionId, active?.repoPath)
+    await this.completionService.removeWorktree(sessionId, active)
   }
 
   private applyUsage(event: AgentEvent): void {
-    const usage = extractUsage(event.payload)
-    if (!usage) return
-
-    const session = sessionsStore.get(event.sessionId)
-    if (!session) return
-
-    const costUsd =
-      usage.costUsd ?? this.estimateCost(session.model, usage.tokensIn, usage.tokensOut)
-
-    sessionsStore.updateUsage(event.sessionId, usage.tokensIn, usage.tokensOut, costUsd)
+    this.completionService.applyUsage(event)
   }
 
   /**
@@ -1809,56 +1806,14 @@ export class SessionManager {
    * finished (or only paused) therefore reads as not busy.
    */
   private isThreadBusy(threadId: string): boolean {
-    for (const active of this.activeSessions.values()) {
-      if (active.threadId === threadId) return true
-    }
-    return false
+    return this.queueService.isThreadBusy(threadId)
   }
 
   private async dispatchNextQueued(
     threadId: string,
     fallback: { projectId: string; repoPath: string },
   ): Promise<void> {
-    const queue = this.pendingQueues.get(threadId)
-    if (!queue?.length) return
-
-    // A queued follow-up must start on an idle thread. If a session is still
-    // active here — e.g. a plan rejected while newer work runs on the same
-    // thread — leave the queue intact; that session's own completion calls
-    // back here and drains it in order. Without this guard a reject (or an
-    // out-of-order completion) could start a second concurrent dispatch on
-    // the thread and break queue ordering.
-    if (this.isThreadBusy(threadId)) return
-
-    const [next, ...rest] = queue
-    if (rest.length === 0) {
-      this.pendingQueues.delete(threadId)
-    } else {
-      this.pendingQueues.set(threadId, rest)
-    }
-    broadcastQueueUpdated(threadId, publicQueuedMessages(rest))
-
-    try {
-      await this.dispatch({
-        projectId: fallback.projectId,
-        prompt: next.prompt,
-        agentId: next.agentId,
-        model: next.model,
-        repoPath: fallback.repoPath,
-        threadId,
-        runtimeSettings: next.runtimeSettings,
-      })
-    } catch (error) {
-      // dispatch() invokes failSession() on most error paths, which already
-      // broadcasts an `error` event scoped to the real sessionId. The renderer
-      // also sees the queue shrink via the earlier broadcastQueueUpdated call,
-      // so we only need to surface unhandled cases (e.g. thread resolution
-      // failures that happen before a session is created) to the main log.
-      console.error(
-        `[session] queued dispatch failed for thread ${threadId}:`,
-        errorMessage(error),
-      )
-    }
+    await this.queueService.dispatchNextQueued(threadId, fallback)
   }
 
   private failSession(sessionId: string, error: unknown): void {
@@ -1895,70 +1850,218 @@ export class SessionManager {
   }
 
   private registerDelegatedTask(record: DelegatedTaskRecord): void {
-    this.delegatedTasksByChildSession.set(record.childSessionId, record)
-    this.recordDelegationActivity(record, 'running')
+    this.recoveryDelegationService.registerDelegatedTask(record)
   }
 
   private mirrorDelegatedTaskEvent(event: AgentEvent): void {
-    const record = this.delegatedTasksByChildSession.get(event.sessionId)
-    if (!record) return
+    const result = this.recoveryDelegationService.mirrorDelegatedTaskEvent(event)
+    if (!result) return
 
-    const lastOutput = delegationOutputFromEvent(event)
-    if (lastOutput) {
-      record.lastOutput = truncateDelegationText(lastOutput, 500)
-    }
-
-    if (event.type === 'session-complete') {
-      const status = delegationStatusFromSessionStatus(completionStatus(event))
-      this.recordDelegationActivity(record, status, {
-        summary: delegationSummary(record.childSessionId, event),
-      })
-      this.delegatedTasksByChildSession.delete(event.sessionId)
-      return
-    }
-
-    if (event.type === 'error') {
-      const error = textFromUnknownPayload(event.payload).trim()
-      this.recordDelegationActivity(record, 'error', {
-        error: truncateDelegationText(error || 'Delegated task failed.', 500),
-        summary: delegationSummary(record.childSessionId, event),
-      })
-      this.delegatedTasksByChildSession.delete(event.sessionId)
-      return
-    }
-
-    if (lastOutput || event.type === 'activity') {
-      this.recordDelegationActivity(record, 'running')
-    }
+    const completed = this.completedDelegationsByParentSession.get(result.record.parentSessionId) ?? []
+    this.completedDelegationsByParentSession.set(result.record.parentSessionId, [
+      ...completed,
+      result.record,
+    ])
+    this.queueDelegationHandoffIfReady(result.record.parentSessionId)
   }
 
-  private recordDelegationActivity(
-    record: DelegatedTaskRecord,
-    status: Extract<AgentActivity, { kind: 'delegation' }>['status'],
-    options: { summary?: string; error?: string } = {},
-  ): void {
-    this.recordEvent({
-      type: 'activity',
-      sessionId: record.parentSessionId,
-      payload: {
-        kind: 'delegation',
-        delegationId: record.delegationId,
-        childSessionId: record.childSessionId,
-        childThreadId: record.childThreadId,
-        goal: record.goal,
-        status,
-        agentId: record.agentId,
-        model: record.model,
-        lastOutput: record.lastOutput,
-        summary: options.summary,
-        error: options.error,
+  private queueDelegationHandoffIfReady(parentSessionId: string): void {
+    if (this.queuedDelegationHandoffs.has(parentSessionId)) return
+
+    const completed = this.completedDelegationsByParentSession.get(parentSessionId)
+    if (!completed?.length) return
+    if (this.hasActiveDelegationsForParent(parentSessionId)) return
+
+    const parentSession = sessionsStore.get(parentSessionId)
+    if (!parentSession?.threadId) return
+    if (parentSession.status !== 'done') return
+    if (parentSession.spawnedAgent) return
+
+    const project = projectsStore.get(parentSession.projectId)
+    if (!project) {
+      this.recordEvent({
+        type: 'activity',
+        sessionId: parentSessionId,
+        payload: {
+          kind: 'step',
+          title: 'Background handoff could not start',
+          detail: `Project not found: ${parentSession.projectId}`,
+          status: 'error',
+        },
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    this.queuedDelegationHandoffs.add(parentSessionId)
+    this.completedDelegationsByParentSession.delete(parentSessionId)
+    this.enqueueMessage(
+      {
+        prompt: buildDelegationHandoffPrompt(completed),
+        agentId: parentSession.agentId,
+        model: parentSession.model,
       },
-      timestamp: Date.now(),
-    })
+      parentSession.threadId,
+    )
+
+    if (!this.isThreadBusy(parentSession.threadId)) {
+      void this.dispatchNextQueued(parentSession.threadId, {
+        projectId: parentSession.projectId,
+        repoPath: project.repoPath,
+      })
+    }
   }
+
+  private hasActiveDelegationsForParent(parentSessionId: string): boolean {
+    for (const record of this.delegatedTasksByChildSession.values()) {
+      if (record.parentSessionId === parentSessionId) return true
+    }
+    return false
+  }
+
 }
 
 export const sessionManager = new SessionManager()
+
+function buildDelegationHandoffPrompt(records: readonly DelegatedTaskRecord[]): string {
+  const sections = records.map(formatDelegatedTaskRecord).join('\n\n---\n\n')
+  return truncateDelegationHandoffPrompt(
+    [
+      '[Background agent handoff]',
+      '',
+      'Background agents for the previous user request have finished.',
+      'Continue the main thread now.',
+      '',
+      'Required response:',
+      '- Review the background outputs and edited files below.',
+      '- If implementation is still incomplete, make the remaining code changes.',
+      '- Tell the user what happened, which files changed, and what verification was run or is still needed.',
+      '- Do not delegate again unless there is genuinely new independent work.',
+      '',
+      'Background agent results:',
+      sections,
+    ].join('\n'),
+  )
+}
+
+function formatDelegatedTaskRecord(record: DelegatedTaskRecord): string {
+  const events = sessionsStore.listEvents(record.childSessionId)
+  const editedFiles = delegatedTaskEditedFiles(events)
+  const transcript = events
+    .map(formatDelegatedTaskEvent)
+    .filter((line) => line.trim().length > 0)
+    .join('\n')
+
+  return [
+    `Goal: ${record.goal}`,
+    `Child session: ${record.childSessionId}`,
+    `Agent: ${record.agentId} / ${record.model}`,
+    `Status: ${record.status ?? 'done'}`,
+    record.summary ? `Summary: ${record.summary}` : null,
+    record.error ? `Error: ${record.error}` : null,
+    editedFiles.length > 0 ? `Edited files:\n${editedFiles.map((file) => `- ${file}`).join('\n')}` : 'Edited files: none recorded',
+    transcript ? `Full output:\n${transcript}` : 'Full output: no recorded output',
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n')
+}
+
+function delegatedTaskEditedFiles(events: readonly AgentEvent[]): string[] {
+  const files = new Map<string, string>()
+
+  for (const event of events) {
+    if (event.type === 'activity' && isAgentActivityPayload(event.payload)) {
+      const activity = event.payload
+      if (activity.kind === 'file-change') {
+        files.set(
+          activity.filePath,
+          `${activity.filePath} (${activity.changeType}, ${activity.status})`,
+        )
+      }
+    }
+
+    if (event.type !== 'diff' || !Array.isArray(event.payload)) continue
+    for (const item of event.payload) {
+      if (!item || typeof item !== 'object') continue
+      const proposal = item as Partial<DiffProposal>
+      if (!proposal.filePath) continue
+      files.set(
+        proposal.filePath,
+        `${proposal.filePath} (${proposal.status ?? 'changed'}, +${proposal.additions ?? 0}/-${proposal.deletions ?? 0})`,
+      )
+    }
+  }
+
+  return [...files.values()]
+}
+
+function formatDelegatedTaskEvent(event: AgentEvent): string {
+  const prefix = new Date(event.timestamp).toISOString()
+
+  if (event.type === 'activity' && isAgentActivityPayload(event.payload)) {
+    const text = formatDelegatedTaskActivity(event.payload)
+    return text ? `[${prefix}] ${text}` : ''
+  }
+
+  if (event.type === 'diff') {
+    const files = delegatedTaskEditedFiles([event])
+    return files.length > 0 ? `[${prefix}] Diff: ${files.join('; ')}` : ''
+  }
+
+  if (event.type === 'session-complete') {
+    return `[${prefix}] Session completed: ${completionStatus(event)}`
+  }
+
+  const text = textFromUnknownPayload(event.payload).trim()
+  return text ? `[${prefix}] ${event.type}: ${text}` : ''
+}
+
+function formatDelegatedTaskActivity(activity: AgentActivity): string {
+  switch (activity.kind) {
+    case 'message':
+      return `${activity.role}: ${activity.text}`
+    case 'step':
+      return [activity.title, activity.detail].filter(Boolean).join(' - ')
+    case 'tool-call':
+      return `Tool call: ${activity.name}`
+    case 'tool-result':
+      return `Tool result: ${activity.name}${activity.output ? `\n${activity.output}` : ''}`
+    case 'command':
+      return `Command: ${activity.command} (${activity.status})`
+    case 'file-change':
+      return `File changed: ${activity.filePath} (${activity.changeType}, ${activity.status})`
+    case 'diff-summary':
+      return `Diff summary: ${activity.summary}`
+    case 'completion':
+      return `Completion: ${activity.summary}`
+    case 'approval':
+      return `Approval: ${activity.status}`
+    case 'compaction':
+      return 'Context automatically compacted'
+    case 'plan-prompt':
+      return `Plan prompt: ${activity.title}`
+    case 'plan-review':
+      return 'Plan review requested'
+    case 'user-question':
+      return `User question: ${activity.title}`
+    case 'swarm-step-approval':
+      return `Swarm approval: ${activity.completedRole} -> ${activity.nextRole}`
+    case 'model-recovery':
+      return `Model recovery: ${activity.failedAgentId} / ${activity.failedModel}`
+    case 'delegation':
+      return `Delegation: ${activity.goal} (${activity.status})`
+    case 'multitask-plan':
+      return `Multitask plan: ${activity.tasks.length} tasks`
+    case 'todo-list':
+      return `Todo list: ${activity.items.map((item) => `${item.completed ? '[x]' : '[ ]'} ${item.text}`).join('; ')}`
+  }
+}
+
+function truncateDelegationHandoffPrompt(prompt: string): string {
+  const maxLength = 120_000
+  if (prompt.length <= maxLength) return prompt
+  return `${prompt.slice(0, maxLength - 120)}\n\n[Background handoff truncated to fit the agent context.]`
+}
 
 function processWarningActivityKey(event: AgentEvent): string | null {
   if (event.type !== 'activity') return null
@@ -1967,15 +2070,28 @@ function processWarningActivityKey(event: AgentEvent): string | null {
   return processWarningKey(event.payload.detail)
 }
 
-function isUserQuestionActivity(payload: unknown): payload is Extract<
-  AgentActivity,
-  { kind: 'user-question' }
-> {
-  return (
-    typeof payload === 'object' &&
-    payload !== null &&
-    (payload as { kind?: unknown }).kind === 'user-question'
-  )
+function gitChangedFiles(files: readonly GitFileEntry[]): GitChangedFile[] {
+  return files.map((file) => ({
+    path: file.path,
+    previousPath: file.previousPath,
+    status: gitChangedFileStatus(file.status),
+  }))
+}
+
+function gitChangedFileStatus(status: GitFileEntry['status']): GitChangedFile['status'] {
+  if (
+    status === 'added' ||
+    status === 'modified' ||
+    status === 'deleted' ||
+    status === 'renamed' ||
+    status === 'copied' ||
+    status === 'untracked' ||
+    status === 'type-changed'
+  ) {
+    return status
+  }
+
+  return 'modified'
 }
 
 function providerLimitReasonFromEvent(event: AgentEvent): string | null {
@@ -1988,7 +2104,7 @@ function providerLimitReasonFromEvent(event: AgentEvent): string | null {
   }
 
   const text = textFromUnknownPayload(event.payload).trim()
-  if (!isProviderLimitText(text)) return null
+  if (!isProviderLimitText(text) && !hasRecoverableProviderStatus(event.payload)) return null
 
   return truncateProviderLimitReason(text)
 }
@@ -2012,8 +2128,19 @@ function isProviderLimitText(text: string): boolean {
     'model is not supported',
     'model is unsupported',
     'model_not_supported',
+    'model not found',
+    'model_not_found',
+    'model does not exist',
+    'model not available',
+    'model unavailable',
+    'unknown model',
+    'invalid model',
     'unsupported model',
     'not supported when using',
+    '404 page not found',
+    '404 not found',
+    'status code 404',
+    'statuscode":404',
     'credits exhausted',
     'billing hard limit',
     'credit balance',
@@ -2024,201 +2151,42 @@ function isProviderLimitText(text: string): boolean {
   return directSignals.some((signal) => normalized.includes(signal))
 }
 
+function hasRecoverableProviderStatus(payload: unknown, depth = 0): boolean {
+  if (!payload || typeof payload !== 'object' || depth > 4) return false
+
+  const record = payload as Record<string, unknown>
+  for (const field of ['statusCode', 'status', 'httpStatus']) {
+    const status = numberLike(record[field])
+    if (status && isRecoverableProviderStatus(status)) return true
+  }
+
+  return Object.values(record).some((value) => hasRecoverableProviderStatus(value, depth + 1))
+}
+
+function numberLike(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string') return null
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isRecoverableProviderStatus(status: number): boolean {
+  return (
+    status === 404 ||
+    status === 408 ||
+    status === 409 ||
+    status === 422 ||
+    status === 429 ||
+    status >= 500
+  )
+}
+
 function truncateProviderLimitReason(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (normalized.length <= 500) return normalized
 
   return `${normalized.slice(0, 497)}...`
-}
-
-function textFromUnknownPayload(payload: unknown): string {
-  if (typeof payload === 'string') return payload
-  if (payload === null || payload === undefined) return ''
-  if (typeof payload !== 'object') return String(payload)
-
-  const record = payload as Record<string, unknown>
-  const directFields = [
-    'text',
-    'message',
-    'error',
-    'detail',
-    'reason',
-    'result',
-    'summary',
-    'output',
-    'content',
-  ]
-
-  for (const field of directFields) {
-    const value = record[field]
-    if (typeof value === 'string' && value.trim()) return value
-    if (Array.isArray(value)) {
-      const text = value.map(textFromUnknownPayload).join(' ')
-      if (text.trim()) return text
-    }
-    if (value && typeof value === 'object') {
-      const text = textFromUnknownPayload(value)
-      if (text.trim()) return text
-    }
-  }
-
-  try {
-    return JSON.stringify(payload)
-  } catch {
-    return String(payload)
-  }
-}
-
-function isDelegateTaskToolCall(
-  payload: unknown,
-): payload is Extract<AgentActivity, { kind: 'tool-call' }> {
-  if (!payload || typeof payload !== 'object') return false
-  const activity = payload as Partial<Extract<AgentActivity, { kind: 'tool-call' }>>
-  if (activity.kind !== 'tool-call') return false
-
-  const normalized = activity.name?.replace(/[^a-z0-9]/gi, '').toLowerCase()
-  return normalized === 'delegatetask' || normalized === 'delegate'
-}
-
-function delegateTaskRequestFromToolCall(
-  activity: Extract<AgentActivity, { kind: 'tool-call' }>,
-): { goal: string; context?: string } | null {
-  const input = structuredDelegationInput(activity.input)
-  const goal =
-    cleanDelegationString(input.goal) ??
-    cleanDelegationString(input.task) ??
-    cleanDelegationString(input.prompt)
-  if (!goal) return null
-
-  return {
-    goal,
-    context: cleanDelegationString(input.context),
-  }
-}
-
-function structuredDelegationInput(input: unknown): Record<string, unknown> {
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    return input as Record<string, unknown>
-  }
-
-  if (typeof input === 'string') {
-    try {
-      const parsed = JSON.parse(input) as unknown
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>
-      }
-    } catch {
-      return { goal: input }
-    }
-  }
-
-  return {}
-}
-
-function cleanDelegationString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed || undefined
-}
-
-function delegationRequestKey(
-  sessionId: string,
-  request: { goal: string; context?: string },
-): string {
-  return createHash('sha1')
-    .update(sessionId)
-    .update('\0')
-    .update(request.goal)
-    .update('\0')
-    .update(request.context ?? '')
-    .digest('hex')
-}
-
-function delegationOutputFromEvent(event: AgentEvent): string | null {
-  if (event.type === 'stdout' || event.type === 'stderr') {
-    const text = textFromUnknownPayload(event.payload).trim()
-    return text || null
-  }
-
-  if (event.type !== 'activity') return null
-  if (!event.payload || typeof event.payload !== 'object') return null
-
-  const payload = event.payload as AgentActivity
-  switch (payload.kind) {
-    case 'message':
-      return payload.text.trim() || null
-    case 'tool-call':
-      return `Running ${payload.name}`
-    case 'tool-result':
-      return payload.output?.trim() || `${payload.name} finished`
-    case 'command':
-      return payload.command
-    case 'step':
-      return payload.detail?.trim() || payload.title
-    case 'completion':
-      return payload.summary
-    default:
-      return null
-  }
-}
-
-function delegationSummary(childSessionId: string, terminalEvent: AgentEvent): string | undefined {
-  const events = [...sessionsStore.listEvents(childSessionId), terminalEvent]
-
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const output = delegationOutputFromEvent(events[index])
-    if (output) return truncateDelegationText(output, 2_000)
-  }
-
-  const fallback = textFromUnknownPayload(terminalEvent.payload).trim()
-  return fallback ? truncateDelegationText(fallback, 2_000) : undefined
-}
-
-function delegationStatusFromSessionStatus(
-  status: SessionStatus,
-): Extract<AgentActivity, { kind: 'delegation' }>['status'] {
-  if (status === 'error' || status === 'cancelled') return status
-  return 'done'
-}
-
-function truncateDelegationText(text: string, maxLength: number): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (normalized.length <= maxLength) return normalized
-  return `${normalized.slice(0, maxLength - 3)}...`
-}
-
-function publicQueuedMessage(message: PendingQueuedMessage): QueuedMessage {
-  const { runtimeSettings: _runtimeSettings, ...publicMessage } = message
-  return publicMessage
-}
-
-function publicQueuedMessages(messages: readonly PendingQueuedMessage[]): QueuedMessage[] {
-  return messages.map(publicQueuedMessage)
-}
-
-function completionStatus(event: AgentEvent): SessionStatus {
-  const payload = objectPayload(event.payload)
-  const status = readSessionStatus(payload, 'status')
-  if (status && terminalSessionStatuses.has(status)) return status
-
-  const exitCode = readNumber(payload, 'exitCode')
-  const signal = payload.signal
-
-  if (exitCode !== undefined && exitCode !== 0) return 'error'
-  if (typeof signal === 'string' && signal.trim()) return 'cancelled'
-
-  return 'done'
-}
-
-function withCompletionStatus(event: AgentEvent, status: SessionStatus): AgentEvent {
-  const payload = objectPayload(event.payload)
-  return {
-    ...event,
-    payload:
-      Object.keys(payload).length > 0
-        ? { ...payload, status }
-        : { status, value: event.payload },
-  }
 }
 
 function broadcastToRenderer(event: AgentEvent): void {
@@ -2246,25 +2214,6 @@ function isLiveDiffPayload(payload: unknown): boolean {
   )
 }
 
-function broadcastQueueUpdated(threadId: string, pending: QueuedMessage[]): void {
-  try {
-    const electron = require('electron') as {
-      BrowserWindow?: {
-        getAllWindows(): Array<{
-          webContents: { send(channel: string, payload: QueueStatusEvent): void }
-        }>
-      }
-    }
-
-    const payload: QueueStatusEvent = { threadId, pending }
-    for (const win of electron.BrowserWindow?.getAllWindows() ?? []) {
-      win.webContents.send('queue:updated', payload)
-    }
-  } catch {
-    // Unit tests and non-Electron contexts: silently noop.
-  }
-}
-
 function broadcastThreadUpdated(thread: Thread): void {
   try {
     const electron = require('electron') as {
@@ -2282,67 +2231,6 @@ function broadcastThreadUpdated(thread: Thread): void {
   } catch {
     // Unit tests and non-Electron contexts: silently noop.
   }
-}
-
-function extractUsage(payload: unknown):
-  | { tokensIn: number; tokensOut: number; costUsd?: number }
-  | null {
-  const payloadObject = objectPayload(payload)
-  const usageObject = objectPayload(payloadObject.usage) ?? payloadObject
-
-  const tokensIn =
-    readNumber(usageObject, 'input_tokens') ??
-    readNumber(usageObject, 'inputTokens') ??
-    readNumber(usageObject, 'tokens_in') ??
-    readNumber(usageObject, 'tokensIn') ??
-    0
-  const tokensOut =
-    readNumber(usageObject, 'output_tokens') ??
-    readNumber(usageObject, 'outputTokens') ??
-    readNumber(usageObject, 'tokens_out') ??
-    readNumber(usageObject, 'tokensOut') ??
-    0
-  const costUsd =
-    readNumber(usageObject, 'cost_usd') ??
-    readNumber(usageObject, 'costUsd') ??
-    readNumber(payloadObject, 'cost_usd') ??
-    readNumber(payloadObject, 'costUsd')
-
-  if (tokensIn === 0 && tokensOut === 0 && costUsd === undefined) {
-    return null
-  }
-
-  return { tokensIn, tokensOut, costUsd }
-}
-
-function objectPayload(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
-function readNumber(object: Record<string, unknown>, key: string): number | undefined {
-  const value = object[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function readSessionStatus(
-  object: Record<string, unknown>,
-  key: string,
-): SessionStatus | undefined {
-  const value = object[key]
-  return typeof value === 'string' && isSessionStatus(value) ? value : undefined
-}
-
-function isSessionStatus(value: string): value is SessionStatus {
-  return (
-    value === 'running' ||
-    value === 'awaiting-approval' ||
-    value === 'awaiting-input' ||
-    value === 'done' ||
-    value === 'error' ||
-    value === 'cancelled'
-  )
 }
 
 function isAgentActivityPayload(payload: unknown): payload is AgentActivity {
@@ -2368,120 +2256,6 @@ function isProcessWarningPayload(payload: unknown): payload is {
     typeof record.detail === 'string' &&
     processWarningKey(record.detail).length > 0
   )
-}
-
-function shouldTriggerLiveLocalDiff(event: AgentEvent): boolean {
-  if (event.type !== 'activity') return false
-
-  const payload = event.payload
-  if (!payload || typeof payload !== 'object') return false
-
-  const kind = (payload as { kind?: unknown }).kind
-  return kind === 'file-change' || kind === 'tool-call' || kind === 'command'
-}
-
-function diffProposalSignature(proposals: readonly DiffProposal[]): string {
-  const hash = createHash('sha256')
-  for (const proposal of [...proposals].sort((left, right) =>
-    left.filePath.localeCompare(right.filePath),
-  )) {
-    hash.update(proposal.filePath)
-    hash.update('\0')
-    hash.update(proposal.changeType ?? '')
-    hash.update('\0')
-    hash.update(String(proposal.additions ?? 0))
-    hash.update('\0')
-    hash.update(String(proposal.deletions ?? 0))
-    hash.update('\0')
-    hash.update(proposal.proposedContent)
-    hash.update('\0')
-  }
-  return hash.digest('hex')
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function buildAdapterContext(
-  baseContext: string | null | undefined,
-  transcript: ThreadTranscriptTurn[],
-): string | null | undefined {
-  const trimmedBaseContext = baseContext?.trim()
-  const historyBlock = buildThreadHistoryBlock(transcript)
-  if (!historyBlock) {
-    return trimmedBaseContext
-      ? truncateForContext(redactSensitiveText(trimmedBaseContext), MAX_ADAPTER_CONTEXT_CHARS)
-      : null
-  }
-
-  return buildBoundedPromptContext(
-    [
-      { title: 'Prepared project context:', content: baseContext, maxChars: 18_000 },
-      { title: 'Conversation context:', content: historyBlock, maxChars: 6_000 },
-    ],
-    { maxChars: MAX_ADAPTER_CONTEXT_CHARS },
-  )
-}
-
-function buildThreadHistoryBlock(transcript: ThreadTranscriptTurn[]): string | null {
-  const relevantTurns = transcript.filter(
-    (turn) => turn.prompt.trim() || turn.assistantText?.trim(),
-  )
-  if (relevantTurns.length === 0) return null
-
-  const summaryTurns = relevantTurns.slice(
-    0,
-    Math.max(0, relevantTurns.length - THREAD_CONTEXT_RECENT_TURNS),
-  )
-  const recentTurns = relevantTurns.slice(-THREAD_CONTEXT_RECENT_TURNS)
-  const sections: string[] = []
-
-  if (summaryTurns.length > 0) {
-    sections.push(
-      [
-        `Older conversation summary (${summaryTurns.length} turn${
-          summaryTurns.length === 1 ? '' : 's'
-        }):`,
-        ...summaryTurns.map(
-          (turn, index) =>
-            `${index + 1}. User: ${truncateForContext(
-              turn.prompt,
-              THREAD_CONTEXT_SUMMARY_CHARS,
-            )}${
-              turn.assistantText?.trim()
-                ? `\n   Assistant: ${truncateForContext(
-                    turn.assistantText,
-                    THREAD_CONTEXT_SUMMARY_CHARS,
-                  )}`
-                : ''
-            }`,
-        ),
-      ].join('\n'),
-    )
-  }
-
-  const recent = recentTurns
-    .map((turn, index) => {
-      const parts = [
-        `Turn ${index + 1}`,
-        `User: ${truncateForContext(turn.prompt, THREAD_CONTEXT_PROMPT_CHARS)}`,
-      ]
-      const assistantText = turn.assistantText?.trim()
-      if (assistantText) {
-        parts.push(
-          `Assistant: ${truncateForContext(assistantText, THREAD_CONTEXT_ASSISTANT_CHARS)}`,
-        )
-      }
-
-      return parts.join('\n')
-    })
-
-  if (recent.length > 0) {
-    sections.push(['Recent conversation turns:', ...recent].join('\n\n'))
-  }
-
-  return `Conversation history (same thread, oldest to newest):\n${sections.join('\n\n')}`
 }
 
 function formatMs(ms: number): string {

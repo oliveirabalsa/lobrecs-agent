@@ -32,7 +32,7 @@ type ThreadSearchRow = ThreadRow & {
   project_updated_at: number
   session_id: string | null
   session_prompt: string | null
-  event_payload: string | null
+  session_assistant_summary: string | null
 }
 
 function rowToThread(row: ThreadRow): Thread {
@@ -101,7 +101,7 @@ export const threadsStore = {
           lower(t.title) LIKE ? ESCAPE '\\'
           OR lower(p.name) LIKE ? ESCAPE '\\'
           OR lower(s.prompt) LIKE ? ESCAPE '\\'
-          OR lower(e.payload) LIKE ? ESCAPE '\\'
+          OR lower(s.assistant_summary) LIKE ? ESCAPE '\\'
         )
       `
       : ''
@@ -111,7 +111,7 @@ export const threadsStore = {
       params.push(like, like, like, like)
     }
 
-    params.push(limit * 8)
+    params.push(limit)
 
     const rows = getDb()
       .prepare(
@@ -127,22 +127,20 @@ export const threadsStore = {
             p.updated_at AS project_updated_at,
             s.id AS session_id,
             s.prompt AS session_prompt,
-            e.payload AS event_payload
+            s.assistant_summary AS session_assistant_summary
           FROM threads t
           JOIN projects p ON p.id = t.project_id
-          LEFT JOIN sessions s ON s.thread_id = t.id
-          LEFT JOIN session_events e ON e.session_id = s.id
+          JOIN sessions s ON s.id = t.last_session_id
           WHERE 1 = 1
-          AND t.last_session_id IS NOT NULL
           ${archivedSql}
           ${querySql}
-          ORDER BY t.pinned DESC, t.updated_at DESC, t.created_at DESC, s.created_at DESC, e.id DESC
+          ORDER BY t.pinned DESC, t.updated_at DESC, t.created_at DESC
           LIMIT ?
         `,
       )
       .all(...params) as ThreadSearchRow[]
 
-    return collapseSearchRows(rows, query).slice(0, limit)
+    return rows.map((row) => createSearchResult(row, query))
   },
 
   create(data: CreateThreadInput & { id?: string; createdAt?: number }): Thread {
@@ -290,29 +288,13 @@ export const threadsStore = {
   },
 }
 
-function collapseSearchRows(rows: ThreadSearchRow[], query: string): ThreadSearchResult[] {
-  const byThread = new Map<string, ThreadSearchResult & { score: number }>()
-
-  for (const row of rows) {
-    const candidate = createSearchResult(row, query)
-    const existing = byThread.get(candidate.thread.id)
-    if (!existing || candidate.score > existing.score) {
-      byThread.set(candidate.thread.id, candidate)
-    }
-  }
-
-  return [...byThread.values()]
-    .sort((left, right) => right.score - left.score || right.updatedAt - left.updatedAt)
-    .map(({ score: _score, ...result }) => result)
-}
-
 function createSearchResult(
   row: ThreadSearchRow,
   query: string,
 ): ThreadSearchResult & { score: number } {
   const thread = rowToThread(row)
   const project = rowToSearchProject(row)
-  const messageText = textFromPayload(row.event_payload)
+  const messageText = row.session_assistant_summary ?? ''
   const fields: Array<{
     kind: ThreadSearchMatchKind
     text: string
@@ -371,30 +353,6 @@ function snippetForText(text: string, query: string): string {
   const suffix = end < trimmed.length ? '...' : ''
 
   return `${prefix}${trimmed.slice(start, end).trim()}${suffix}`
-}
-
-function textFromPayload(payload: string | null): string {
-  if (!payload) return ''
-
-  try {
-    const parsed = JSON.parse(payload) as unknown
-    return textFromUnknown(parsed)
-  } catch {
-    return payload
-  }
-}
-
-function textFromUnknown(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (!value || typeof value !== 'object') return ''
-
-  const record = value as Record<string, unknown>
-  for (const field of ['text', 'message', 'content', 'summary', 'result', 'output']) {
-    const item = record[field]
-    if (typeof item === 'string') return item
-  }
-
-  return JSON.stringify(record)
 }
 
 function requireThread(id: string): Thread {

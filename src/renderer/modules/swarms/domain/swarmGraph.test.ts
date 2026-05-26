@@ -136,4 +136,64 @@ describe('buildSwarmGraph', () => {
       messageCount: 1,
     })
   })
+
+  it('summarizes multitask-plan activity as an approval-style handoff', () => {
+    const sessions: Session[] = [
+      {
+        ...baseSession,
+        id: 'session-1',
+        prompt: '[Role: planner]\nBreak down the work',
+        status: 'awaiting-approval',
+        createdAt: 1_000,
+      } as Session,
+    ]
+    const events = new Map<string, AgentEvent[]>([
+      [
+        'session-1',
+        [
+          {
+            type: 'activity',
+            sessionId: 'session-1',
+            timestamp: 1_200,
+            payload: {
+              kind: 'multitask-plan',
+              planId: 'plan-1',
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Update UI',
+                  prompt: 'Refresh the composer controls',
+                  recommendedAgentId: 'codex',
+                  recommendedModel: 'gpt-5.3-codex',
+                  complexity: 'medium',
+                  reasoning: 'UI work',
+                  estimatedCostUsd: 0.25,
+                },
+                {
+                  id: 'task-2',
+                  title: 'Add orchestration tests',
+                  prompt: 'Cover the spawn flow',
+                  recommendedAgentId: 'claude-code',
+                  recommendedModel: 'claude-sonnet-4.5',
+                  complexity: 'medium',
+                  reasoning: 'Test coverage',
+                  estimatedCostUsd: 0.2,
+                },
+              ],
+              totalEstimatedCostUsd: 0.45,
+              decomposedBy: { agentId: 'codex', model: 'gpt-5.3-mini' },
+              originalPrompt: 'Implement multitask mode',
+            },
+          },
+        ],
+      ],
+    ])
+
+    const graph = buildSwarmGraph(sessions, events)
+
+    expect(graph.nodes[0]).toMatchObject({
+      outputPreview: '2 multitask items ready',
+      approvalCount: 1,
+    })
+  })
 })

@@ -114,7 +114,7 @@ export function ModelPopover({
       description="Choose an agent, model, and thinking depth"
       maxWidth={640}
     >
-      <div className="flex min-h-[360px] gap-3">
+      <div className="flex h-[min(560px,calc(100vh-120px))] min-h-[360px] gap-3">
         <nav
           aria-label="Provider"
           className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-hairline pr-2"
@@ -146,7 +146,7 @@ export function ModelPopover({
         </nav>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex-1 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {activeTab === 'auto' ? (
               <button
                 type="button"
@@ -169,6 +169,32 @@ export function ModelPopover({
               </button>
             ) : (
               <div className="flex flex-col gap-1">
+                {activeGroup?.account ? (
+                  <div className="mb-2 rounded-card border border-hairline bg-card-raised px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium uppercase text-muted">
+                        Account
+                      </span>
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          activeGroup.account.status === 'authenticated'
+                            ? 'bg-accent-add'
+                            : activeGroup.account.status === 'unauthenticated'
+                              ? 'bg-accent-del'
+                              : 'bg-accent-warn'
+                        }`}
+                      />
+                    </div>
+                    <div className="mt-1 truncate text-xs font-medium text-primary">
+                      {activeGroup.account.label}
+                    </div>
+                    {activeGroup.account.detail ? (
+                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">
+                        {activeGroup.account.detail}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {activeGroup?.options.map((option) => {
                   const isActive =
                     selection.kind === 'manual' &&

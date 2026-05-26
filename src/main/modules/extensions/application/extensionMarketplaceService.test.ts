@@ -201,6 +201,50 @@ describe('ExtensionMarketplaceService', () => {
     ).rejects.toThrow('provider entry')
   })
 
+  it('installs executable hook manifests disabled and untrusted by default', async () => {
+    const service = serviceWithCatalog()
+
+    const installed = await service.install({
+      extensionId: 'local-jsonrpc-workflow-hooks',
+      scope: 'project',
+      projectPath: repoPath,
+      targetAgents: ['codex'],
+    })
+
+    expect(installed.actions).toEqual([])
+    expect(installed.executable).toMatchObject({
+      trusted: false,
+      enabled: false,
+      scope: 'project',
+      manifest: {
+        runtime: 'node',
+        hooks: expect.arrayContaining(['prompt-decoration', 'retry-gating']),
+        capabilities: expect.arrayContaining(['prompt:decorate', 'retry:gate']),
+      },
+    })
+  })
+
+  it('requires trust before executable hook installations can be enabled', async () => {
+    const service = serviceWithCatalog()
+    const installed = await service.install({
+      extensionId: 'local-jsonrpc-workflow-hooks',
+      scope: 'project',
+      projectPath: repoPath,
+      targetAgents: ['codex'],
+    })
+
+    expect(() =>
+      service.updateRuntimeState({ installationId: installed.id, enabled: true }),
+    ).toThrow('trusted before')
+
+    const trusted = service.updateRuntimeState({
+      installationId: installed.id,
+      trusted: true,
+      enabled: true,
+    })
+    expect(trusted.executable).toMatchObject({ trusted: true, enabled: true })
+  })
+
   it('injects the selected project path into project-bound MCP configs', async () => {
     const service = serviceWithCatalog()
     await service.install({
@@ -244,8 +288,40 @@ function fakeRepository(): ExtensionRepository {
         targetAgents: input.targetAgents,
         actions: input.actions,
         installedAt: input.installedAt,
+        executable: input.executableManifest
+          ? {
+              manifest: input.executableManifest,
+              trusted: false,
+              enabled: false,
+              scope: input.scope,
+            }
+          : undefined,
       }
       records.unshift(record)
+      return record
+    },
+    get: (id) => records.find((record) => record.id === id) ?? null,
+    updateRuntimeState: (input) => {
+      const record = records.find((item) => item.id === input.installationId)
+      if (!record?.executable) throw new Error('Missing executable record')
+      const trusted = input.trusted ?? record.executable.trusted
+      if (input.enabled === true && !trusted) {
+        throw new Error('Executable extension hooks must be trusted before they can be enabled.')
+      }
+      record.executable = {
+        ...record.executable,
+        trusted,
+        enabled: trusted ? (input.enabled ?? record.executable.enabled) : false,
+      }
+      return record
+    },
+    saveDoctorResult: (input) => {
+      const record = records.find((item) => item.id === input.installationId)
+      if (!record?.executable) throw new Error('Missing executable record')
+      record.executable = {
+        ...record.executable,
+        doctorResult: input.result,
+      }
       return record
     },
   }

@@ -15,38 +15,19 @@ import type {
 import { isSessionStatus } from '../../sessions/domain/sessionStatus'
 import { useTabs, type Tab } from '../../sessions/state/tabs'
 import type { ActiveSessionMeta, StartedSessionSummary } from '../../sessions/types'
+import {
+  readActiveThread,
+  useWorkspaceThreadSelectionState,
+  writeActiveThread,
+} from './useWorkspaceThreadSelection'
 
 export type MainView = 'workspace' | 'costs' | 'automations' | 'memory' | 'git'
 
-const ACTIVE_THREAD_KEY_PREFIX = 'activeThread:'
 const BLOCKING_SESSION_STATUSES = new Set<SessionStatus>([
   'running',
   'awaiting-approval',
   'awaiting-input',
 ])
-
-function safeLocalStorage(): Storage | null {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return null
-    return window.localStorage
-  } catch {
-    return null
-  }
-}
-
-function readActiveThread(projectId: string): string | null {
-  const ls = safeLocalStorage()
-  if (!ls) return null
-  return ls.getItem(`${ACTIVE_THREAD_KEY_PREFIX}${projectId}`)
-}
-
-function writeActiveThread(projectId: string, threadId: string | null): void {
-  const ls = safeLocalStorage()
-  if (!ls) return
-  const key = `${ACTIVE_THREAD_KEY_PREFIX}${projectId}`
-  if (threadId) ls.setItem(key, threadId)
-  else ls.removeItem(key)
-}
 
 function toStartedSessionAgentId(
   agentId: Project['agentId'] | undefined,
@@ -240,19 +221,24 @@ export function buildSwarmWorkspaceState(
 
 export function useWorkspaceController() {
   const tabs = useTabs()
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
-  const [activeSession, setActiveSession] = useState<ActiveSessionMeta | null>(null)
+  const {
+    selectedProject,
+    setSelectedProject,
+    activeSession,
+    setActiveSession,
+    activeSessionId,
+    activeThreadId,
+  } = useWorkspaceThreadSelectionState()
   const [diffProposalState, setDiffProposalState] =
     useState<ScopedDiffProposalState | null>(null)
   const [approvalRequest, setApprovalRequest] = useState<ApprovalRequest | null>(null)
   const [prefillPrompt, setPrefillPrompt] = useState<string | undefined>(undefined)
+  const [prefillPromptRevision, setPrefillPromptRevision] = useState(0)
   const [bannerError, setBannerError] = useState<string | null>(null)
   const [mainView, setMainView] = useState<MainView>('workspace')
   const [swarmOpen, setSwarmOpen] = useState(false)
   const [pendingQueue, setPendingQueue] = useState<QueuedMessage[]>([])
 
-  const activeSessionId = activeSession?.id ?? null
-  const activeThreadId = activeSession?.threadId ?? null
   const diffProposals = useMemo(
     () =>
       visibleDiffProposalsForActiveSession(
@@ -316,7 +302,7 @@ export function useWorkspaceController() {
   const busyReason = useMemo(() => {
     if (approvalRequest) return 'Respond to the pending approval before starting another task'
     if (activeSession?.status === 'awaiting-input') {
-      return 'Answer the agent question before starting another task'
+      return 'Respond to the pending agent request before starting another task'
     }
     if (isBusy) return 'Current session is still running'
     return undefined
@@ -511,6 +497,7 @@ export function useWorkspaceController() {
     agentId?: AgentId,
     modelOverride?: string,
     approvalMode?: StartedSessionSummary['approvalMode'],
+    profileId?: string,
     thinking?: AgentThinkingLevel,
   ): Promise<void> {
     if (!selectedProject || !activeThreadId) return
@@ -523,6 +510,7 @@ export function useWorkspaceController() {
         agentId,
         modelOverride,
         approvalMode,
+        profileId,
         thinking,
       })
       setBannerError(null)
@@ -652,10 +640,18 @@ export function useWorkspaceController() {
       const fork = await window.agentforge.sessions.fork(sessionId)
       if (fork?.prompt) {
         setPrefillPrompt(fork.prompt)
+        setPrefillPromptRevision((revision) => revision + 1)
       }
     } catch (error: unknown) {
       setBannerError(error instanceof Error ? error.message : 'Failed to fork session')
     }
+  }
+
+  function handleRestorePrompt(prompt: string) {
+    if (!prompt.trim()) return
+    setPrefillPrompt(prompt)
+    setPrefillPromptRevision((revision) => revision + 1)
+    setBannerError(null)
   }
 
   function handleOpenSession(session: Session, project?: Project) {
@@ -827,6 +823,7 @@ export function useWorkspaceController() {
     diffProposals,
     approvalRequest,
     prefillPrompt,
+    prefillPromptRevision,
     bannerError,
     mainView,
     swarmOpen,
@@ -855,6 +852,7 @@ export function useWorkspaceController() {
     pendingQueue,
     handleDeleteActiveThread,
     handleForkSession,
+    handleRestorePrompt,
     handleOpenSession,
     handleCloseTab,
     handleSelectTab,

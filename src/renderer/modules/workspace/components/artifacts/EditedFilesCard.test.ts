@@ -263,7 +263,6 @@ describe('buildEditedFileEntries', () => {
 
 describe('areFileRowPropsEqual', () => {
   const onOpenDiff = () => undefined
-  const onReview = () => undefined
 
   it('keeps an unchanged row memoized when its entry object is rebuilt', () => {
     expect(
@@ -274,7 +273,6 @@ describe('areFileRowPropsEqual', () => {
             additions: 2,
             deletions: 1,
           },
-          onReview,
           onOpenDiff,
         },
         {
@@ -283,7 +281,6 @@ describe('areFileRowPropsEqual', () => {
             additions: 2,
             deletions: 1,
           },
-          onReview,
           onOpenDiff,
         },
       ),
@@ -309,7 +306,6 @@ describe('areFileRowPropsEqual', () => {
             deletions: 1,
             proposal,
           },
-          onReview,
           onOpenDiff,
         },
         {
@@ -319,7 +315,6 @@ describe('areFileRowPropsEqual', () => {
             deletions: 1,
             proposal: { ...proposal },
           },
-          onReview,
           onOpenDiff,
         },
       ),
@@ -335,7 +330,6 @@ describe('areFileRowPropsEqual', () => {
             additions: 2,
             deletions: 1,
           },
-          onReview,
           onOpenDiff,
         },
         {
@@ -344,7 +338,6 @@ describe('areFileRowPropsEqual', () => {
             additions: 3,
             deletions: 1,
           },
-          onReview,
           onOpenDiff,
         },
       ),
@@ -369,7 +362,6 @@ describe('areFileRowPropsEqual', () => {
             deletions: 1,
             proposal,
           },
-          onReview,
           onOpenDiff,
         },
         {
@@ -379,7 +371,6 @@ describe('areFileRowPropsEqual', () => {
             deletions: 1,
             proposal: { ...proposal, proposedContent: 'newer\n' },
           },
-          onReview,
           onOpenDiff,
         },
       ),

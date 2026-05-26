@@ -13,10 +13,18 @@ import type {
   SteerParams,
   SwarmStepApprovalDecisionPayload,
 } from '../../shared/contracts/agents'
+import type { AgentProfileListResult } from '../../shared/contracts/agentProfiles'
+import {
+  validateAgentDispatchParams,
+  validateEnqueueParams,
+  validateSteerParams,
+} from '../../shared/contracts/agents'
+import { assertPlainId } from '../../shared/contracts/validation'
 import type { IpcInvoker, IpcSubscriber } from './ipc'
 
 export interface AgentApi {
   dispatch(params: AgentDispatchParams): Promise<AgentDispatchResult>
+  listProfiles(projectId: string): Promise<AgentProfileListResult>
   delegateTask(params: AgentDelegateTaskParams): Promise<AgentDelegateTaskResult>
   approve(sessionId: string): Promise<void>
   reject(sessionId: string): Promise<void>
@@ -66,11 +74,13 @@ export interface AgentApi {
 
 export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentApi {
   return {
-    dispatch: (params) => ipcRenderer.invoke('agent:dispatch', params),
+    dispatch: (params) => ipcRenderer.invoke('agent:dispatch', validateAgentDispatchParams(params)),
+    listProfiles: (projectId) =>
+      ipcRenderer.invoke('agent:list-profiles', assertPlainId(projectId, 'Project id')),
     delegateTask: (params) => ipcRenderer.invoke('agent:delegate-task', params),
-    approve: (sessionId) => ipcRenderer.invoke('agent:approve', sessionId),
-    reject: (sessionId) => ipcRenderer.invoke('agent:reject', sessionId),
-    cancel: (sessionId) => ipcRenderer.invoke('agent:cancel', sessionId),
+    approve: (sessionId) => ipcRenderer.invoke('agent:approve', assertPlainId(sessionId, 'Session id')),
+    reject: (sessionId) => ipcRenderer.invoke('agent:reject', assertPlainId(sessionId, 'Session id')),
+    cancel: (sessionId) => ipcRenderer.invoke('agent:cancel', assertPlainId(sessionId, 'Session id')),
     killAll: () => ipcRenderer.invoke('agent:kill-all'),
     planDecision: (payload) => ipcRenderer.invoke('agent:plan-decision', payload),
     planReviewDecision: (payload) =>
@@ -79,12 +89,15 @@ export function createAgentApi(ipcRenderer: IpcInvoker & IpcSubscriber): AgentAp
       ipcRenderer.invoke('agent:model-recovery-decision', payload),
     stepApprovalDecision: (payload) =>
       ipcRenderer.invoke('swarm:step-approval-decision', payload),
-    enqueue: (params) => ipcRenderer.invoke('agent:enqueue', params),
-    getQueue: (threadId) => ipcRenderer.invoke('agent:queue-status', threadId),
+    enqueue: (params) => ipcRenderer.invoke('agent:enqueue', validateEnqueueParams(params)),
+    getQueue: (threadId) => ipcRenderer.invoke('agent:queue-status', assertPlainId(threadId, 'Thread id')),
     dequeueItem: (threadId, messageId) =>
-      ipcRenderer.invoke('agent:dequeue-item', { threadId, messageId }),
-    clearQueue: (threadId) => ipcRenderer.invoke('agent:clear-queue', threadId),
-    steer: (params) => ipcRenderer.invoke('agent:steer', params),
+      ipcRenderer.invoke('agent:dequeue-item', {
+        threadId: assertPlainId(threadId, 'Thread id'),
+        messageId: assertPlainId(messageId, 'Message id'),
+      }),
+    clearQueue: (threadId) => ipcRenderer.invoke('agent:clear-queue', assertPlainId(threadId, 'Thread id')),
+    steer: (params) => ipcRenderer.invoke('agent:steer', validateSteerParams(params)),
     onQueueUpdated: (callback) => {
       const handler = (_event: IpcRendererEvent, payload: QueueStatusEvent) => callback(payload)
       ipcRenderer.on('queue:updated', handler)

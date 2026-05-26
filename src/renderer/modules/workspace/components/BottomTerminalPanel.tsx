@@ -27,14 +27,7 @@ import {
   createTerminalRemediationPrompt,
   extractTerminalCommandStatuses,
 } from './terminalFailureCapture'
-
-export interface TerminalTab {
-  id: string
-  label: string
-  editorId: string
-  editorName: string
-  repoPath: string
-}
+import type { TerminalTab } from './terminalTabs'
 
 interface BottomTerminalPanelProps {
   initialTab: TerminalTab
@@ -141,15 +134,6 @@ export function BottomTerminalPanel({
     onEmpty()
   }, [tabs.length, onEmpty])
 
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setMounted(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
-
-  const effectiveVisible = visible && mounted
-
   const panelClassName = fullscreen
     ? 'absolute inset-0 z-40 flex min-h-0 flex-col bg-canvas'
     : 'relative flex min-h-0 shrink-0 flex-col bg-canvas'
@@ -161,11 +145,10 @@ export function BottomTerminalPanel({
         fullscreen
           ? undefined
           : {
-              height: effectiveVisible ? height : 0,
+              height: visible ? height : 0,
               overflow: 'hidden',
-              opacity: effectiveVisible ? 1 : 0,
-              pointerEvents: effectiveVisible ? 'auto' : 'none',
-              transition: 'height 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease',
+              opacity: visible ? 1 : 0,
+              pointerEvents: visible ? 'auto' : 'none',
             }
       }
     >
@@ -238,21 +221,6 @@ export function BottomTerminalPanel({
       </div>
     </div>
   )
-}
-
-export function createTerminalTab(
-  editorId: string,
-  editorName: string,
-  repoPath: string,
-  index: number,
-): TerminalTab {
-  return {
-    id: createTerminalSessionId(),
-    label: index > 1 ? `${editorName} ${index}` : editorName,
-    editorId,
-    editorName,
-    repoPath,
-  }
 }
 
 // ─── Resize Handle ───────────────────────────────────────────────────────────
@@ -601,10 +569,6 @@ function sameCursorDisplayState(
   right: CliEditorCursorState,
 ): boolean {
   return left.mode === right.mode && left.shape === right.shape && left.blink === right.blink
-}
-
-function createTerminalSessionId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `terminal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
 function PlusIcon() {

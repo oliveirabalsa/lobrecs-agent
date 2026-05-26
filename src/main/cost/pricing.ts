@@ -10,6 +10,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-5.4-mini": { inputPer1M: 0.5, outputPer1M: 2 },
   "gpt-5.4": { inputPer1M: 2, outputPer1M: 8 },
   "gpt-5.5": { inputPer1M: 15, outputPer1M: 30 },
+  "gpt-5": { inputPer1M: 0, outputPer1M: 0 },
   minimax: { inputPer1M: 0.1, outputPer1M: 0.3 },
   "minimax-coding-plan/MiniMax-M2": { inputPer1M: 0.1, outputPer1M: 0.3 },
   "minimax-coding-plan/MiniMax-M2.5": { inputPer1M: 0.1, outputPer1M: 0.3 },

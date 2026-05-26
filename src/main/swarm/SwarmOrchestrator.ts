@@ -24,18 +24,23 @@ import { modelRouter } from '../router'
 import { capacityFallbackModelsForAgent } from '../router/modelCapacityFallbacks'
 import { sessionManager } from '../session'
 import { projectsStore, sessionsStore, threadsStore } from '../store'
-import { extractSessionOutput } from '../store/sessionOutput'
 import type { PlanPromptOutcome } from './planPrompt'
 import { askStepApproval } from './stepApprovalPrompt'
 import { parseReviewerVerdict, VERDICT_INSTRUCTION } from './reviewVerdict'
 import {
   extractSpecContract,
-  buildSpecContext,
-  PLANNER_SDD_INSTRUCTION,
-  IMPLEMENTER_SPEC_INSTRUCTION,
-  VERIFIER_SPEC_INSTRUCTION,
   type SpecContract,
 } from '../modules/swarms/domain/specContract'
+import {
+  buildAgentPrompt,
+  buildManagedPhaseOutput,
+  buildSwarmThreadTitle,
+} from './services/swarmHelpers'
+import {
+  createSessionCompletionWaiter,
+  isTerminalStatus,
+  normalizeCompletionStatus,
+} from './services/sessionCompletion'
 
 const DEFAULT_REVIEW_LOOP_MAX_ITERATIONS = 3
 const REVIEW_LOOP_HARD_CAP = 10
@@ -220,6 +225,9 @@ export class SwarmOrchestrator {
         settings,
       )
       this.injectSwarmFileSummary(result.sessions)
+    } else if (config.strategy === 'multitask') {
+      result.sessions = await this.spawnParallel(config, project.repoPath, result.swarmId, threadId)
+      void this.waitForParallelCompletion(result.swarmId, config.projectId, result.sessions)
     } else {
       result.sessions = await this.spawnFanOut(config, project.repoPath, result.swarmId, threadId)
       void this.waitForParallelCompletion(result.swarmId, config.projectId, result.sessions)
@@ -1079,18 +1087,6 @@ function validateConfig(config: SwarmConfig, settings: AppSettings): void {
   }
 }
 
-function buildSwarmThreadTitle(config: SwarmConfig): string {
-  const prefix =
-    config.strategy === 'managed'
-      ? 'Managed swarm'
-      : config.strategy === 'sequential'
-        ? 'Sequential swarm'
-        : 'Swarm'
-  const prompt = config.prompt.trim()
-  const title = prompt ? `${prefix}: ${prompt}` : prefix
-  return title.slice(0, 200)
-}
-
 function selectManagerAgent(agentIds: readonly SupportedAgentId[]): SupportedAgentId {
   for (const preferred of ['codex', 'claude-code', 'antigravity', 'opencode'] as const) {
     if (agentIds.includes(preferred)) return preferred
@@ -1122,11 +1118,12 @@ function selectNextManagedPhase(plan: ManagerPlan): ManagerPlan {
     }
   }
 
-  const firstVerificationIndex = plan.agents.findIndex((agent) => isVerificationRole(agent.role))
-  if (firstVerificationIndex > 0) {
+  const hasVerificationRole = plan.agents.some((agent) => isVerificationRole(agent.role))
+  const nonVerificationAgents = plan.agents.filter((agent) => !isVerificationRole(agent.role))
+  if (hasVerificationRole && nonVerificationAgents.length > 0) {
     return {
       ...plan,
-      agents: plan.agents.slice(0, firstVerificationIndex),
+      agents: nonVerificationAgents,
     }
   }
 
@@ -1150,55 +1147,6 @@ function isImplementationRole(role: string): boolean {
   return /\b(implement\w*|builder|build|coder|developer|engineer)\b/i.test(role)
 }
 
-function buildManagedPhaseOutput(sessions: readonly SpawnedSession[]): string {
-  return sessions
-    .map((session) => {
-      const output = session.output?.trim()
-      if (!output) return ''
-      return `[${session.role}]\n${output}`
-    })
-    .filter(Boolean)
-    .join('\n\n')
-}
-
-function buildAgentPrompt(
-  basePrompt: string,
-  agentConfig: SwarmAgentConfig,
-  previousOutput?: string,
-  options?: { contextLabel?: string; extraInstruction?: string; specContract?: SpecContract },
-): string {
-  const role = agentConfig.role
-  const lines = [`[Role: ${role}]`]
-
-  if (isPlanningRole(role)) {
-    lines.push(PLANNER_SDD_INSTRUCTION)
-  } else if (options?.specContract) {
-    lines.push('', buildSpecContext(options.specContract))
-    if (isImplementationRole(role)) {
-      lines.push(IMPLEMENTER_SPEC_INSTRUCTION)
-    } else if (isVerificationRole(role)) {
-      lines.push(VERIFIER_SPEC_INSTRUCTION)
-    }
-  }
-
-  lines.push('', basePrompt.trim())
-
-  if (previousOutput?.trim()) {
-    const label = options?.contextLabel ?? 'Context from previous step'
-    lines.push('', `${label}:`, previousOutput.trim())
-  }
-
-  if (agentConfig.promptSuffix?.trim()) {
-    lines.push('', agentConfig.promptSuffix.trim())
-  }
-
-  if (options?.extraInstruction?.trim()) {
-    lines.push('', options.extraInstruction.trim())
-  }
-
-  return lines.join('\n')
-}
-
 function clampReviewLoopIterations(
   value: number | undefined,
   defaultMaxIterations = DEFAULT_REVIEW_LOOP_MAX_ITERATIONS,
@@ -1212,62 +1160,11 @@ function clampReviewLoopIterations(
   return rounded
 }
 
-function normalizeCompletionStatus(status: SessionStatus | string): SessionStatus {
-  if (
-    status === 'running' ||
-    status === 'awaiting-approval' ||
-    status === 'awaiting-input' ||
-    status === 'done' ||
-    status === 'error' ||
-    status === 'cancelled'
-  ) {
-    return status
-  }
-
-  return 'running'
-}
-
 function cloneResult(result: SwarmResult): SwarmResult {
   return {
     ...result,
     sessions: result.sessions.map((session) => ({ ...session })),
   }
-}
-
-async function waitForStoredSessionCompletion(
-  sessionId: string,
-): Promise<SwarmCompletionResult> {
-  for (;;) {
-    const session = sessionsStore.get(sessionId)
-    if (!session) throw new Error(`Session not found: ${sessionId}`)
-
-    const events = sessionsStore.listEvents(sessionId)
-    const terminalEvent = events.find(
-      (event) => event.type === 'session-complete' || event.type === 'error',
-    )
-
-    if (session.status === 'awaiting-input') {
-      return { status: 'awaiting-input', output: extractSessionOutput(events) }
-    }
-
-    if (session.status === 'cancelled') {
-      return { status: 'cancelled', output: extractSessionOutput(events) }
-    }
-
-    if (terminalEvent && isTerminalStatus(session.status)) {
-      return { status: session.status, output: extractSessionOutput(events) }
-    }
-
-    await delay(750)
-  }
-}
-
-function isTerminalStatus(status: SessionStatus): boolean {
-  return status === 'done' || status === 'error' || status === 'cancelled'
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function createDefaultDependencies(): SwarmOrchestratorDependencies {
@@ -1293,12 +1190,12 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
         context: projectsStore.getContext(input.projectId),
         isolate: settings.execution.worktreeIsolation,
         runtimeSettings: settings.agents.runtimes[input.agentId],
-        modelRecoveryMode: input.strategy === 'managed' ? 'auto' : 'prompt',
+        modelRecoveryMode: 'auto',
       })
 
       return { sessionId, threadId, status: 'running' }
     },
-    waitForSessionCompletion: waitForStoredSessionCompletion,
+    waitForSessionCompletion: createSessionCompletionWaiter(),
     cancelSession: (sessionId) => sessionManager.cancel(sessionId),
     worktrees: worktreeManager,
     getSettings: (projectId) => settingsService.getEffective(projectId).settings,

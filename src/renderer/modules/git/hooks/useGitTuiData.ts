@@ -39,6 +39,8 @@ interface GitWorkspaceApi {
   reviewCurrentDiff?: (projectId: string, threadId?: string) => Promise<GitDiffReviewResult>
 }
 
+type GitWorkspaceClient = typeof window.agentforge.git & GitWorkspaceApi
+
 export interface UseGitTuiDataResult {
   snapshot: GitRepositorySnapshot | null
   loading: boolean
@@ -46,7 +48,7 @@ export interface UseGitTuiDataResult {
   operation: GitOperationState
   detail: GitDetailState
   refresh: () => void
-  runAction: (action: GitTuiAction) => Promise<void>
+  runAction: (action: GitTuiAction) => Promise<GitCommandResult | null>
   generateCommitMessage: () => Promise<string | null>
 }
 
@@ -64,10 +66,7 @@ export function useGitTuiData(project: Project | null): UseGitTuiDataResult {
     kind: 'status',
   })
 
-  const gitApi = useMemo(
-    () => window.agentforge.git as typeof window.agentforge.git & GitWorkspaceApi,
-    [],
-  )
+  const gitApi = useMemo(() => window.agentforge.git as GitWorkspaceClient, [])
 
   useEffect(() => {
     if (!project) {
@@ -116,15 +115,15 @@ export function useGitTuiData(project: Project | null): UseGitTuiDataResult {
 
   const runAction = useCallback(
     async (action: GitTuiAction) => {
-      if (!project || action.type === 'none') return
+      if (!project || action.type === 'none') return null
 
       if (isDetailAction(action)) {
         await loadDetail(project.id, action, gitApi, setDetail, setOperation)
-        return
+        return null
       }
 
-      const result = await executeAction(project.id, action, gitApi)
-      if (!result) return
+      const result = await executeGitTuiAction(project.id, action, gitApi)
+      if (!result) return null
 
       const nextOperation = gitCommandResultToOperation(result, operationMessage(action, result))
       setOperation(nextOperation)
@@ -134,6 +133,7 @@ export function useGitTuiData(project: Project | null): UseGitTuiDataResult {
         kind: 'operation',
       })
       refresh()
+      return result
     },
     [gitApi, project, refresh],
   )
@@ -164,7 +164,7 @@ export function useGitTuiData(project: Project | null): UseGitTuiDataResult {
 
 async function loadSnapshot(
   project: Project,
-  gitApi: typeof window.agentforge.git & GitWorkspaceApi,
+  gitApi: GitWorkspaceClient,
 ): Promise<GitRepositorySnapshot> {
   if (gitApi.getSnapshot) return gitApi.getSnapshot({ projectId: project.id })
 
@@ -229,7 +229,7 @@ function isDetailAction(action: GitTuiAction): boolean {
 async function loadDetail(
   projectId: string,
   action: GitTuiAction,
-  gitApi: typeof window.agentforge.git & GitWorkspaceApi,
+  gitApi: GitWorkspaceClient,
   setDetail: (detail: GitDetailState) => void,
   setOperation: (operation: GitOperationState) => void,
 ) {
@@ -339,10 +339,10 @@ function formatDiffReview(review: GitDiffReviewResult): string {
   return lines.join('\n')
 }
 
-async function executeAction(
+export async function executeGitTuiAction(
   projectId: string,
   action: GitTuiAction,
-  gitApi: typeof window.agentforge.git & GitWorkspaceApi,
+  gitApi: GitWorkspaceClient,
 ): Promise<GitCommandResult | null> {
   switch (action.type) {
     case 'refresh':
@@ -392,7 +392,9 @@ async function executeAction(
       if (!gitApi.dropStash) return blocked('Stash drop is waiting for backend support.')
       return gitApi.dropStash({ projectId, stashId: action.stashId, confirmed: true })
     case 'create-branch':
-      return blocked('Use the existing branch manager until native branch creation input lands here.')
+      const branchName = action.branchName?.trim()
+      if (!branchName) return blocked('Branch name is required.')
+      return gitApi.createBranch(projectId, branchName)
     default:
       return null
   }

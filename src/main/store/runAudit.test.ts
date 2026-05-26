@@ -67,4 +67,41 @@ describe('runAuditStore', () => {
     expect(runAuditStore.listForSession('session-1')).toHaveLength(1)
     expect(runAuditStore.listForSession('session-2')).toHaveLength(1)
   })
+
+  it('persists visual evidence on audit records', () => {
+    const record = runAuditStore.create({
+      sessionId: 'session-1',
+      attempt: 0,
+      phase: 'visual-captured',
+      finalStatus: 'passed',
+      visualEvidence: {
+        id: 'evidence-1',
+        kind: 'local-web',
+        status: 'captured',
+        url: 'http://localhost:5173/',
+        finalUrl: 'http://localhost:5173/dashboard',
+        title: 'Dashboard',
+        viewport: { width: 1280, height: 720, deviceScaleFactor: 1 },
+        screenshot: {
+          mimeType: 'image/png',
+          width: 1280,
+          height: 720,
+          sizeBytes: 120,
+          dataUrl: 'data:image/png;base64,AAAA',
+        },
+        consoleErrors: [{ message: 'boom', createdAt: 10 }],
+        networkFailures: [],
+        replayNotes: 'Clicked through the dashboard.',
+        capturedAt: 20,
+      },
+    })
+
+    expect(runAuditStore.listForSession('session-1')).toEqual([record])
+    expect(record.visualEvidence).toMatchObject({
+      id: 'evidence-1',
+      url: 'http://localhost:5173/',
+      finalUrl: 'http://localhost:5173/dashboard',
+      consoleErrors: [{ message: 'boom', createdAt: 10 }],
+    })
+  })
 })

@@ -86,6 +86,7 @@ export interface RoutingSettings {
 
 export interface ExecutionSettings {
   worktreeIsolation: boolean
+  experimentalWorktreeHandoff: boolean
   autoApplyCompletedDiffs: boolean
   defaultApprovalMode: AgentPermissionMode
   maxQueuedMessagesPerThread: number
@@ -144,6 +145,30 @@ export interface CostSettings {
   pricing: Record<string, ModelPricing>
 }
 
+export type ChatBackgroundSize = 'cover' | 'contain' | 'auto' | 'stretch'
+export type ChatBackgroundPosition =
+  | 'center'
+  | 'top'
+  | 'bottom'
+  | 'left'
+  | 'right'
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+export type ChatBackgroundRepeat = 'no-repeat' | 'repeat' | 'repeat-x' | 'repeat-y'
+
+export interface ChatBackgroundSettings {
+  enabled: boolean
+  imagePath: string
+  opacity: number
+  blur: number
+  size: ChatBackgroundSize
+  position: ChatBackgroundPosition
+  repeat: ChatBackgroundRepeat
+  fixed: boolean
+}
+
 export interface UiSettings {
   compactMode: boolean
   sidebarDefaultWidth: number
@@ -152,6 +177,7 @@ export interface UiSettings {
   terminalDefaultHeight: number
   showCostBadges: boolean
   showTokenCounts: boolean
+  chatBackground: ChatBackgroundSettings
 }
 
 export interface EditorSettings {

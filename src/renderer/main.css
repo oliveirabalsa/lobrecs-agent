@@ -35,6 +35,15 @@
 
   --color-accent-add: #34d399;
   --color-accent-del: #f87171;
+  --color-diff-add-bar: #16a34a;
+  --color-diff-del-bar: #dc2626;
+  --color-diff-add-text: #4ade80;
+  --color-diff-del-text: #fb7185;
+  --color-diff-add-on-accent: #bbf7d0;
+  --color-diff-del-on-accent: #fecdd3;
+  --color-diff-track: rgba(255, 255, 255, 0.16);
+  --color-diff-track-border: rgba(255, 255, 255, 0.16);
+  --color-diff-track-on-accent: rgba(0, 0, 0, 0.28);
   --color-accent-warn: #f59e0b;
   --color-accent-primary: #3b82f6;
   --color-accent-loader: #ef4444;

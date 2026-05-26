@@ -69,7 +69,7 @@ export function buildManagerPrompt({
     '  "agents": [',
     '    {',
     '      "role": "planner | implementer | reviewer | tester | security analyzer | ...",',
-    '      "agentId": "claude-code | codex | opencode | antigravity",',
+    '      "agentId": "claude-code | codex | opencode | antigravity | cursor",',
     '      "modelOverride": "optional model id",',
     '      "promptSuffix": "role-specific instructions",',
     '      "requireApprovalAfter": false',

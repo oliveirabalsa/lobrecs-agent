@@ -1,24 +1,32 @@
 import type {
   ExtensionInstallAction,
+  ExtensionDoctorResult,
   MarketplaceCatalogSearchResult,
   ExtensionMarketplaceState,
   ExtensionTargetAgent,
   InstallExtensionInput,
   InstalledExtensionRecord,
   MarketplaceExtension,
+  RunExtensionDoctorInput,
   SearchMarketplaceExtensionsInput,
+  UpdateExtensionRuntimeStateInput,
 } from '../../../../shared/types'
 import {
   extensionsStore,
+  type SaveExtensionDoctorResultInput,
   type SaveExtensionInstallationInput,
 } from '../../../store/extensions'
 import { EXTENSION_CATALOG } from '../domain/catalog'
 import { installArtifactForAgent } from '../infrastructure/agentConfigInstallers'
 import { mcpRegistryCatalogProvider } from '../infrastructure/mcpRegistryCatalogProvider'
+import { ExtensionRuntime } from './extensionRuntime'
 
 export interface ExtensionRepository {
   list(): InstalledExtensionRecord[]
   save(input: SaveExtensionInstallationInput): InstalledExtensionRecord
+  get(id: string): InstalledExtensionRecord | null
+  updateRuntimeState(input: UpdateExtensionRuntimeStateInput): InstalledExtensionRecord
+  saveDoctorResult(input: SaveExtensionDoctorResultInput): InstalledExtensionRecord
 }
 
 export interface ExtensionCatalogProvider {
@@ -32,6 +40,7 @@ export class ExtensionMarketplaceService {
     private readonly catalogProviders: readonly ExtensionCatalogProvider[] = [
       mcpRegistryCatalogProvider,
     ],
+    private readonly runtime: ExtensionRuntime = new ExtensionRuntime(repository),
   ) {}
 
   async listCatalog(): Promise<MarketplaceExtension[]> {
@@ -91,7 +100,7 @@ export class ExtensionMarketplaceService {
         (item) => item.id === input.extensionId,
       )
     if (!extension) throw new Error(`Unknown extension: ${input.extensionId}`)
-    if (extension.artifacts.length === 0) {
+    if (extension.artifacts.length === 0 && !extension.executable) {
       throw new Error(`${extension.name} is a provider entry and cannot be installed directly.`)
     }
     if (extension.requiresProject && !input.projectPath?.trim()) {
@@ -124,7 +133,118 @@ export class ExtensionMarketplaceService {
       targetAgents,
       actions,
       installedAt: Date.now(),
+      executableManifest: extension.executable,
     })
+  }
+
+  updateRuntimeState(input: UpdateExtensionRuntimeStateInput): InstalledExtensionRecord {
+    return this.repository.updateRuntimeState(input)
+  }
+
+  async runDoctor(input: RunExtensionDoctorInput): Promise<InstalledExtensionRecord> {
+    const installation = this.repository.get(input.installationId)
+    if (!installation) throw new Error(`Extension installation not found: ${input.installationId}`)
+    const result = await this.runtime.doctor(installation)
+    const doctorResult: ExtensionDoctorResult = {
+      status: result.status,
+      message: result.message,
+      checkedAt: Date.now(),
+      ...(result.stderr ? { stderr: result.stderr } : {}),
+    }
+    return this.repository.saveDoctorResult({
+      installationId: input.installationId,
+      result: doctorResult,
+    })
+  }
+
+  async decoratePrompt(input: {
+    projectId: string
+    projectPath: string
+    prompt: string
+    agentId: ExtensionTargetAgent | string
+  }): Promise<string> {
+    const executions = await this.runtime.runHook<
+      typeof input,
+      { prompt?: string; append?: string; prepend?: string }
+    >(
+      {
+        hook: 'prompt-decoration',
+        requiredCapabilities: ['prompt:decorate'],
+        projectPath: input.projectPath,
+      },
+      input,
+    )
+
+    return executions.reduce((prompt, execution) => {
+      const result = execution.result
+      if (typeof result.prompt === 'string') return result.prompt
+      return [result.prepend, prompt, result.append].filter(Boolean).join('\n')
+    }, input.prompt)
+  }
+
+  async listReviewProviders(input: { projectPath?: string }): Promise<
+    Array<{ installationId: string; extensionId: string; providers: string[]; stderr?: string }>
+  > {
+    const executions = await this.runtime.runHook<
+      typeof input,
+      { providers?: Array<string | { id?: string }> }
+    >(
+      {
+        hook: 'review-provider-registration',
+        requiredCapabilities: ['review-provider:register'],
+        projectPath: input.projectPath,
+      },
+      input,
+    )
+
+    return executions.map((execution) => ({
+      installationId: execution.installationId,
+      extensionId: execution.extensionId,
+      providers: normalizeProviderIds(execution.result.providers),
+      ...(execution.stderr ? { stderr: execution.stderr } : {}),
+    }))
+  }
+
+  async observeQualityGate(input: {
+    projectId: string
+    projectPath: string
+    sessionId: string
+    phase: string
+    recipeId?: string
+    command?: string
+    exitCode?: number
+  }): Promise<void> {
+    await this.runtime.runHook(
+      {
+        hook: 'quality-gate-observation',
+        requiredCapabilities: ['quality-gate:observe'],
+        projectPath: input.projectPath,
+      },
+      input,
+    )
+  }
+
+  async shouldAllowRetry(input: {
+    projectId: string
+    projectPath: string
+    sessionId: string
+    reason: string
+    nextModel?: string
+  }): Promise<{ allow: boolean; reason?: string }> {
+    const executions = await this.runtime.runHook<typeof input, { allow?: boolean; reason?: string }>(
+      {
+        hook: 'retry-gating',
+        requiredCapabilities: ['retry:gate'],
+        projectPath: input.projectPath,
+      },
+      input,
+    )
+    const denial = executions.find((execution) => execution.result.allow === false)
+    if (!denial) return { allow: true }
+    return {
+      allow: false,
+      reason: denial.result.reason ?? `Retry blocked by ${denial.extensionId}.`,
+    }
   }
 
   private async loadCatalog(query?: string): Promise<MarketplaceExtension[]> {
@@ -133,6 +253,13 @@ export class ExtensionMarketplaceService {
     )
     return mergeCatalogs([...this.catalog, ...externalCatalogs.flat()])
   }
+}
+
+function normalizeProviderIds(providers: Array<string | { id?: string }> | undefined): string[] {
+  if (!providers) return []
+  return providers
+    .map((provider) => (typeof provider === 'string' ? provider : provider.id))
+    .filter((provider): provider is string => Boolean(provider?.trim()))
 }
 
 function matchesQuery(extension: MarketplaceExtension, query: string): boolean {
@@ -153,6 +280,10 @@ function matchesQuery(extension: MarketplaceExtension, query: string): boolean {
         'cliSkillName' in artifact ? (artifact.cliSkillName ?? '') : '',
       ]
     }),
+    ...(extension.executable?.hooks ?? []),
+    ...(extension.executable?.capabilities ?? []),
+    extension.executable?.runtime ?? '',
+    extension.executable?.command ?? '',
   ]
   return haystack.some((value) => value.toLowerCase().includes(query))
 }

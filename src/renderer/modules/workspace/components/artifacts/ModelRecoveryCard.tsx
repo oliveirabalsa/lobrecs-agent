@@ -231,7 +231,8 @@ function toSupportedAgentId(value: string): SupportedAgentId | undefined {
     value === 'claude-code' ||
     value === 'codex' ||
     value === 'opencode' ||
-    value === 'antigravity'
+    value === 'antigravity' ||
+    value === 'cursor'
   ) {
     return value
   }
