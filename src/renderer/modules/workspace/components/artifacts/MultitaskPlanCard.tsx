@@ -18,9 +18,11 @@ export interface MultitaskPlanCardProps {
   tasks: MultitaskTask[]
   totalEstimatedCostUsd: number
   decomposedBy: { agentId: SupportedAgentId; model: string }
+  resolvedOutcome?: CardOutcome | null
+  onDecisionSettled?: () => void
 }
 
-type CardOutcome = 'approved' | 'rejected'
+export type CardOutcome = 'approved' | 'rejected' | 'failed'
 
 const TIER_STYLES: Record<ModelTier, string> = {
   lightweight: 'bg-emerald-500/20 text-emerald-400',
@@ -88,6 +90,8 @@ export function MultitaskPlanCard({
   tasks,
   totalEstimatedCostUsd,
   decomposedBy,
+  resolvedOutcome = null,
+  onDecisionSettled,
 }: MultitaskPlanCardProps) {
   const tasksVersion = useMemo(
     () => tasks.map((task) => `${task.id}:${task.agentId}:${task.model}`).join('|'),
@@ -100,6 +104,7 @@ export function MultitaskPlanCard({
   const [outcome, setOutcome] = useState<CardOutcome | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const displayOutcome = resolvedOutcome ?? outcome
 
   useEffect(() => {
     setEditableTasks(tasks)
@@ -141,6 +146,7 @@ export function MultitaskPlanCard({
         editedTasks: decision === 'approve' ? editableTasks : undefined,
       })
       setOutcome(decision === 'approve' ? 'approved' : 'rejected')
+      onDecisionSettled?.()
     } catch (decisionError: unknown) {
       setError(
         decisionError instanceof Error
@@ -153,24 +159,28 @@ export function MultitaskPlanCard({
   }
 
   // ── Resolved state ──────────────────────────────────────
-  if (outcome !== null) {
+  if (displayOutcome !== null) {
     return (
       <article className="self-start overflow-hidden rounded-card border border-hairline bg-card">
         <div className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted">
           <span
             className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-card border ${
-              outcome === 'approved'
+              displayOutcome === 'approved'
                 ? 'border-accent-primary/30 bg-accent-primary/15 text-accent-primary'
-                : 'border-hairline bg-card-raised text-secondary'
+                : displayOutcome === 'failed'
+                  ? 'border-accent-del/35 bg-accent-del/10 text-accent-del'
+                  : 'border-hairline bg-card-raised text-secondary'
             }`}
             aria-hidden="true"
           >
-            {outcome === 'approved' ? iconCheck : iconCross}
+            {displayOutcome === 'approved' ? iconCheck : iconCross}
           </span>
           <span>
-            {outcome === 'approved'
+            {displayOutcome === 'approved'
               ? `Multitask plan approved. ${editableTasks.length} task${editableTasks.length === 1 ? '' : 's'} dispatched.`
-              : 'Multitask plan rejected.'}
+              : displayOutcome === 'failed'
+                ? 'Multitask launch failed.'
+                : 'Multitask plan rejected.'}
           </span>
         </div>
       </article>

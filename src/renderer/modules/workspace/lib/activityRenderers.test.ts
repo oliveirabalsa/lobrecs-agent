@@ -1,7 +1,10 @@
 import { isValidElement, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { DiffProposal } from '../../../../shared/types'
-import { renderStreamItem } from './activityRenderers'
+import {
+  multitaskPlanOutcomeFromSessionStatus,
+  renderStreamItem,
+} from './activityRenderers'
 import type { StreamItem } from './groupTurns'
 
 function elementProps<T>(node: ReactNode): T {
@@ -204,5 +207,47 @@ describe('renderStreamItem diff actions', () => {
     expect(props.sessionId).toBe('session-1')
     expect(props.planText).toBe('Plan text')
     expect(props.onMultitaskSessionStarted).toBe(onSessionStarted)
+  })
+
+  it('renders replayed completed multitask plans as resolved artifacts', () => {
+    const onDecisionSettled = vi.fn()
+    const item = {
+      kind: 'multitask-plan',
+      planId: 'plan-1',
+      originalPrompt: 'Build in parallel',
+      totalEstimatedCostUsd: 0.02,
+      decomposedBy: { agentId: 'codex', model: 'gpt-5.5' },
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'API',
+          description: 'Implement API',
+          tier: 'frontier',
+          agentId: 'codex',
+          model: 'gpt-5.5',
+        },
+      ],
+    } satisfies Extract<StreamItem, { kind: 'multitask-plan' }>
+
+    const node = renderStreamItem(item, 'multitask', {
+      sessionId: 'session-1',
+      running: false,
+      sessionStatus: 'done',
+      onMultitaskDecisionSettled: onDecisionSettled,
+    })
+    const props = elementProps<{
+      resolvedOutcome?: string | null
+      onDecisionSettled?: unknown
+    }>(node)
+
+    expect(props.resolvedOutcome).toBe('approved')
+    expect(props.onDecisionSettled).toBe(onDecisionSettled)
+  })
+
+  it('derives durable multitask plan outcomes from terminal session status', () => {
+    expect(multitaskPlanOutcomeFromSessionStatus('done')).toBe('approved')
+    expect(multitaskPlanOutcomeFromSessionStatus('cancelled')).toBe('rejected')
+    expect(multitaskPlanOutcomeFromSessionStatus('error')).toBe('failed')
+    expect(multitaskPlanOutcomeFromSessionStatus('running')).toBeNull()
   })
 })

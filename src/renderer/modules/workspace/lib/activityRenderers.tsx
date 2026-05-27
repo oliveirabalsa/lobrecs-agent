@@ -3,6 +3,7 @@ import type {
   AgentActivity,
   ApprovalRequest,
   DiffProposal,
+  SessionStatus,
 } from '../../../../shared/types'
 import { AssistantMessage } from '../components/AssistantMessage'
 import type { MarkdownLinkRequest } from '../components/MarkdownContent'
@@ -24,6 +25,7 @@ import {
   TodoCard,
   UserQuestionPromptCard,
 } from '../components/artifacts'
+import type { CardOutcome as MultitaskPlanOutcome } from '../components/artifacts/MultitaskPlanCard'
 import type { UserQuestionActivity } from '../components/artifacts'
 import type { StartedSessionSummary } from '../../sessions/types'
 import type { StreamItem } from './groupTurns'
@@ -49,9 +51,12 @@ export interface RendererContext {
   approvalRequest?: ApprovalRequest | null
   /** Latest unresolved agent question. Used to highlight its timeline card. */
   pendingUserQuestionPromptId?: string | null
+  /** Current owner-session status, used to make replayed artifacts durable. */
+  sessionStatus?: SessionStatus | null
   onApproveApproval?: () => void | Promise<void>
   onRejectApproval?: () => void | Promise<void>
   onAnswerUserQuestion?: (prompt: UserQuestionActivity) => void
+  onMultitaskDecisionSettled?: () => void
   onSessionStarted?: (session: StartedSessionSummary) => void
   onOpenMarkdown?: (request: MarkdownLinkRequest) => void
   onPreviewMarkdown?: (document: MarkdownPreviewDocument) => void
@@ -289,6 +294,8 @@ export function renderStreamItem(
           tasks={item.tasks}
           totalEstimatedCostUsd={item.totalEstimatedCostUsd}
           decomposedBy={item.decomposedBy}
+          resolvedOutcome={multitaskPlanOutcomeFromSessionStatus(ctx.sessionStatus)}
+          onDecisionSettled={ctx.onMultitaskDecisionSettled}
         />
       )
 
@@ -358,6 +365,15 @@ export function renderStreamItem(
       return null
     }
   }
+}
+
+export function multitaskPlanOutcomeFromSessionStatus(
+  status: SessionStatus | null | undefined,
+): MultitaskPlanOutcome | null {
+  if (status === 'done') return 'approved'
+  if (status === 'cancelled') return 'rejected'
+  if (status === 'error') return 'failed'
+  return null
 }
 
 /**

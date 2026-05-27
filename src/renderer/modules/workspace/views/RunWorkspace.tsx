@@ -195,6 +195,7 @@ export function RunWorkspace({
   const [activeUserQuestion, setActiveUserQuestion] = useState<UserQuestionActivity | null>(null)
   const [activeBackgroundUserQuestion, setActiveBackgroundUserQuestion] =
     useState<BackgroundAgentUserQuestion | null>(null)
+  const [backgroundAgentsRefreshKey, setBackgroundAgentsRefreshKey] = useState(0)
   const [questionSubmitError, setQuestionSubmitError] = useState<string | null>(null)
   const [submittingQuestion, setSubmittingQuestion] = useState(false)
   const dismissedUserQuestionIdsRef = useRef<Set<string>>(new Set())
@@ -443,8 +444,12 @@ export function RunWorkspace({
       diffProposals,
       approvalRequest,
       pendingUserQuestionPromptId: pendingUserQuestion?.promptId ?? null,
+      sessionStatus: effectiveStatus,
       onApproveApproval,
       onRejectApproval,
+      onMultitaskDecisionSettled: () => {
+        setBackgroundAgentsRefreshKey((key) => key + 1)
+      },
       onAnswerUserQuestion: (prompt: UserQuestionActivity) => {
         dismissedUserQuestionIdsRef.current.delete(userQuestionKey(null, prompt.promptId))
         setActiveUserQuestion(prompt)
@@ -464,6 +469,7 @@ export function RunWorkspace({
       onSessionStarted,
       onOpenMarkdown,
       onPreviewMarkdown,
+      effectiveStatus,
       project.id,
       threadId,
     ],
@@ -612,6 +618,7 @@ export function RunWorkspace({
           <BackgroundAgentsCard
             projectId={project.id}
             threadId={threadId}
+            refreshKey={backgroundAgentsRefreshKey}
             onBlockingChange={handleBackgroundBlockingChange}
             onUserQuestion={handleBackgroundUserQuestion}
           />
