@@ -10,7 +10,7 @@ import type {
   ThreadTranscriptTurn,
 } from '../../shared/types'
 import { getDb } from './db'
-import { extractSessionOutput } from './sessionOutput'
+import { extractSessionOutput, mergeSessionOutputFragment } from './sessionOutput'
 
 type SessionRow = {
   id: string
@@ -91,6 +91,14 @@ export const sessionsStore = {
     const rows = getDb()
       .prepare('SELECT * FROM sessions WHERE project_id = ? ORDER BY created_at DESC')
       .all(projectId) as SessionRow[]
+
+    return rows.map(rowToSession)
+  },
+
+  listByThread(threadId: string): Session[] {
+    const rows = getDb()
+      .prepare('SELECT * FROM sessions WHERE thread_id = ? ORDER BY created_at ASC')
+      .all(threadId) as SessionRow[]
 
     return rows.map(rowToSession)
   },
@@ -207,7 +215,7 @@ export const sessionsStore = {
 
   addEvent(event: AgentEvent): void {
     const db = getDb()
-    db
+    const result = db
       .prepare(
         `
           INSERT INTO session_events (session_id, event_type, payload, created_at)
@@ -216,10 +224,19 @@ export const sessionsStore = {
       )
       .run(event.sessionId, event.type, JSON.stringify(event.payload ?? null), event.timestamp)
 
-    if (isAssistantMessageEvent(event)) {
-      const summary = extractSessionOutput(sessionsStore.listEvents(event.sessionId), {
-        maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS,
-      })
+    const assistantText = assistantMessageTextFromEvent(event)
+    if (assistantText !== undefined) {
+      const summary = mergeSessionOutputFragment(
+        sessionsStore.getAssistantSummary(event.sessionId),
+        assistantText,
+        {
+          currentTrailingWhitespace: previousAssistantBoundaryWhitespace(
+            event.sessionId,
+            Number(result.lastInsertRowid),
+          ),
+          maxChars: MAX_ASSISTANT_TRANSCRIPT_CHARS,
+        },
+      )
       db.prepare('UPDATE sessions SET assistant_summary = ? WHERE id = ?').run(
         summary ?? null,
         event.sessionId,
@@ -433,14 +450,52 @@ function isImageAttachment(value: unknown): value is ImageAttachment {
   )
 }
 
-function isAssistantMessageEvent(event: AgentEvent): boolean {
-  if (event.type !== 'activity' || !isRecord(event.payload)) return false
-  const payload = event.payload
-  return (
-    payload.kind === 'message' &&
+function assistantMessageTextFromEvent(event: AgentEvent): string | undefined {
+  if (event.type !== 'activity') return undefined
+  return assistantMessageTextFromPayload(event.payload)
+}
+
+function assistantMessageTextFromPayload(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined
+
+  return payload.kind === 'message' &&
     payload.role === 'assistant' &&
     typeof payload.text === 'string'
-  )
+    ? payload.text
+    : undefined
+}
+
+function previousAssistantBoundaryWhitespace(
+  sessionId: string,
+  beforeEventId: number,
+): string | undefined {
+  const row = getDb()
+    .prepare(
+      `
+        SELECT event_type, payload
+        FROM session_events
+        WHERE session_id = ? AND id < ?
+        ORDER BY id DESC
+        LIMIT 1
+      `,
+    )
+    .get(sessionId, beforeEventId) as
+    | { event_type: AgentEvent['type']; payload: string }
+    | undefined
+
+  if (!row || row.event_type !== 'activity') return undefined
+
+  try {
+    return trailingWhitespace(assistantMessageTextFromPayload(JSON.parse(row.payload) as unknown))
+  } catch {
+    return undefined
+  }
+}
+
+function trailingWhitespace(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const match = value.match(/\s+$/)
+  return match?.[0]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

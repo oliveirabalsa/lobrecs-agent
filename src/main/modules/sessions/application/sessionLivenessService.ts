@@ -162,8 +162,9 @@ export class SessionLivenessService {
 
   async emitLiveLocalDiff(sessionId: string): Promise<void> {
     const active = this.options.activeSessions.get(sessionId)
-    if (!active?.localBaseline || active.planMode) return
+    if (!active?.localBaseline || active.planMode || active.liveDiffInProgress) return
 
+    active.liveDiffInProgress = true
     try {
       const proposals = this.options.filterLocalDiffProposals(
         active,
@@ -183,6 +184,8 @@ export class SessionLivenessService {
       })
     } catch {
       // Live counters are best-effort; completion still performs the authoritative diff.
+    } finally {
+      active.liveDiffInProgress = false
     }
   }
 }
@@ -194,7 +197,14 @@ export function shouldTriggerLiveLocalDiff(event: AgentEvent): boolean {
   if (!payload || typeof payload !== 'object') return false
 
   const kind = (payload as { kind?: unknown }).kind
-  return kind === 'file-change' || kind === 'tool-call' || kind === 'command'
+  const status = (payload as { status?: unknown }).status
+
+  if (kind === 'file-change') return true
+  if (kind === 'tool-result') return true
+  if (kind === 'tool-call' && (status === 'done' || status === 'error')) return true
+  if (kind === 'command' && (status === 'done' || status === 'error')) return true
+
+  return false
 }
 
 function diffProposalSignature(proposals: readonly DiffProposal[]): string {

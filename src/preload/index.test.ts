@@ -115,6 +115,10 @@ describe('preload api shape', () => {
         expected: ['sessions:list', 'project-1'],
       },
       {
+        call: (agentforge) => agentforge.sessions.listByThread('thread-1'),
+        expected: ['sessions:list-by-thread', 'thread-1'],
+      },
+      {
         call: (agentforge) => agentforge.sessions.get('session-1'),
         expected: ['sessions:get', 'session-1'],
       },
@@ -125,6 +129,11 @@ describe('preload api shape', () => {
       {
         call: (agentforge) => agentforge.sessions.listEvents('session-1'),
         expected: ['sessions:list-events', 'session-1'],
+      },
+      {
+        call: (agentforge) =>
+          agentforge.sessions.listEventsForSessions(['session-1', 'session-2']),
+        expected: ['sessions:list-events-for-sessions', ['session-1', 'session-2']],
       },
       {
         call: (agentforge) =>

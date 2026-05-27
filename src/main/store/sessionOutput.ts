@@ -4,6 +4,12 @@ export interface ExtractSessionOutputOptions {
   maxChars?: number
 }
 
+export interface MergeSessionOutputFragmentOptions extends ExtractSessionOutputOptions {
+  currentTrailingWhitespace?: string
+}
+
+const TRUNCATED_OUTPUT_SUFFIX = '\n[truncated]'
+
 export function extractSessionOutput(
   events: readonly AgentEvent[],
   options: ExtractSessionOutputOptions = {},
@@ -20,6 +26,32 @@ export function extractSessionOutput(
   )
 
   return stdoutOutput ? truncateOutput(stdoutOutput, options.maxChars) : undefined
+}
+
+export function mergeSessionOutputFragment(
+  current: string | null | undefined,
+  incoming: string | null | undefined,
+  options: MergeSessionOutputFragmentOptions = {},
+): string | undefined {
+  const currentText = typeof current === 'string' ? current.trim() : ''
+  const incomingText = typeof incoming === 'string' ? incoming : ''
+
+  if (!incomingText.trim()) return currentText || undefined
+  if (currentText.endsWith(TRUNCATED_OUTPUT_SUFFIX)) return currentText
+
+  const restoredCurrent =
+    currentText &&
+    options.currentTrailingWhitespace &&
+    !/\s$/.test(currentText) &&
+    !/^\s/.test(incomingText)
+      ? `${currentText}${options.currentTrailingWhitespace}`
+      : currentText
+
+  const merged = mergeSessionOutputFragments(
+    restoredCurrent ? [restoredCurrent, incomingText] : [incomingText],
+  )
+
+  return merged ? truncateOutput(merged, options.maxChars) : undefined
 }
 
 export function mergeSessionOutputFragments(values: readonly string[]): string | undefined {
@@ -85,7 +117,7 @@ function truncateOutput(text: string, maxChars: number | undefined): string {
   const trimmed = text.trim()
   if (maxChars === undefined || trimmed.length <= maxChars) return trimmed
 
-  return `${trimmed.slice(0, maxChars).trimEnd()}\n[truncated]`
+  return `${trimmed.slice(0, maxChars).trimEnd()}${TRUNCATED_OUTPUT_SUFFIX}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

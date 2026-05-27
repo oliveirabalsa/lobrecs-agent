@@ -15,7 +15,7 @@ export const TERMINAL_SESSION_STATUSES = new Set<SessionStatus>([
   'cancelled',
 ])
 
-export const LIVE_DIFF_DEBOUNCE_MS = 120
+export const LIVE_DIFF_DEBOUNCE_MS = 500
 
 export type ActiveSession = {
   approve(): void
@@ -30,6 +30,7 @@ export type ActiveSession = {
   sharedLocalRepo: boolean
   liveDiffTimer?: ReturnType<typeof setTimeout>
   liveDiffSignature?: string
+  liveDiffInProgress?: boolean
   lastAgentEventAt: number
   lastIdleHeartbeatAt: number
   idleHeartbeatTimer?: ReturnType<typeof setTimeout>

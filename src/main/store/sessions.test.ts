@@ -12,6 +12,7 @@ describe('sessionsStore', () => {
 
   afterEach(() => {
     closeDb()
+    vi.restoreAllMocks()
     vi.useRealTimers()
   })
 
@@ -137,6 +138,91 @@ describe('sessionsStore', () => {
     ])
   })
 
+  it('updates assistant summaries incrementally without reloading full event history', () => {
+    const project = createProject()
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      prompt: 'streamed summary',
+    })
+    const listEventsSpy = vi.spyOn(sessionsStore, 'listEvents')
+
+    addAssistantMessage(session.id, 'Now I ')
+    addAssistantMessage(session.id, 'have the fix.')
+
+    expect(sessionsStore.getAssistantSummary(session.id)).toBe('Now I have the fix.')
+
+    sessionsStore.updateStatus(session.id, 'done', 100)
+
+    expect(sessionsStore.getAssistantSummary(session.id)).toBe('Now I have the fix.')
+    expect(listEventsSpy).not.toHaveBeenCalled()
+  })
+
+  it('coalesces cumulative assistant snapshots into the stored summary', () => {
+    const project = createProject()
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      prompt: 'cumulative summary',
+    })
+
+    addAssistantMessage(session.id, 'Let me inspect ')
+    addAssistantMessage(session.id, 'Let me inspect the session event flow.')
+    addAssistantMessage(session.id, 'Let me inspect the session event flow.')
+
+    expect(sessionsStore.getAssistantSummary(session.id)).toBe(
+      'Let me inspect the session event flow.',
+    )
+  })
+
+  it('keeps truncated assistant summaries stable after more streamed output arrives', () => {
+    const project = createProject()
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      prompt: 'truncated summary',
+    })
+
+    addAssistantMessage(session.id, 'A'.repeat(6_100))
+    const summaryAfterFirstChunk = sessionsStore.getAssistantSummary(session.id)
+
+    addAssistantMessage(session.id, 'B'.repeat(50))
+
+    expect(summaryAfterFirstChunk).toBeTruthy()
+    expect(summaryAfterFirstChunk).toContain('[truncated]')
+    expect(sessionsStore.getAssistantSummary(session.id)).toBe(summaryAfterFirstChunk)
+  })
+
+  it('backfills stdout output for terminal sessions that never emitted assistant messages', () => {
+    const project = createProject()
+    const session = sessionsStore.create({
+      projectId: project.id,
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      prompt: 'stdout fallback',
+    })
+
+    sessionsStore.addEvent({
+      type: 'stdout',
+      sessionId: session.id,
+      payload: { text: 'Part one. ' },
+      timestamp: 1,
+    })
+    sessionsStore.addEvent({
+      type: 'stdout',
+      sessionId: session.id,
+      payload: { text: 'Part two.' },
+      timestamp: 2,
+    })
+
+    sessionsStore.updateStatus(session.id, 'done', 3)
+
+    expect(sessionsStore.getAssistantSummary(session.id)).toBe('Part one. Part two.')
+  })
+
   it('cancels interrupted active sessions without touching terminal history', () => {
     vi.useFakeTimers()
     const project = createProject()
@@ -209,6 +295,42 @@ describe('sessionsStore', () => {
     expect(session.threadId).toBe(thread.id)
     expect(sessionsStore.get(session.id)?.threadId).toBe(thread.id)
     expect(sessionsStore.list(project.id)[0]?.threadId).toBe(thread.id)
+  })
+
+  it('lists sessions by thread in chronological order', () => {
+    const project = createProject()
+    const thread = threadsStore.create({ projectId: project.id, title: 'Test thread' })
+    const otherThread = threadsStore.create({ projectId: project.id, title: 'Other thread' })
+
+    const first = sessionsStore.create({
+      projectId: project.id,
+      threadId: thread.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: 'first',
+      createdAt: 1_000,
+    })
+    const second = sessionsStore.create({
+      projectId: project.id,
+      threadId: thread.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: 'second',
+      createdAt: 2_000,
+    })
+    const otherThreadSession = sessionsStore.create({
+      projectId: project.id,
+      threadId: otherThread.id,
+      agentId: 'codex',
+      model: 'gpt-5.3-codex',
+      prompt: 'other',
+      createdAt: 1_500,
+    })
+
+    expect(sessionsStore.listByThread(thread.id).map((s) => s.id)).toEqual([first.id, second.id])
+    expect(sessionsStore.listByThread(otherThread.id).map((s) => s.id)).toEqual([
+      otherThreadSession.id,
+    ])
   })
 
   it('returns recent thread transcript turns in chronological order', () => {
