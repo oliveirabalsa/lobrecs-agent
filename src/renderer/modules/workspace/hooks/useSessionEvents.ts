@@ -31,6 +31,10 @@ export interface TimedActivity {
   at: number
 }
 
+type AnimationFrameRequest = (callback: FrameRequestCallback) => number
+type AnimationFrameCancel = (handle: number) => void
+type TimeoutHandle = ReturnType<typeof setTimeout>
+
 interface UseSessionEventsOptions {
   onApprovalRequest?: (request: ApprovalRequest | null) => void
   onDiffProposals?: (proposals: DiffProposal[]) => void
@@ -44,6 +48,24 @@ interface UseSessionEventsOptions {
    */
   maxActivities?: number
 }
+
+interface CreateSessionEventBufferOptions {
+  onFlush(events: AgentEvent[]): void
+  flushDelayMs?: number
+  requestAnimationFrame?: AnimationFrameRequest | null
+  cancelAnimationFrame?: AnimationFrameCancel | null
+  scheduleTimeout?: (callback: () => void, delay: number) => TimeoutHandle
+  clearScheduledTimeout?: (handle: TimeoutHandle) => void
+}
+
+interface SessionEventBuffer {
+  push(event: AgentEvent): void
+  pushMany(events: readonly AgentEvent[]): void
+  flush(): void
+  dispose(): void
+}
+
+export const LIVE_EVENT_FLUSH_DELAY_MS = 40
 
 export function useSessionEvents(sessionId: string | null, options: UseSessionEventsOptions = {}) {
   const [events, setEvents] = useState<AgentEvent[]>([])
@@ -75,13 +97,14 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     }
 
     let cancelled = false
-    const seen = new Set<string>()
+    const buffer = createSessionEventBuffer({
+      onFlush: (batchedEvents) => {
+        batchedEvents.forEach((event) => applySessionState(event, optionsRef.current))
+        setEvents((current) => current.concat(batchedEvents))
+      },
+    })
     const append = (event: AgentEvent) => {
-      const key = eventKey(event)
-      if (seen.has(key)) return
-      seen.add(key)
-      applySessionState(event, optionsRef.current)
-      setEvents((current) => [...current, event])
+      buffer.push(event)
     }
 
     setLoading(true)
@@ -95,7 +118,8 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
         if (liveDiffProposals.length > 0) {
           optionsRef.current.onDiffProposals?.(liveDiffProposals)
         }
-        loadedEvents.filter(shouldReplayHistoricalSessionEvent).forEach(append)
+        buffer.pushMany(loadedEvents.filter(shouldReplayHistoricalSessionEvent))
+        buffer.flush()
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -104,6 +128,7 @@ export function useSessionEvents(sessionId: string | null, options: UseSessionEv
     return () => {
       cancelled = true
       unsubscribe()
+      buffer.dispose()
     }
   }, [sessionId])
 
@@ -215,6 +240,116 @@ export function latestHistoricalLiveDiffProposals(
   }
 
   return []
+}
+
+export function shouldFlushSessionEventImmediately(event: AgentEvent): boolean {
+  if (
+    event.type === 'approval-request' ||
+    event.type === 'error' ||
+    event.type === 'session-complete'
+  ) {
+    return true
+  }
+
+  return event.type === 'activity' && isAgentActivity(event.payload)
+    ? userQuestionFromActivity(event.payload) !== null
+    : false
+}
+
+export function createSessionEventBuffer(
+  options: CreateSessionEventBufferOptions,
+): SessionEventBuffer {
+  const requestFrame =
+    options.requestAnimationFrame ??
+    (typeof globalThis.requestAnimationFrame === 'function'
+      ? globalThis.requestAnimationFrame.bind(globalThis)
+      : null)
+  const cancelFrame =
+    options.cancelAnimationFrame ??
+    (typeof globalThis.cancelAnimationFrame === 'function'
+      ? globalThis.cancelAnimationFrame.bind(globalThis)
+      : null)
+  const scheduleTimeout = options.scheduleTimeout ?? ((callback, delay) => setTimeout(callback, delay))
+  const clearScheduledTimeout = options.clearScheduledTimeout ?? clearTimeout
+  const flushDelayMs = options.flushDelayMs ?? LIVE_EVENT_FLUSH_DELAY_MS
+
+  const seenKeys = new Set<string>()
+  let pending: AgentEvent[] = []
+  let frameHandle: number | null = null
+  let timeoutHandle: TimeoutHandle | null = null
+
+  const clearScheduledFlush = () => {
+    if (frameHandle !== null && cancelFrame) {
+      cancelFrame(frameHandle)
+    }
+    if (timeoutHandle !== null) {
+      clearScheduledTimeout(timeoutHandle)
+    }
+
+    frameHandle = null
+    timeoutHandle = null
+  }
+
+  const flush = () => {
+    clearScheduledFlush()
+    if (pending.length === 0) return
+
+    const next = pending
+    pending = []
+    options.onFlush(next)
+  }
+
+  const scheduleFlush = () => {
+    if (frameHandle !== null || timeoutHandle !== null) return
+
+    if (requestFrame) {
+      frameHandle = requestFrame(() => {
+        flush()
+      })
+    }
+
+    timeoutHandle = scheduleTimeout(() => {
+      flush()
+    }, flushDelayMs)
+  }
+
+  const pushMany = (events: readonly AgentEvent[]) => {
+    let didQueue = false
+    let shouldFlushNow = false
+
+    for (const event of events) {
+      const key = eventKey(event)
+      if (seenKeys.has(key)) continue
+
+      seenKeys.add(key)
+      pending.push(event)
+      didQueue = true
+
+      if (shouldFlushSessionEventImmediately(event)) {
+        shouldFlushNow = true
+      }
+    }
+
+    if (!didQueue) return
+    if (shouldFlushNow) {
+      flush()
+      return
+    }
+
+    scheduleFlush()
+  }
+
+  return {
+    push(event) {
+      pushMany([event])
+    },
+    pushMany,
+    flush,
+    dispose() {
+      clearScheduledFlush()
+      pending = []
+    },
+  }
 }
 
 function timedActivitiesFromEvents(events: readonly AgentEvent[]): TimedActivity[] {

@@ -1,6 +1,7 @@
 import type { AgentActivity, AgentEvent, Session } from '../../../../shared/types'
 import type { SessionStatus } from '../../../../shared/types'
 import { userQuestionActivityFromToolPayload } from '../../../../shared/contracts/userQuestionPrompts'
+import { eventKey } from '../../../components/TerminalPanel/events'
 
 export type BackgroundAgentSession = Session & {
   spawnedAgent: NonNullable<Session['spawnedAgent']>
@@ -37,6 +38,9 @@ export interface BackgroundAgentPreviewState {
   hiddenCount: number
   overLimit: boolean
 }
+
+export type BackgroundAgentEventsRecord = Record<string, readonly AgentEvent[] | undefined>
+export type BackgroundAgentEventKeyIndex = Map<string, Set<string>>
 
 export function latestBackgroundAgentSessions(
   sessions: readonly Session[],
@@ -149,6 +153,82 @@ export function backgroundAgentStatusFromEvent(event: AgentEvent): SessionStatus
     if (isSessionStatus(status)) return status
   }
   return 'done'
+}
+
+export function shouldFlushBackgroundAgentEventImmediately(event: AgentEvent): boolean {
+  return backgroundAgentStatusFromEvent(event) !== null
+}
+
+export function backgroundAgentEventsFromBulkRecord(
+  sessions: readonly BackgroundAgentSession[],
+  eventsRecord: BackgroundAgentEventsRecord,
+): Map<string, AgentEvent[]> {
+  const eventsBySession = new Map<string, AgentEvent[]>()
+
+  for (const session of sessions) {
+    eventsBySession.set(session.id, [...(eventsRecord[session.id] ?? [])])
+  }
+
+  return eventsBySession
+}
+
+export function mergeBackgroundAgentEventMaps(
+  historicalEvents: ReadonlyMap<string, readonly AgentEvent[]>,
+  liveEvents: ReadonlyMap<string, readonly AgentEvent[]>,
+  sessionIds: readonly string[],
+): Map<string, AgentEvent[]> {
+  const mergedEvents = new Map<string, AgentEvent[]>()
+
+  for (const sessionId of sessionIds) {
+    const seen = new Set<string>()
+    const events: AgentEvent[] = []
+
+    for (const event of historicalEvents.get(sessionId) ?? []) {
+      seen.add(eventKey(event))
+      events.push(event)
+    }
+
+    for (const event of liveEvents.get(sessionId) ?? []) {
+      const key = eventKey(event)
+      if (seen.has(key)) continue
+      seen.add(key)
+      events.push(event)
+    }
+
+    mergedEvents.set(sessionId, events)
+  }
+
+  return mergedEvents
+}
+
+export function indexBackgroundAgentEvents(
+  eventsBySession: ReadonlyMap<string, readonly AgentEvent[]>,
+): BackgroundAgentEventKeyIndex {
+  const index: BackgroundAgentEventKeyIndex = new Map()
+
+  for (const [sessionId, events] of eventsBySession) {
+    index.set(sessionId, new Set(events.map(eventKey)))
+  }
+
+  return index
+}
+
+export function rememberBackgroundAgentEvent(
+  index: BackgroundAgentEventKeyIndex,
+  sessionId: string,
+  event: AgentEvent,
+): boolean {
+  let keys = index.get(sessionId)
+  if (!keys) {
+    keys = new Set()
+    index.set(sessionId, keys)
+  }
+
+  const key = eventKey(event)
+  if (keys.has(key)) return false
+
+  keys.add(key)
+  return true
 }
 
 function formatAgentList(sessions: readonly BackgroundAgentSession[]): string {

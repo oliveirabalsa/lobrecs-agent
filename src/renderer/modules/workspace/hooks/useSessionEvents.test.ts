@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '../../../../shared/types'
 import {
+  createSessionEventBuffer,
   deriveSessionActivities,
   deriveTimedSessionActivities,
+  LIVE_EVENT_FLUSH_DELAY_MS,
   latestHistoricalLiveDiffProposals,
+  shouldFlushSessionEventImmediately,
   shouldReplayHistoricalSessionEvent,
 } from './useSessionEvents'
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 describe('deriveSessionActivities', () => {
   it('keeps activity timestamps available for replayed message streams', () => {
@@ -387,11 +395,162 @@ describe('bounded window derivation', () => {
   })
 })
 
+describe('shouldFlushSessionEventImmediately', () => {
+  it('flushes blocking and user-question events immediately', () => {
+    expect(shouldFlushSessionEventImmediately(approvalRequestEvent(1))).toBe(true)
+    expect(shouldFlushSessionEventImmediately(errorEvent(2))).toBe(true)
+    expect(shouldFlushSessionEventImmediately(sessionCompleteEvent(3))).toBe(true)
+    expect(shouldFlushSessionEventImmediately(userQuestionEvent(4))).toBe(true)
+    expect(shouldFlushSessionEventImmediately(stepEvent(5, 'Buffered step'))).toBe(false)
+  })
+})
+
+describe('createSessionEventBuffer', () => {
+  it('batches deduped live events into a single frame flush', () => {
+    vi.useFakeTimers()
+
+    const flushed: AgentEvent[][] = []
+    const requestAnimationFrame = vi.fn((callback: (timestamp: number) => void) => 1)
+
+    const buffer = createSessionEventBuffer({
+      onFlush: (events) => flushed.push(events),
+      requestAnimationFrame,
+      cancelAnimationFrame: vi.fn(),
+    })
+    const first = stepEvent(1, 'Step 1')
+    const second = stepEvent(2, 'Step 2')
+
+    buffer.push(first)
+    buffer.push(second)
+    buffer.push(first)
+
+    expect(flushed).toEqual([])
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
+    const frameCallback = requestAnimationFrame.mock.calls[0]?.[0] as
+      | ((timestamp: number) => void)
+      | undefined
+    if (!frameCallback) {
+      throw new Error('Expected a scheduled animation frame callback')
+    }
+
+    frameCallback(16)
+
+    expect(flushed).toEqual([[first, second]])
+
+    vi.advanceTimersByTime(LIVE_EVENT_FLUSH_DELAY_MS)
+    expect(flushed).toHaveLength(1)
+
+    buffer.dispose()
+  })
+
+  it('flushes queued events immediately when a user-question arrives', () => {
+    vi.useFakeTimers()
+
+    const flushed: AgentEvent[][] = []
+    const cancelAnimationFrame = vi.fn()
+    const buffer = createSessionEventBuffer({
+      onFlush: (events) => flushed.push(events),
+      requestAnimationFrame: () => 1,
+      cancelAnimationFrame,
+    })
+    const first = stepEvent(1, 'Queued step')
+    const question = userQuestionEvent(2)
+
+    buffer.push(first)
+    buffer.push(question)
+
+    expect(flushed).toEqual([[first, question]])
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1)
+
+    buffer.dispose()
+  })
+
+  it('falls back to a timeout flush when animation frames are unavailable', () => {
+    vi.useFakeTimers()
+
+    const flushed: AgentEvent[][] = []
+    const buffer = createSessionEventBuffer({
+      onFlush: (events) => flushed.push(events),
+      requestAnimationFrame: null,
+      cancelAnimationFrame: null,
+    })
+    const event = stepEvent(1, 'Timeout step')
+
+    buffer.push(event)
+
+    vi.advanceTimersByTime(LIVE_EVENT_FLUSH_DELAY_MS - 1)
+    expect(flushed).toEqual([])
+
+    vi.advanceTimersByTime(1)
+    expect(flushed).toEqual([[event]])
+
+    buffer.dispose()
+  })
+})
+
 function stderrEvent(sessionId: string, text: string, timestamp: number): AgentEvent {
   return {
     type: 'stderr',
     sessionId,
     payload: { text },
+    timestamp,
+  }
+}
+
+function stepEvent(timestamp: number, title: string): AgentEvent {
+  return {
+    type: 'activity',
+    sessionId: 'session-1',
+    payload: { kind: 'step', title, status: 'done' },
+    timestamp,
+  }
+}
+
+function userQuestionEvent(timestamp: number): AgentEvent {
+  return {
+    type: 'activity',
+    sessionId: 'session-1',
+    payload: {
+      kind: 'user-question',
+      promptId: `question-${timestamp}`,
+      title: 'Need input',
+      questions: [
+        {
+          id: 'scope',
+          header: 'Scope',
+          question: 'Which area?',
+          multiSelect: false,
+          options: [{ id: 'renderer', label: 'Renderer' }],
+        },
+      ],
+    },
+    timestamp,
+  }
+}
+
+function approvalRequestEvent(timestamp: number): AgentEvent {
+  return {
+    type: 'approval-request',
+    sessionId: 'session-1',
+    payload: { action: 'run-command', command: 'git status' },
+    timestamp,
+  }
+}
+
+function sessionCompleteEvent(timestamp: number): AgentEvent {
+  return {
+    type: 'session-complete',
+    sessionId: 'session-1',
+    payload: { status: 'done' },
+    timestamp,
+  }
+}
+
+function errorEvent(timestamp: number): AgentEvent {
+  return {
+    type: 'error',
+    sessionId: 'session-1',
+    payload: { text: 'boom' },
     timestamp,
   }
 }

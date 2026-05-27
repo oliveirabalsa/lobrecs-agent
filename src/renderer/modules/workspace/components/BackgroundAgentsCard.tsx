@@ -1,16 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, Session, SessionStatus } from '../../../../shared/types'
 import { Button, Modal, Pill, Spinner } from '../../../components/ui'
 import {
   backgroundAgentPreviewState,
   ACTIVE_BACKGROUND_AGENT_STATUSES,
   BACKGROUND_AGENT_PREVIEW_LIMIT,
+  backgroundAgentEventsFromBulkRecord,
   backgroundAgentStatusFromEvent,
   backgroundAgentWaitMessage,
   canStopBackgroundAgentSession,
+  indexBackgroundAgentEvents,
   latestBackgroundAgentSessions,
   latestBackgroundAgentUserQuestion,
+  mergeBackgroundAgentEventMaps,
+  rememberBackgroundAgentEvent,
   summarizeBackgroundAgentSessions,
+  shouldFlushBackgroundAgentEventImmediately,
+  type BackgroundAgentEventKeyIndex,
   type BackgroundAgentSession,
   type BackgroundAgentSummary,
   type BackgroundAgentUserQuestion,
@@ -31,6 +37,8 @@ export interface BackgroundAgentsBlockingState {
   message: string
 }
 
+const BACKGROUND_EVENT_BATCH_MS = 32
+
 export function BackgroundAgentsCard({
   projectId,
   threadId,
@@ -45,33 +53,103 @@ export function BackgroundAgentsCard({
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [cancellingSessionIds, setCancellingSessionIds] = useState<Set<string>>(new Set())
+  const eventKeysBySessionRef = useRef<BackgroundAgentEventKeyIndex>(new Map())
+  const pendingEventsBySessionRef = useRef<Map<string, AgentEvent[]>>(new Map())
+  const pendingFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flushPendingEvents = useCallback(() => {
+    if (pendingFlushTimerRef.current) {
+      clearTimeout(pendingFlushTimerRef.current)
+      pendingFlushTimerRef.current = null
+    }
+    if (pendingEventsBySessionRef.current.size === 0) return
+
+    const batches = pendingEventsBySessionRef.current
+    pendingEventsBySessionRef.current = new Map()
+
+    setEventsBySession((current) => {
+      const next = new Map(current)
+      for (const [sessionId, events] of batches) {
+        next.set(sessionId, [...(next.get(sessionId) ?? []), ...events])
+      }
+      return next
+    })
+  }, [])
+
+  const schedulePendingEventFlush = useCallback(() => {
+    if (pendingFlushTimerRef.current) return
+
+    pendingFlushTimerRef.current = setTimeout(() => {
+      pendingFlushTimerRef.current = null
+      flushPendingEvents()
+    }, BACKGROUND_EVENT_BATCH_MS)
+  }, [flushPendingEvents])
+
+  const applySessionStatusEvent = useCallback((sessionId: string, event: AgentEvent) => {
+    const status = backgroundAgentStatusFromEvent(event)
+    if (!status) return
+
+    setSessions((current) =>
+      current.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              status,
+              completedAt: ACTIVE_BACKGROUND_AGENT_STATUSES.has(status)
+                ? item.completedAt
+                : event.timestamp,
+            }
+          : item,
+      ),
+    )
+  }, [])
 
   const reload = useCallback(async () => {
     if (!threadId) {
+      if (pendingFlushTimerRef.current) {
+        clearTimeout(pendingFlushTimerRef.current)
+        pendingFlushTimerRef.current = null
+      }
       setSessions([])
       setEventsBySession(new Map())
       setActionError(null)
       setCancellingSessionIds(new Set())
+      eventKeysBySessionRef.current = new Map()
+      pendingEventsBySessionRef.current = new Map()
       return
     }
 
+    flushPendingEvents()
     setLoading(true)
     try {
-      const list = await window.agentforge.sessions.list(projectId)
+      const list = await listSessionsForThread(projectId, threadId)
       const backgroundSessions = latestBackgroundAgentSessions(list, threadId)
-      const eventEntries = await Promise.all(
-        backgroundSessions.map(async (session) => [
-          session.id,
-          await window.agentforge.sessions.listEvents(session.id).catch(() => []),
-        ] as const),
+      const backgroundSessionIds = backgroundSessions.map((session) => session.id)
+      const eventsRecord =
+        backgroundSessionIds.length === 0
+          ? {}
+          : await window.agentforge.sessions
+              .listEventsForSessions(backgroundSessionIds)
+              .catch(() => ({}))
+      const historicalEvents = backgroundAgentEventsFromBulkRecord(
+        backgroundSessions,
+        eventsRecord,
       )
 
       setSessions(list)
-      setEventsBySession(new Map(eventEntries))
+      setEventsBySession((current) => {
+        const mergedEvents = mergeBackgroundAgentEventMaps(
+          historicalEvents,
+          current,
+          backgroundSessionIds,
+        )
+        eventKeysBySessionRef.current = indexBackgroundAgentEvents(mergedEvents)
+        return mergedEvents
+      })
     } finally {
       setLoading(false)
     }
-  }, [projectId, threadId])
+  }, [flushPendingEvents, projectId, threadId])
 
   useEffect(() => {
     void reload()
@@ -87,6 +165,15 @@ export function BackgroundAgentsCard({
   useEffect(() => {
     setShowAll(false)
   }, [threadId])
+
+  useEffect(() => {
+    return () => {
+      if (pendingFlushTimerRef.current) {
+        clearTimeout(pendingFlushTimerRef.current)
+      }
+      pendingEventsBySessionRef.current = new Map()
+    }
+  }, [])
 
   const handleCancelSession = useCallback(async (sessionId: string) => {
     setActionError(null)
@@ -124,34 +211,32 @@ export function BackgroundAgentsCard({
   useEffect(() => {
     const unsubscribers = backgroundSessions.map((session) =>
       window.agentforge.on(`session:${session.id}`, (event) => {
-        setEventsBySession((current) => {
-          const next = new Map(current)
-          next.set(session.id, appendEvent(next.get(session.id) ?? [], event))
-          return next
-        })
+        if (!rememberBackgroundAgentEvent(eventKeysBySessionRef.current, session.id, event)) {
+          return
+        }
 
-        const status = backgroundAgentStatusFromEvent(event)
-        if (!status) return
-        setSessions((current) =>
-          current.map((item) =>
-            item.id === session.id
-              ? {
-                  ...item,
-                  status,
-                  completedAt: ACTIVE_BACKGROUND_AGENT_STATUSES.has(status)
-                    ? item.completedAt
-                    : event.timestamp,
-                }
-              : item,
-          ),
-        )
+        const events = pendingEventsBySessionRef.current.get(session.id) ?? []
+        events.push(event)
+        pendingEventsBySessionRef.current.set(session.id, events)
+        applySessionStatusEvent(session.id, event)
+
+        if (shouldFlushBackgroundAgentEventImmediately(event)) {
+          flushPendingEvents()
+        } else {
+          schedulePendingEventFlush()
+        }
       }),
     )
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe())
     }
-  }, [backgroundSessions])
+  }, [
+    applySessionStatusEvent,
+    backgroundSessions,
+    flushPendingEvents,
+    schedulePendingEventFlush,
+  ])
 
   const selectedSession =
     backgroundSessions.find((session) => session.id === selectedSessionId) ??
@@ -322,6 +407,14 @@ export function BackgroundAgentsCard({
   )
 }
 
+async function listSessionsForThread(projectId: string, threadId: string): Promise<Session[]> {
+  try {
+    return await window.agentforge.sessions.listByThread(threadId)
+  } catch {
+    return window.agentforge.sessions.list(projectId)
+  }
+}
+
 function BackgroundAgentRow({
   session,
   selected,
@@ -373,14 +466,6 @@ function BackgroundAgentRow({
       ) : null}
     </div>
   )
-}
-
-function appendEvent(events: readonly AgentEvent[], event: AgentEvent): AgentEvent[] {
-  const key = `${event.type}:${event.timestamp}:${event.sessionId}:${JSON.stringify(event.payload).slice(0, 80)}`
-  if (events.some((item) => `${item.type}:${item.timestamp}:${item.sessionId}:${JSON.stringify(item.payload).slice(0, 80)}` === key)) {
-    return [...events]
-  }
-  return [...events, event]
 }
 
 function statusDotClass(status: SessionStatus): string {

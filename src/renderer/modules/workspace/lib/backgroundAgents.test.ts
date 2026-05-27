@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent, Session } from '../../../../shared/types'
 import {
   BACKGROUND_AGENT_PREVIEW_LIMIT,
+  backgroundAgentEventsFromBulkRecord,
   backgroundAgentPreviewState,
   backgroundAgentStatusFromEvent,
   backgroundAgentWaitMessage,
   canStopBackgroundAgentSession,
+  indexBackgroundAgentEvents,
   latestBackgroundAgentUserQuestion,
   latestBackgroundAgentSessions,
+  mergeBackgroundAgentEventMaps,
+  rememberBackgroundAgentEvent,
+  shouldFlushBackgroundAgentEventImmediately,
   summarizeBackgroundAgentSessions,
   type BackgroundAgentSession,
 } from './backgroundAgents'
@@ -172,6 +177,74 @@ describe('backgroundAgentStatusFromEvent', () => {
   })
 })
 
+describe('background agent event hydration', () => {
+  it('hydrates background session events from one bulk record', () => {
+    const workerOne = makeBackgroundSession('worker-1', 1, 'Agent 1')
+    const workerTwo = makeBackgroundSession('worker-2', 2, 'Agent 2')
+    const workerOneEvent = makeStepEvent(workerOne.id, 10, 'one')
+    const unrelatedEvent = makeStepEvent('unrelated', 11, 'other')
+
+    expect(
+      [...backgroundAgentEventsFromBulkRecord([workerOne, workerTwo], {
+        [workerOne.id]: [workerOneEvent],
+        unrelated: [unrelatedEvent],
+      })],
+    ).toEqual([
+      [workerOne.id, [workerOneEvent]],
+      [workerTwo.id, []],
+    ])
+  })
+
+  it('preserves live-only events when a bulk hydration response is older', () => {
+    const historicalEvent = makeStepEvent('worker-1', 10, 'loaded')
+    const liveEvent = makeStepEvent('worker-1', 20, 'live')
+
+    expect(
+      mergeBackgroundAgentEventMaps(
+        new Map([['worker-1', [historicalEvent]]]),
+        new Map([['worker-1', [historicalEvent, liveEvent]]]),
+        ['worker-1'],
+      ).get('worker-1'),
+    ).toEqual([historicalEvent, liveEvent])
+  })
+})
+
+describe('background agent event dedupe', () => {
+  it('uses per-session event-key sets to reject duplicate live events', () => {
+    const event = makeStepEvent('worker-1', 10, 'same')
+    const index = indexBackgroundAgentEvents(new Map([['worker-1', [event]]]))
+
+    expect(rememberBackgroundAgentEvent(index, 'worker-1', event)).toBe(false)
+    expect(
+      rememberBackgroundAgentEvent(index, 'worker-1', makeStepEvent('worker-1', 11, 'next')),
+    ).toBe(true)
+    expect(index.get('worker-1')).toHaveLength(2)
+  })
+})
+
+describe('shouldFlushBackgroundAgentEventImmediately', () => {
+  it('flushes status-changing events immediately', () => {
+    expect(
+      shouldFlushBackgroundAgentEventImmediately(
+        makeUserQuestionEvent('worker-1', 10, 'question-1', 'Continue?'),
+      ),
+    ).toBe(true)
+    expect(
+      shouldFlushBackgroundAgentEventImmediately({
+        type: 'session-complete',
+        sessionId: 'worker-1',
+        timestamp: 11,
+        payload: { status: 'done' },
+      }),
+    ).toBe(true)
+  })
+
+  it('does not immediately flush routine stream events', () => {
+    expect(shouldFlushBackgroundAgentEventImmediately(makeStepEvent('worker-1', 10, 'running')))
+      .toBe(false)
+  })
+})
+
 describe('canStopBackgroundAgentSession', () => {
   it.each([
     ['running', true],
@@ -218,6 +291,19 @@ function makeBackgroundSession(
   status: Session['status'] = 'running',
 ): BackgroundAgentSession {
   return makeSession(id, createdAt, { kind: 'swarm', role }, 'thread-1', status) as BackgroundAgentSession
+}
+
+function makeStepEvent(sessionId: string, timestamp: number, title: string): AgentEvent {
+  return {
+    type: 'activity',
+    sessionId,
+    timestamp,
+    payload: {
+      kind: 'step',
+      title,
+      status: 'running',
+    },
+  }
 }
 
 function makeUserQuestionEvent(

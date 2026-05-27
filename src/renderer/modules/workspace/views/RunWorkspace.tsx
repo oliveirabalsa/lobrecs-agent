@@ -615,13 +615,6 @@ export function RunWorkspace({
             onOpenMarkdown={onOpenMarkdown}
             onPreviewMarkdown={onPreviewMarkdown}
           />
-          <BackgroundAgentsCard
-            projectId={project.id}
-            threadId={threadId}
-            refreshKey={backgroundAgentsRefreshKey}
-            onBlockingChange={handleBackgroundBlockingChange}
-            onUserQuestion={handleBackgroundUserQuestion}
-          />
           <MessageStream
             activities={activities}
             activityTimes={activityTimes}
@@ -634,6 +627,13 @@ export function RunWorkspace({
             streamHandlers={streamHandlers}
             canRestoreUserMessage={effectiveStatus === 'cancelled'}
             onRestoreUserMessage={onRestorePrompt}
+          />
+          <BackgroundAgentsCard
+            projectId={project.id}
+            threadId={threadId}
+            refreshKey={backgroundAgentsRefreshKey}
+            onBlockingChange={handleBackgroundBlockingChange}
+            onUserQuestion={handleBackgroundUserQuestion}
           />
           {showFinalDiffReview ? (
             <FinalDiffReviewBar
