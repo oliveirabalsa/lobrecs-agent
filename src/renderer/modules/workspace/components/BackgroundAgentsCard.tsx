@@ -21,6 +21,7 @@ import { MessageStream } from './MessageStream'
 interface BackgroundAgentsCardProps {
   projectId: string
   threadId: string | null | undefined
+  refreshKey?: number
   onBlockingChange?: (blocking: BackgroundAgentsBlockingState | null) => void
   onUserQuestion?: (question: BackgroundAgentUserQuestion | null) => void
 }
@@ -33,6 +34,7 @@ export interface BackgroundAgentsBlockingState {
 export function BackgroundAgentsCard({
   projectId,
   threadId,
+  refreshKey,
   onBlockingChange,
   onUserQuestion,
 }: BackgroundAgentsCardProps) {
@@ -73,7 +75,7 @@ export function BackgroundAgentsCard({
 
   useEffect(() => {
     void reload()
-  }, [reload])
+  }, [reload, refreshKey])
 
   useEffect(() => {
     if (!threadId) return

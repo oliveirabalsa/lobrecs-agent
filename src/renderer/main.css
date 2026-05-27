@@ -13,8 +13,22 @@
   --color-canvas: #0e0e0f;
   --color-sidebar: #141416;
   --color-bubble-user: #1f1f22;
-  --color-card: #17171a;
-  --color-card-raised: #1c1c20;
+  --color-card: #151517;
+  --color-card-raised: #1b1b1e;
+  --color-surface-subtle: color-mix(in srgb, var(--color-card) 72%, transparent);
+  --color-compact-hover: color-mix(in srgb, var(--color-card-raised) 68%, transparent);
+  --color-composer: color-mix(in srgb, var(--color-card-raised) 76%, #050505 24%);
+  --color-composer-border: color-mix(
+    in srgb,
+    var(--color-hairline-strong) 76%,
+    rgba(255, 255, 255, 0.16)
+  );
+  --color-code-block: color-mix(in srgb, #050506 82%, var(--color-canvas) 18%);
+  --color-code-block-header: color-mix(
+    in srgb,
+    var(--color-card-raised) 46%,
+    transparent
+  );
   --color-hairline: rgba(255, 255, 255, 0.06);
   --color-hairline-strong: rgba(255, 255, 255, 0.10);
 
@@ -27,8 +41,8 @@
     0 8px 24px -12px rgba(0, 0, 0, 0.5);
 
   --color-text-primary: rgba(255, 255, 255, 0.92);
-  --color-text-secondary: rgba(255, 255, 255, 0.58);
-  --color-text-muted: rgba(255, 255, 255, 0.40);
+  --color-text-secondary: rgba(255, 255, 255, 0.62);
+  --color-text-muted: rgba(255, 255, 255, 0.48);
   --color-primary: var(--color-text-primary);
   --color-secondary: var(--color-text-secondary);
   --color-muted: var(--color-text-muted);
@@ -59,14 +73,20 @@
   /* Layout dimensions. Centralizes repeated shell alignment widths. */
   --container-conversation: 820px;
 
-  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
 }
 
 :root {
   color-scheme: dark;
   font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  font-synthesis-weight: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--gradient-app);
   color: var(--color-text-primary);
 }
@@ -649,9 +669,14 @@ section,
 .bg-sidebar-surface,
 .bg-card,
 .bg-card-raised,
+.bg-surface-subtle,
+.bg-composer,
+.bg-code-block,
+.bg-code-block-header,
 .bg-bubble-user,
 .border-hairline,
 .border-hairline-strong,
+.border-composer,
 .text-primary,
 .text-secondary,
 .text-muted {
@@ -667,6 +692,58 @@ section,
  * Components opt in by className. */
 .bg-sidebar-surface {
   background: var(--gradient-sidebar);
+}
+
+.codex-composer-surface {
+  border: 1px solid var(--color-composer-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
+    var(--color-composer);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 12px 34px -26px rgba(0, 0, 0, 0.85);
+}
+
+.codex-compact-row {
+  min-height: 28px;
+  border-radius: var(--radius-card);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.codex-compact-row:hover {
+  background: var(--color-compact-hover);
+  color: var(--color-text-primary);
+}
+
+.codex-muted-label {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.codex-mono-snippet {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.codex-code-block {
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  background: var(--color-code-block);
+  color: var(--color-text-secondary);
+}
+
+.codex-code-header {
+  border-bottom: 1px solid var(--color-hairline);
+  background: var(--color-code-block-header);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.35;
 }
 
 html,
@@ -686,6 +763,8 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   overflow: hidden;
+  font-family: var(--font-ui);
+  letter-spacing: 0;
 }
 
 #root {
