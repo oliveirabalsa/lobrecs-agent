@@ -31,19 +31,17 @@ export function SidebarActions({
   gitActive = false,
 }: SidebarActionsProps) {
   return (
-    <nav className="flex flex-col px-1.5 py-1">
+    <nav className="flex flex-col px-1.5 pt-1 pb-0.5">
       <ActionRow
         icon={<NewChatIcon />}
         label="New chat"
         onClick={onNewChat}
-        shortcut="⌘T"
       />
       <ActionRow
         icon={<SearchIcon />}
         label="Search"
         onClick={onSearch}
         disabled={!onSearch}
-        shortcut="⌘K"
       />
       {onPlugins ? (
         <ActionRow
@@ -70,7 +68,7 @@ export function SidebarActions({
       {onOpenGit ? (
         <ActionRow
           icon={<GitIcon />}
-          label="GIT"
+          label="Git"
           onClick={onOpenGit}
           active={gitActive}
         />
@@ -87,7 +85,7 @@ function GitIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -102,7 +100,7 @@ function GitIcon() {
 
 function ActionRow({ icon, label, onClick, disabled, shortcut, active }: ActionRowProps) {
   const baseClasses =
-    'no-drag flex h-8 w-full items-center gap-3 rounded-card px-3 text-left transition-colors'
+    'no-drag flex h-7 w-full items-center gap-2.5 rounded-card pl-2.5 pr-2 text-left transition-colors'
   const stateClasses = disabled
     ? 'cursor-not-allowed text-muted/60'
     : active
@@ -118,15 +116,15 @@ function ActionRow({ icon, label, onClick, disabled, shortcut, active }: ActionR
       title={disabled ? `${label} (coming soon)` : undefined}
     >
       <span
-        className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+        className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center ${
           active ? 'text-primary' : 'text-muted'
         }`}
       >
         {icon}
       </span>
-      <span className="flex-1 truncate text-[13px] leading-none">{label}</span>
+      <span className="flex-1 truncate text-[12.5px] font-medium leading-none">{label}</span>
       {shortcut ? (
-        <span className="shrink-0 text-[10px] font-mono text-muted">{shortcut}</span>
+        <span className="shrink-0 text-[10px] font-mono text-muted/70">{shortcut}</span>
       ) : null}
     </button>
   )
@@ -140,12 +138,13 @@ function NewChatIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
     </svg>
   )
 }
@@ -158,7 +157,7 @@ function SearchIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -177,7 +176,7 @@ function PluginsIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -195,7 +194,7 @@ function AutomationsIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -213,7 +212,7 @@ function CliToolsIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.75"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

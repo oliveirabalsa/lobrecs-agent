@@ -17,7 +17,7 @@ interface ModelChipProps {
 }
 
 /**
- * Composer model chip. Click to open the picker modal.
+ * Composer model chip. Click to open the compact picker popover.
  * Label format: `{Agent} · {Friendly Model}` or `Auto` (with router hint).
  * Thinking depth, when active, is appended as `· think:Hi`.
  */
@@ -58,7 +58,7 @@ export function ModelChip({
         aria-label={`Select model: ${label}`}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setOpen((value) => !value)}
-        className="group flex max-w-[220px] items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/35 sm:max-w-[280px]"
+        className="group flex max-w-[220px] items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/40 sm:max-w-[280px]"
       >
         <span className="flex min-w-0 items-center gap-1">
           <span className="truncate">{label}</span>
@@ -66,7 +66,7 @@ export function ModelChip({
             <span
               aria-label={`Thinking ${THINKING_LABEL[thinking]}`}
               title={`Thinking: ${THINKING_LABEL[thinking]}`}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-primary/12 px-1 py-0 text-[9px] font-semibold uppercase text-accent-primary"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-primary/15 px-1 py-0 text-[9px] font-semibold uppercase text-accent-primary"
             >
               <BrainIcon />
               {THINKING_LABEL[thinking].slice(0, 2)}

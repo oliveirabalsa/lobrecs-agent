@@ -73,7 +73,7 @@ export function ProjectTreeItem({
     : allThreads
   const hiddenCount = overLimit && !showAll ? allThreads.length - COLLAPSED_THREAD_LIMIT : 0
   const rowBase =
-    'group flex h-8 w-full items-center gap-1.5 rounded-card pl-1.5 pr-2 transition-colors cursor-pointer'
+    'group flex h-7 w-full items-center gap-1.5 rounded-card pl-1.5 pr-2 transition-colors cursor-pointer'
   const rowState = selected
     ? 'bg-white/8 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary'
@@ -106,7 +106,7 @@ export function ProjectTreeItem({
           title={project.repoPath}
         >
           <FolderIcon />
-          <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium leading-none">
             {project.name}
           </span>
         </div>
@@ -130,14 +130,14 @@ export function ProjectTreeItem({
         <div
           data-motion="collapsible"
           data-state={expanded ? 'open' : 'closed'}
-          className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-hairline pl-2"
+          className="ml-2 mt-1 mb-1 flex flex-col gap-px"
           onAnimationEnd={(event) => {
             if (event.target !== event.currentTarget) return
             if (!expanded) setThreadsMounted(false)
           }}
         >
           {loadingThreads && allThreads.length === 0 ? (
-            <div className="flex h-8 items-center gap-2 px-2 text-[12px] text-muted">
+            <div className="flex h-7 items-center gap-2 px-2 text-[12px] text-muted">
               <Spinner size={12} />
               Loading threads…
             </div>

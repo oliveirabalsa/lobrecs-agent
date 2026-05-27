@@ -59,21 +59,21 @@ export function UserMessage({
   }
 
   return (
-    <div className="group relative ml-auto max-w-[85%] sm:max-w-[70%]">
+    <div className="group relative ml-auto max-w-[90%] sm:max-w-[72%]">
       {onRestoreDraft ? (
         <button
           type="button"
           onClick={() => onRestoreDraft(text)}
-          className="absolute -left-9 top-2 flex h-7 w-7 items-center justify-center rounded-full border border-hairline bg-card-raised text-muted opacity-0 shadow-elevated transition hover:border-white/15 hover:bg-white/10 hover:text-primary focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/60 group-hover:opacity-100"
+          className="absolute -left-8 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-hairline bg-card-raised text-muted opacity-0 shadow-elevated transition hover:border-white/15 hover:bg-white/10 hover:text-primary focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/60 group-hover:opacity-100"
           title="Edit stopped prompt"
           aria-label="Edit stopped prompt"
         >
           <RestoreDraftIcon />
         </button>
       ) : null}
-      <div className="shadow-elevated rounded-bubble bg-bubble-user px-4 py-3 text-sm leading-6 text-primary">
+      <div className="rounded-[16px] border border-hairline-strong bg-bubble-user/80 px-3.5 py-2.5 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_1px_2px_rgba(0,0,0,0.18)]">
         {attachments && attachments.length > 0 ? (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="mb-2 flex flex-wrap gap-1.5">
             {attachments.map((attachment) => (
               <AttachmentThumb
                 key={attachment.filePath}
@@ -83,7 +83,12 @@ export function UserMessage({
             ))}
           </div>
         ) : null}
-        <MarkdownContent text={text} variant="compact" onOpenMarkdown={onOpenMarkdown} />
+        <MarkdownContent
+          text={text}
+          variant="compact"
+          className="[font-size:13px] [line-height:1.52]"
+          onOpenMarkdown={onOpenMarkdown}
+        />
       </div>
     </div>
   )

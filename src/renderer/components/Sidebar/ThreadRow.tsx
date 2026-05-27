@@ -1,7 +1,6 @@
 import type { MouseEvent } from 'react'
 import type { SessionStatus } from '../../../shared/types'
 import { Spinner } from '../ui'
-import { formatRelative } from '../../lib/relativeTime'
 import type { Thread } from './useProjectTree'
 
 interface ThreadRowProps {
@@ -37,7 +36,7 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
   void onSelectAgent
   const isRunning = RUNNING_STATUSES.has(thread.sessionStatus)
   const baseClasses =
-    'group flex h-8 w-full cursor-pointer items-center gap-1 rounded-card pr-1 pl-3 text-left transition-colors'
+    'group flex h-7 w-full cursor-pointer items-center gap-1 rounded-card pr-1 pl-2 text-left transition-colors'
   const stateClasses = active
     ? 'bg-white/10 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary'
@@ -67,18 +66,14 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
           aria-label={thread.title}
         >
           <StatusDot status={thread.sessionStatus} />
-          <span className="min-w-0 flex-1 truncate text-[13px] leading-none">
+          <span className="min-w-0 flex-1 truncate text-[12.5px] leading-none">
             {thread.title}
           </span>
           {isRunning ? (
             <span className="shrink-0 text-secondary" aria-label={`${thread.sessionStatus}`}>
               <Spinner size={12} />
             </span>
-          ) : (
-            <span className="shrink-0 text-[11px] text-muted tabular-nums">
-              {formatRelative(thread.updatedAt)}
-            </span>
-          )}
+          ) : null}
         </button>
         {onDelete ? (
           <button

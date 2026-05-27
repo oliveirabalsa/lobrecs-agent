@@ -73,23 +73,23 @@ export function ProjectsSection({
   }
 
   return (
-    <section className="mt-4 flex min-h-0 flex-1 flex-col">
-      <header className="flex h-7 items-center justify-between pl-3 pr-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-          Projects
+    <section className="mt-3 flex min-h-0 flex-1 flex-col">
+      <header className="flex h-6 items-center justify-between pl-3 pr-2">
+        <h2 className="text-[11px] font-medium tracking-wide text-muted">
+          Workspaces
         </h2>
         <button
           type="button"
           onClick={onCreateProject}
-          aria-label="Create project"
-          title="Create project"
+          aria-label="Create workspace"
+          title="Create workspace"
           className="no-drag flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-white/5 hover:text-primary"
         >
           <PlusIcon />
         </button>
       </header>
 
-      <div className="mt-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1.5 pb-2">
+      <div className="mt-0.5 flex min-h-0 flex-1 flex-col gap-px overflow-y-auto px-1.5 pb-2">
         {loading ? (
           <div className="flex items-center gap-2 px-2 py-2 text-[12px] text-muted">
             <Spinner size={12} />
@@ -101,7 +101,7 @@ export function ProjectsSection({
           </div>
         ) : projects.length === 0 ? (
           <div className="mx-1 rounded-card border border-dashed border-hairline px-2 py-3 text-[11px] leading-5 text-muted">
-            No projects yet. Use the plus button to add one.
+            No workspaces yet. Use the plus button to add one.
           </div>
         ) : (
           projects.map((project) => (

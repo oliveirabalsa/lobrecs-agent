@@ -26,8 +26,8 @@ interface ModelPopoverProps {
 }
 
 /**
- * Two-pane model picker: provider tabs on the left, model cards on the right
- * with a thinking-depth segmented control for tiers that support it.
+ * Compact model picker: provider tabs on the left, model rows on the right
+ * with a thinking-depth segmented control for models that support it.
  *
  * "Auto routing" is treated as its own provider in the left column.
  */
@@ -158,7 +158,7 @@ export function ModelPopover({
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center justify-between gap-1 rounded px-2 py-1 text-left text-[11px] transition-colors ${
                   active
-                    ? 'bg-white/8 text-primary'
+                    ? 'bg-white/10 text-primary'
                     : 'text-muted hover:bg-white/5 hover:text-primary'
                 }`}
               >
@@ -233,7 +233,7 @@ export function ModelPopover({
                       onClick={() => pickModel(option)}
                       className={`flex w-full items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left transition-colors ${
                         isActive
-                          ? 'border-accent-primary/35 bg-accent-primary/6'
+                          ? 'border-accent-primary/40 bg-accent-primary/5'
                           : 'border-transparent hover:border-white/10 hover:bg-white/5'
                       }`}
                     >
@@ -241,7 +241,7 @@ export function ModelPopover({
                         {option.label}
                       </span>
                       <span
-                        className={`inline-flex h-4.5 items-center rounded-pill border px-1.5 text-[9px] font-medium ${
+                        className={`inline-flex h-[18px] items-center rounded-pill border px-1.5 text-[9px] font-medium ${
                           TIER_TONE[option.tier]
                         }`}
                       >

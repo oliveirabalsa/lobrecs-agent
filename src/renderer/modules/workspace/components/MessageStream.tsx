@@ -288,7 +288,7 @@ export function MessageStream({
   return (
     <div
       ref={containerRef}
-      className="motion-fade-in mx-auto flex w-full max-w-conversation flex-col gap-4"
+      className="motion-fade-in mx-auto flex w-full max-w-conversation flex-col gap-3 sm:gap-3.5"
     >
       {turns.map((turn, index) => {
         const isLastTurn = index === turns.length - 1
@@ -362,7 +362,7 @@ const TurnBlock = memo(function TurnBlock({
 
   return (
     <section
-      className="motion-fade-up-in flex flex-col gap-3"
+      className="motion-fade-up-in flex flex-col gap-2.5 sm:gap-3"
       style={{ animationDelay: `${Math.min(turnIndex, 8) * 20}ms` }}
     >
       {turn.userMessage ? (
@@ -385,7 +385,7 @@ const TurnBlock = memo(function TurnBlock({
       ) : null}
 
       {renderable.length > 0 ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           {renderable.map((item, idx) => (
             <div
               key={`${turn.id}-${idx}`}
@@ -566,11 +566,11 @@ export function splitFinalAssistant(
 
 function StreamSkeleton() {
   return (
-    <div className="mx-auto flex w-full max-w-conversation flex-col gap-3">
+    <div className="mx-auto flex w-full max-w-conversation flex-col gap-2.5">
       {[0, 1, 2].map((item) => (
         <div
           key={item}
-          className="h-20 animate-pulse rounded-card border border-hairline bg-card"
+          className="h-16 animate-pulse rounded-card border border-hairline bg-card/80"
         />
       ))}
     </div>

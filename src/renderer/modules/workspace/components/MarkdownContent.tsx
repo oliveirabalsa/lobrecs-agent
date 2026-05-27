@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { lexer, type Token, type Tokens } from 'marked'
 
 export interface MarkdownContentProps {
@@ -130,20 +130,79 @@ function renderHeading(
 
 function renderCodeBlock(token: Tokens.Code, key: string): ReactNode {
   const language = token.lang?.trim()
+  return <CodeBlock key={key} text={token.text} language={language} />
+}
 
+interface CodeBlockProps {
+  text: string
+  language?: string
+}
+
+function CodeBlock({ text, language }: CodeBlockProps) {
   return (
-    <figure key={key} className="overflow-hidden rounded-card border border-hairline bg-card">
-      {language ? (
-        <figcaption className="border-b border-hairline px-3 py-1 text-[11px] text-muted">
-          {language}
-        </figcaption>
-      ) : null}
-      <pre className="overflow-x-auto px-3 py-2 text-[12px] leading-5 text-secondary">
-        <code className="font-mono">{token.text}</code>
+    <figure className="my-2 overflow-hidden rounded-card border border-hairline bg-[#0a0a0c]/90 shadow-elevated">
+      <div className="flex items-center justify-between border-b border-hairline bg-card-raised/30 px-3 py-1.5">
+        {language ? (
+          <span className="font-mono text-[10px] font-medium text-muted tracking-wider">
+            {language}
+          </span>
+        ) : (
+          <span />
+        )}
+        <CopyButton text={text} />
+      </div>
+      <pre className="overflow-x-auto p-3 text-[11.5px] leading-[1.4] text-secondary">
+        <code className="font-mono select-text whitespace-pre">{text}</code>
       </pre>
     </figure>
   )
 }
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      void navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="flex items-center gap-1.5 text-[10.5px] text-muted hover:text-primary transition-colors focus:outline-none cursor-pointer"
+      aria-label={copied ? 'Copied code' : 'Copy code'}
+    >
+      {copied ? (
+        <>
+          {iconCheck}
+          <span>Copied</span>
+        </>
+      ) : (
+        <>
+          {iconCopy}
+          <span>Copy</span>
+        </>
+      )}
+    </button>
+  )
+}
+
+const iconCopy = (
+  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4">
+    <rect x="4" y="4" width="9" height="9" rx="1.5" />
+    <path d="M11 4V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h1" />
+  </svg>
+)
+
+const iconCheck = (
+  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13.25 4.75L6 12L2.75 8.75" />
+  </svg>
+)
 
 function renderList(
   token: Tokens.List,

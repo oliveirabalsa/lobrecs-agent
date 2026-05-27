@@ -41,14 +41,19 @@ export function SidebarTopZone({
         />
       </div>
       <div className="flex-1" />
-      {logoUrl ? (
-        <img
-          src={logoUrl}
-          alt=""
-          aria-hidden="true"
-          className="h-4 w-4 shrink-0 rounded-sm opacity-80"
-        />
-      ) : null}
+      <div className="no-drag flex shrink-0 items-center gap-1.5 pr-1">
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt=""
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 rounded-sm opacity-80"
+          />
+        ) : null}
+        <span className="text-[12px] font-semibold tracking-tight text-primary/90">
+          lobrecs
+        </span>
+      </div>
     </div>
   )
 }

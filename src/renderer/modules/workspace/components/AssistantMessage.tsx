@@ -49,14 +49,18 @@ export function AssistantMessage({
   const swarmPlan = parseSwarmPlan(text)
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       {swarmPlan ? (
         <SwarmPlanCard plan={swarmPlan} onPreviewMarkdown={onPreviewMarkdown} />
       ) : (
-        <MarkdownContent text={text} onOpenMarkdown={onOpenMarkdown} />
+        <MarkdownContent
+          text={text}
+          className="[font-size:13.5px] [line-height:1.58]"
+          onOpenMarkdown={onOpenMarkdown}
+        />
       )}
       {showActions ? (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 pt-0.5">
           <ActionButton label="Copy" onClick={handleCopy}>
             {iconCopy}
           </ActionButton>
@@ -96,7 +100,7 @@ function ActionButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="flex h-7 w-7 items-center justify-center rounded text-secondary opacity-50 transition-opacity hover:bg-white/5 hover:opacity-100"
+      className="flex h-6 w-6 items-center justify-center rounded text-secondary opacity-45 transition-opacity hover:bg-white/5 hover:opacity-100"
     >
       {children}
     </button>

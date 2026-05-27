@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { WORKING_PHRASES } from "../lib/workingPhrases";
 
 export interface WorkingStateProps {
   /** Epoch millis when this turn started. */
@@ -12,24 +11,10 @@ export interface WorkingStateProps {
   onToggle?: () => void;
 }
 
-const PHRASE_ROTATION_MS = 3_000;
-
-function pickRandomPhrase(exclude?: string): string {
-  if (WORKING_PHRASES.length === 0) return "Working";
-  if (WORKING_PHRASES.length === 1) return WORKING_PHRASES[0];
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidate =
-      WORKING_PHRASES[Math.floor(Math.random() * WORKING_PHRASES.length)];
-    if (candidate !== exclude) return candidate;
-  }
-  return `${WORKING_PHRASES[0]}...`;
-}
-
 /**
- * Status row shown while a turn is in flight. Live runs render a larger
- * "agent harness" indicator with a scanning sweep, orbiting glyphs and the
- * rotating phrase + elapsed time. Once the run completes it collapses to a
- * single "Worked for Xs" label so historical turns stay compact.
+ * Status row shown while a turn is in flight. Live runs stay as a quiet
+ * one-line reasoning indicator; completed runs collapse to "Worked for Xs"
+ * so historical turns stay compact.
  */
 export function WorkingState({
   startedAt,
@@ -38,20 +23,11 @@ export function WorkingState({
   onToggle,
 }: WorkingStateProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [phrase, setPhrase] = useState(() => pickRandomPhrase());
 
   useEffect(() => {
     if (!running) return;
     const tick = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(tick);
-  }, [running]);
-
-  useEffect(() => {
-    if (!running) return;
-    const rotate = window.setInterval(() => {
-      setPhrase((prev) => pickRandomPhrase(prev));
-    }, PHRASE_ROTATION_MS);
-    return () => window.clearInterval(rotate);
   }, [running]);
 
   const elapsedMs = running
@@ -60,7 +36,7 @@ export function WorkingState({
   const duration = formatDuration(elapsedMs);
 
   if (running) {
-    return <AgentRunIndicator phrase={phrase} duration={duration} />;
+    return <AgentRunIndicator duration={duration} />;
   }
 
   const label = `Worked for ${duration}`;
@@ -69,67 +45,39 @@ export function WorkingState({
       <button
         type="button"
         onClick={onToggle}
-        className="self-start text-xs text-muted transition-colors hover:text-secondary"
+        className="self-start rounded px-1 py-0.5 text-[12px] leading-5 text-muted transition-colors hover:text-secondary"
       >
         {label}
       </button>
     );
   }
-  return <div className="text-xs text-muted">{label}</div>;
+  return <div className="px-1 py-0.5 text-[12px] leading-5 text-muted">{label}</div>;
 }
 
 interface AgentRunIndicatorProps {
-  phrase: string;
   duration: string;
 }
 
-function AgentRunIndicator({ phrase, duration }: AgentRunIndicatorProps) {
+function AgentRunIndicator({ duration }: AgentRunIndicatorProps) {
+  const label = "Reasoning";
+
   return (
     <div
       role="status"
       aria-live="polite"
-      aria-label={`${phrase} for ${duration}`}
-      className="motion-fade-up-in relative flex items-center gap-3 self-stretch overflow-hidden px-3.5 py-3"
+      aria-label={`${label} for ${duration}`}
+      className="motion-fade-up-in inline-flex max-w-full items-center gap-2 self-start px-1 py-0.5 text-[12px] leading-5 text-muted"
     >
-      <AgentGlyph />
-      <div className="flex min-w-0 flex-1 items-baseline gap-2 font-mono">
-        <span className="truncate text-[13px] font-medium tracking-tight text-accent-loader">
-          {phrase}
-          <span
-            aria-hidden="true"
-            className="ml-0.5 inline-block text-accent-loader/80"
-            style={{ animation: "loader-caret 1.05s steps(1, end) infinite" }}
-          >
-            ▍
-          </span>
-        </span>
-        <span aria-hidden="true" className="text-muted opacity-50">
-          ·
-        </span>
-        <span className="text-[11px] tabular-nums text-muted">{duration}</span>
-      </div>
+      <span
+        aria-hidden="true"
+        className="h-3 w-3 shrink-0 animate-spin rounded-full border border-current border-r-transparent text-secondary/70 motion-reduce:animate-none"
+      />
+      <span className="truncate font-medium text-secondary">{label}</span>
+      <span aria-hidden="true" className="text-muted/60">
+        ·
+      </span>
+      <span className="tabular-nums text-muted">{duration}</span>
     </div>
-  );
-}
-
-/**
- * Claude Code-style mark — a six-pointed asterisk in monospace red that
- * slowly rotates and pulses. Replaces the previous orbiting-dots glyph
- * with a single, denser symbol that reads as a terminal cursor more than
- * a spinner.
- */
-function AgentGlyph() {
-  return (
-    <span
-      aria-hidden="true"
-      className="flex h-9 w-9 shrink-0 items-center justify-center font-mono text-[26px] leading-none text-accent-loader"
-      style={{
-        animation: "loader-asterisk 1.6s ease-in-out infinite",
-        textShadow: "0 0 12px var(--color-accent-loader-glow)",
-      }}
-    >
-      ✻
-    </span>
   );
 }
 
