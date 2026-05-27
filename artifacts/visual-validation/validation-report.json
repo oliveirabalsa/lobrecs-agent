@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:5173/",
+  "title": "Lobrecs Agent",
+  "viewport": {
+    "width": 1440,
+    "height": 960
+  },
+  "visibleTextChecks": {
+    "newChat": 2,
+    "projects": 1,
+    "threadTitle": 1,
+    "branch": 1,
+    "composerPrompt": 1,
+    "noThreadSelected": 0
+  },
+  "controls": {
+    "textareaCount": 1,
+    "gitActions": 1,
+    "newChatButtons": 3
+  },
+  "console": [
+    {
+      "type": "console",
+      "level": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "console",
+      "level": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "console",
+      "level": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    }
+  ]
+}
