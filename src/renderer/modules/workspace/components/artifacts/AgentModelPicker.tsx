@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { AgentModel, SupportedAgentId } from '../../../../../shared/types'
 import { ModelPopover } from '../Composer/ModelPopover'
 import { AGENT_SHORT, formatModelLabel } from '../Composer/modelDisplay'
@@ -41,6 +41,7 @@ export function AgentModelPicker({
   onSelect,
 }: AgentModelPickerProps) {
   const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
 
   const selected = models.find(
     (model) =>
@@ -70,8 +71,12 @@ export function AgentModelPicker({
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`Select model: ${label}`}
+        onClick={() => setOpen((value) => !value)}
         disabled={modelGroups.length === 0}
         className="flex items-center gap-1.5 rounded-pill border border-hairline bg-card-raised px-2.5 py-1 text-[11px] font-medium text-secondary hover:border-white/20 hover:text-primary disabled:cursor-not-allowed disabled:opacity-60"
       >
@@ -99,6 +104,7 @@ export function AgentModelPicker({
         onClose={() => setOpen(false)}
         allowAuto={false}
         showThinkingControl={false}
+        anchorRef={buttonRef}
       />
     </div>
   )

@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 import {
   AGENT_SHORT,
   THINKING_LABEL,
@@ -6,6 +15,10 @@ import {
   TIER_TONE,
   supportsThinking,
 } from './modelDisplay'
+import {
+  calculateModelPopoverFixedPosition,
+  type ModelPopoverFixedPosition,
+} from './modelPopoverPosition'
 import type { ModelGroup, ModelOption, ModelSelection, ThinkingLevel } from './types'
 
 const AUTO_THINKING_LEVELS: Array<Exclude<ThinkingLevel, 'off'>> = [
@@ -23,6 +36,7 @@ interface ModelPopoverProps {
   onClose: () => void
   allowAuto?: boolean
   showThinkingControl?: boolean
+  anchorRef?: RefObject<HTMLElement | null>
 }
 
 /**
@@ -39,8 +53,11 @@ export function ModelPopover({
   onClose,
   allowAuto = true,
   showThinkingControl = true,
+  anchorRef,
 }: ModelPopoverProps) {
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const [fixedPosition, setFixedPosition] = useState<ModelPopoverFixedPosition | null>(null)
+  const isViewportAnchored = anchorRef !== undefined
   const tabs = useMemo(() => {
     const providerTabs = groups.map((g) => ({
       id: g.agentId,
@@ -68,6 +85,7 @@ export function ModelPopover({
     function handlePointerDown(event: PointerEvent) {
       const target = event.target
       if (target instanceof Node && panelRef.current?.contains(target)) return
+      if (target instanceof Node && anchorRef?.current?.contains(target)) return
       onClose()
     }
 
@@ -82,7 +100,35 @@ export function ModelPopover({
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose, open])
+  }, [anchorRef, onClose, open])
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef?.current) {
+      setFixedPosition(null)
+      return undefined
+    }
+
+    function updatePosition() {
+      const anchor = anchorRef?.current
+      if (!anchor) return
+      const rect = anchor.getBoundingClientRect()
+      setFixedPosition(
+        calculateModelPopoverFixedPosition(
+          { top: rect.top, right: rect.right, bottom: rect.bottom },
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      )
+    }
+
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [anchorRef, open])
 
   const thinking: ThinkingLevel = selection.thinking ?? 'off'
   const activeGroup = groups.find((g) => g.agentId === activeTab) ?? null
@@ -129,18 +175,40 @@ export function ModelPopover({
 
   if (!open) return null
 
-  return (
+  const fixedStyle = fixedPosition
+    ? ({
+        left: fixedPosition.left,
+        top: fixedPosition.top,
+        width: fixedPosition.width,
+        maxHeight: fixedPosition.maxHeight,
+        transformOrigin: fixedPosition.transformOrigin,
+      } satisfies CSSProperties)
+    : undefined
+  const viewportContentStyle =
+    fixedPosition !== null
+      ? ({ maxHeight: Math.max(240, fixedPosition.maxHeight - 20) } satisfies CSSProperties)
+      : undefined
+
+  const popover = (
     <div
       ref={panelRef}
       role="dialog"
       aria-label="Select model"
       aria-describedby="model-popover-description"
-      className="absolute bottom-full right-0 z-50 mb-2 w-[min(480px,calc(100vw-32px))] overflow-hidden rounded-card border border-hairline bg-card/95 p-2.5 font-ui text-primary shadow-2xl shadow-black/45 backdrop-blur-md"
+      style={isViewportAnchored ? fixedStyle : undefined}
+      className={`${
+        isViewportAnchored
+          ? `fixed z-[1000] ${fixedPosition ? '' : 'invisible'}`
+          : 'absolute bottom-full right-0 z-50 mb-2 w-[min(480px,calc(100vw-32px))]'
+      } overflow-hidden rounded-card border border-hairline bg-card/95 p-2.5 font-ui text-primary shadow-2xl shadow-black/45 backdrop-blur-md`}
     >
       <p id="model-popover-description" className="sr-only">
         Choose an agent, model, and thinking depth.
       </p>
-      <div className="flex max-h-[min(380px,calc(100vh-180px))] min-h-[240px] gap-2.5">
+      <div
+        style={isViewportAnchored ? viewportContentStyle : undefined}
+        className="flex max-h-[min(380px,calc(100vh-180px))] min-h-[240px] gap-2.5"
+      >
         <nav
           aria-label="Provider"
           className="flex w-24 shrink-0 flex-col gap-0.5 border-r border-hairline/80 pr-2"
@@ -296,6 +364,12 @@ export function ModelPopover({
       </div>
     </div>
   )
+
+  if (isViewportAnchored && typeof document !== 'undefined') {
+    return createPortal(popover, document.body)
+  }
+
+  return popover
 }
 
 function thinkingForOption(

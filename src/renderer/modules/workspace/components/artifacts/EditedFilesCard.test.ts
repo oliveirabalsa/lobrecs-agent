@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   areFileRowPropsEqual,
   buildEditedFileEntries,
+  editedFileDisplayName,
   visibleEditedFileEntries,
 } from './EditedFilesCard'
 import type { DiffProposal } from '../../../../../shared/types'
@@ -23,6 +24,17 @@ describe('visibleEditedFileEntries', () => {
         true,
       ),
     ).toEqual(['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts', 'f.ts'])
+  })
+})
+
+describe('editedFileDisplayName', () => {
+  it('renders only the basename for absolute and relative paths', () => {
+    expect(editedFileDisplayName('/Users/leo/project/src/index.ts')).toBe('index.ts')
+    expect(editedFileDisplayName('src/components/App.tsx')).toBe('App.tsx')
+  })
+
+  it('supports Windows-style paths', () => {
+    expect(editedFileDisplayName('C:\\Users\\leo\\project\\src\\index.ts')).toBe('index.ts')
   })
 })
 

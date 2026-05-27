@@ -47,6 +47,8 @@ export function EditedFilesCard({
   const hiddenCount = Math.max(0, count - visibleEntries.length)
 
   const [modalEntry, setModalEntry] = useState<EditedFileEntry | null>(null)
+  const singleFileDisplayName =
+    count === 1 ? editedFileDisplayName(entries[0]?.filePath ?? '') : null
 
   if (count === 0) return null
 
@@ -60,6 +62,7 @@ export function EditedFilesCard({
             </span>
             <span className="text-xs font-medium text-secondary">
               Edited {count} file{count === 1 ? '' : 's'}
+              {singleFileDisplayName ? ` - ${singleFileDisplayName}` : ''}
             </span>
           </div>
         </header>
@@ -112,6 +115,11 @@ export function visibleEditedFileEntries<T>(
   showAllRows: boolean,
 ): T[] {
   return showAllRows ? [...entries] : entries.slice(0, COLLAPSED_FILE_ROW_COUNT)
+}
+
+export function editedFileDisplayName(filePath: string): string {
+  const normalizedPath = filePath.replace(/\\/g, '/')
+  return normalizedPath.split('/').filter(Boolean).at(-1) ?? filePath
 }
 
 export function buildEditedFileEntries(
@@ -195,6 +203,7 @@ const FileRow = memo(function FileRow({
 }: FileRowProps) {
   const { filePath, additions, deletions, proposal } = entry
   const hasVisibleStats = additions + deletions > 0
+  const displayName = editedFileDisplayName(filePath)
 
   const handleClick = () => {
     if (resolveRowClick(entry) === 'modal') {
@@ -214,9 +223,8 @@ const FileRow = memo(function FileRow({
       >
         <span
           className="min-w-0 flex-1 truncate font-mono text-[12px] leading-5 text-secondary transition-colors group-hover:text-primary"
-          dir="rtl"
         >
-          {filePath}
+          {displayName}
         </span>
         {hasVisibleStats ? (
           <span className="shrink-0 rounded-sm bg-card-raised px-1.5 py-0.5 font-mono text-[11px] leading-none tabular-nums ring-1 ring-hairline">
