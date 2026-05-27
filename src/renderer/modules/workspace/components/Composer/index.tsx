@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
@@ -21,9 +22,7 @@ import type {
   SupportedAgentId,
 } from '../../../../../shared/types'
 import { Spinner } from '../../../../components/ui'
-import { AttachButton } from './AttachButton'
 import { AttachmentStrip } from './AttachmentStrip'
-import { ApprovalModeChip } from './ApprovalModeChip'
 import { BackgroundWaitNotice } from './BackgroundWaitNotice'
 import { ModelChip } from './ModelChip'
 import { SendButton } from './SendButton'
@@ -109,7 +108,7 @@ export interface ComposerProps {
   ) => void | Promise<void>
 }
 
-const MIN_TEXTAREA_HEIGHT = 56
+const MIN_TEXTAREA_HEIGHT = 36
 const MAX_TEXTAREA_HEIGHT = 240
 const MAX_ATTACHMENTS = 8
 
@@ -680,7 +679,6 @@ export function Composer({
       : undefined
 
   const wrapperBorderClass = 'border-hairline focus-within:border-white/15'
-  // Soft accent glow breathing behind the bar while the agent runs a turn.
   const wrapperGlowClass = ''
 
   return (
@@ -691,123 +689,90 @@ export function Composer({
         </div>
       ) : null}
 
-      <div
-        className={`rounded-bubble border bg-card ${wrapperBorderClass} ${wrapperGlowClass}`}
-      >
-        <AttachmentStrip
-          attachments={attachments}
-          attaching={attaching}
-          onRemove={removeAttachment}
-        />
-
-        <textarea
-          ref={textareaRef}
-          value={draft}
-          onChange={(event) =>
-            handleTextareaChange(event.target.value, event.target.selectionStart)
-          }
-          onKeyDown={handleKeyDown}
-          onKeyUp={syncCursorPosition}
-          onClick={syncCursorPosition}
-          onSelect={syncCursorPosition}
-          onPaste={(event) => void handlePaste(event)}
-          className="block w-full resize-none bg-transparent px-3 pb-2 pt-3 text-sm leading-6 text-primary outline-none placeholder:text-muted"
-          style={{ minHeight: MIN_TEXTAREA_HEIGHT, maxHeight: MAX_TEXTAREA_HEIGHT }}
-          placeholder={placeholder}
-          disabled={submitting || attaching || inputBlocked}
-          aria-label="Message composer"
-        />
-
-        {selectedSlashMentions.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5 px-3 pb-2">
-            {selectedSlashMentions.map((mention) => (
-              <span
-                key={`${mention.kind}:${mention.value}:${mention.raw}`}
-                className="inline-flex max-w-full items-center gap-1 rounded-pill border border-accent-primary/25 bg-accent-primary/10 px-2 py-0.5 text-[11px] text-accent-primary"
-                title={mention.raw}
-              >
-                <span className="shrink-0 uppercase">
-                  {slashMentionKindLabel(mention.kind)}
-                </span>
-                <span className="min-w-0 truncate font-mono">{mention.value}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {slashPickerVisible ? (
-          <SlashMentionPalette
-            options={slashOptions}
-            loading={slashLoading}
-            error={slashError}
-            activeIndex={slashActiveIndex}
-            onHover={setSlashActiveIndex}
-            onSelect={selectSlashMention}
+      <div className="relative w-full max-w-conversation mx-auto">
+        <div
+          className={`flex items-end gap-2 rounded-[24px] border bg-card-raised/60 p-2 shadow-elevated transition-colors ${wrapperBorderClass} ${wrapperGlowClass}`}
+        >
+          <PlusMenu
+            remainingSlots={MAX_ATTACHMENTS - attachments.length}
+            disabled={submitting}
+            onFilesSelected={(files) => void attachImageFiles(files)}
+            profiles={profiles}
+            profileIssues={profileIssues}
+            selectedProfileId={selectedProfileId}
+            onProfileChange={selectProfile}
+            approvalMode={approvalMode}
+            onApprovalModeChange={setApprovalMode}
+            planMode={planMode}
+            onTogglePlan={() => setPlanMode(!planMode)}
+            onMultitask={() => void handleMultitask()}
+            multitaskDisabled={!draft.trim() || submitting || attaching}
+            onOpenSwarm={onOpenSwarm}
+            busyReason={busyReason}
+            queueAllowed={queueAllowed}
+            submitPhase={submitPhase}
           />
-        ) : null}
 
-        {showRouterPreview ? (
-          <div className="px-3 pb-1 text-xs text-muted" aria-live="polite">
-            {routerPreview ? (
-              <>
-                → {AGENT_SHORT[routerPreview.agentId] ?? routerPreview.agentId} ·{' '}
-                {formatModelLabel(routerPreview.agentId, routerPreview.model)} · score{' '}
-                {routerPreview.score.toFixed(2)} · {routerPreview.reasoning}
-              </>
-            ) : (
-              <>→ resolving route…</>
-            )}
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-3 py-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-            <AttachButton
-              remainingSlots={MAX_ATTACHMENTS - attachments.length}
-              disabled={submitting}
-              onFilesSelected={(files) => void attachImageFiles(files)}
+          <div className="flex-1 min-w-0 flex flex-col justify-end">
+            <AttachmentStrip
+              attachments={attachments}
+              attaching={attaching}
+              onRemove={removeAttachment}
             />
-            {profiles.length > 0 ? (
-              <ProfileSelect
-                profiles={profiles}
-                issueCount={profileIssues}
-                value={selectedProfileId}
-                onChange={selectProfile}
-              />
+
+            {selectedSlashMentions.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5 pb-1 px-1">
+                {selectedSlashMentions.map((mention) => (
+                  <span
+                    key={`${mention.kind}:${mention.value}:${mention.raw}`}
+                    className="inline-flex max-w-full items-center gap-1 rounded-pill border border-accent-primary/25 bg-accent-primary/10 px-2 py-0.5 text-[11px] text-accent-primary"
+                    title={mention.raw}
+                  >
+                    <span className="shrink-0 uppercase">
+                      {slashMentionKindLabel(mention.kind)}
+                    </span>
+                    <span className="min-w-0 truncate font-mono">{mention.value}</span>
+                  </span>
+                ))}
+              </div>
             ) : null}
-            <ApprovalModeChip mode={approvalMode} onChange={setApprovalMode} />
-            {!running ? (
-              <ComposerModeChip
-                planMode={planMode}
-                onTogglePlan={() => setPlanMode(!planMode)}
-                onMultitask={() => void handleMultitask()}
-                multitaskDisabled={!draft.trim() || submitting || attaching}
-              />
+
+            {showRouterPreview ? (
+              <div className="px-1 pb-1 text-[10px] text-muted truncate" aria-live="polite">
+                {routerPreview ? (
+                  <>
+                    → {AGENT_SHORT[routerPreview.agentId] ?? routerPreview.agentId} ·{' '}
+                    {formatModelLabel(routerPreview.agentId, routerPreview.model)} · score{' '}
+                    {routerPreview.score.toFixed(2)} · {routerPreview.reasoning}
+                  </>
+                ) : (
+                  <>→ resolving route…</>
+                )}
+              </div>
             ) : null}
-            {onOpenSwarm ? (
-              <button
-                type="button"
-                onClick={onOpenSwarm}
-                aria-label="Open swarm builder"
-                title="Open swarm builder"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-accent-primary"
-              >
-                <BeeIcon />
-              </button>
-            ) : null}
-            {busyReason && !queueAllowed ? (
-              <span className="min-w-0 truncate text-[11px] text-muted">{busyReason}</span>
-            ) : null}
-            {submitPhase ? (
-              <span className="min-w-0 truncate text-[11px] text-muted" role="status">
-                {submitPhase}...
-              </span>
-            ) : null}
+
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(event) =>
+                handleTextareaChange(event.target.value, event.target.selectionStart)
+              }
+              onKeyDown={handleKeyDown}
+              onKeyUp={syncCursorPosition}
+              onClick={syncCursorPosition}
+              onSelect={syncCursorPosition}
+              onPaste={(event) => void handlePaste(event)}
+              className="block w-full resize-none bg-transparent px-2 py-1.5 text-[14px] leading-5 text-primary outline-none placeholder:text-muted/60"
+              style={{ minHeight: MIN_TEXTAREA_HEIGHT, maxHeight: MAX_TEXTAREA_HEIGHT }}
+              placeholder={placeholder}
+              disabled={submitting || attaching || inputBlocked}
+              aria-label="Message composer"
+            />
           </div>
 
-          <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 pr-1 pb-0.5">
             {submitting || running ? (
-              <span className="inline-flex h-7 w-7 items-center justify-center text-muted">
+              <span className="inline-flex h-6 w-6 items-center justify-center text-muted">
                 <Spinner size={12} />
               </span>
             ) : null}
@@ -818,6 +783,7 @@ export function Composer({
               routerPreview={routerPreview}
               onSelect={setModelSelection}
             />
+            <MicButton />
             <SendButton
               running={running}
               canSend={canSend}
@@ -828,6 +794,19 @@ export function Composer({
             />
           </div>
         </div>
+
+        {slashPickerVisible ? (
+          <div className="absolute bottom-full left-0 z-50 w-full mb-2">
+            <SlashMentionPalette
+              options={slashOptions}
+              loading={slashLoading}
+              error={slashError}
+              activeIndex={slashActiveIndex}
+              onHover={setSlashActiveIndex}
+              onSelect={selectSlashMention}
+            />
+          </div>
+        ) : null}
       </div>
 
       {error ? (
@@ -880,24 +859,53 @@ function DropzoneOverlay() {
   )
 }
 
-function ComposerModeChip({
-  planMode,
-  onTogglePlan,
-  onMultitask,
-  multitaskDisabled,
-}: {
+interface PlusMenuProps {
+  remainingSlots: number
+  disabled?: boolean
+  onFilesSelected: (files: File[]) => void
+  profiles: AgentProfile[]
+  profileIssues: number
+  selectedProfileId: string
+  onProfileChange: (profileId: string) => void
+  approvalMode: AgentApprovalMode
+  onApprovalModeChange: (mode: AgentApprovalMode) => void
   planMode: boolean
   onTogglePlan: () => void
   onMultitask: () => void
   multitaskDisabled: boolean
-}) {
+  onOpenSwarm?: () => void
+  busyReason?: string
+  queueAllowed?: boolean
+  submitPhase?: string | null
+}
+
+function PlusMenu({
+  remainingSlots,
+  disabled = false,
+  onFilesSelected,
+  profiles,
+  profileIssues,
+  selectedProfileId,
+  onProfileChange,
+  approvalMode,
+  onApprovalModeChange,
+  planMode,
+  onTogglePlan,
+  onMultitask,
+  multitaskDisabled,
+  onOpenSwarm,
+  busyReason,
+  queueAllowed,
+  submitPhase,
+}: PlusMenuProps) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!open) return
     function handleClickOutside(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setOpen(false)
       }
     }
@@ -905,41 +913,74 @@ function ComposerModeChip({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [open])
 
+  function handleAttachClick() {
+    if (disabled || remainingSlots <= 0) return
+    fileInputRef.current?.click()
+    setOpen(false)
+  }
+
+  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []).filter((file) =>
+      file.type.startsWith('image/'),
+    )
+    if (files.length > 0) {
+      onFilesSelected(files.slice(0, remainingSlots))
+    }
+    event.target.value = ''
+  }
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={menuRef} className="relative shrink-0 select-none">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        title={
-          planMode
-            ? 'Plan mode on — click to change mode'
-            : 'Click to set execution mode (Plan, Multitask)'
-        }
-        className={`flex h-6 shrink-0 items-center gap-1 rounded px-2 text-[11px] font-medium transition-colors ${
-          planMode
-            ? 'bg-accent-primary/20 text-accent-primary'
-            : 'text-muted hover:bg-white/5 hover:text-secondary'
-        }`}
+        disabled={disabled}
+        aria-label="Plus actions"
+        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-muted hover:bg-white/10 hover:text-primary transition-colors focus:outline-none disabled:opacity-40"
       >
-        <PlanModeIcon />
-        {planMode ? 'Plan' : 'Mode'}
-        <ChevronDownIcon />
+        <PlusIcon />
       </button>
 
-      {open ? (
-        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] overflow-hidden rounded-card border border-hairline bg-card-raised shadow-lg">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={handleFileInputChange}
+        tabIndex={-1}
+      />
+
+      {open && (
+        <div className="absolute bottom-full left-0 z-[60] mb-2 w-64 overflow-hidden rounded-card border border-hairline bg-card-raised py-1.5 shadow-xl shadow-black/40">
+          <button
+            type="button"
+            disabled={remainingSlots <= 0}
+            onClick={handleAttachClick}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-secondary hover:bg-white/5 hover:text-primary disabled:opacity-40"
+          >
+            <span aria-hidden="true" className="text-sm font-semibold">+</span>
+            <span>Attach images ({remainingSlots} left)</span>
+          </button>
+
+          <div className="my-1 border-t border-hairline" />
+
+          <div className="px-3 py-1 text-[10px] font-semibold uppercase text-muted">Execution Mode</div>
           <button
             type="button"
             onClick={() => {
               if (planMode) onTogglePlan()
               setOpen(false)
             }}
-            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${
-              !planMode ? 'font-semibold text-accent-primary' : 'text-secondary'
+            className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
+              !planMode ? 'text-accent-primary bg-white/5 font-semibold' : 'text-secondary hover:bg-white/5 hover:text-primary'
             }`}
           >
-            <SendIcon size={11} />
-            Execute immediately
+            <span className="flex items-center gap-1.5">
+              <SendIcon size={11} />
+              Execute immediately
+            </span>
+            {!planMode && <span>✓</span>}
           </button>
           <button
             type="button"
@@ -947,14 +988,16 @@ function ComposerModeChip({
               if (!planMode) onTogglePlan()
               setOpen(false)
             }}
-            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors hover:bg-white/5 ${
-              planMode ? 'font-semibold text-accent-primary' : 'text-secondary'
+            className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
+              planMode ? 'text-accent-primary bg-white/5 font-semibold' : 'text-secondary hover:bg-white/5 hover:text-primary'
             }`}
           >
-            <PlanModeIcon />
-            Plan first, then execute
+            <span className="flex items-center gap-1.5">
+              <PlanModeIcon />
+              Plan first, then execute
+            </span>
+            {planMode && <span>✓</span>}
           </button>
-          <div className="border-t border-hairline" />
           <button
             type="button"
             disabled={multitaskDisabled}
@@ -962,51 +1005,148 @@ function ComposerModeChip({
               setOpen(false)
               onMultitask()
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-secondary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-secondary hover:bg-white/5 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <MultitaskIcon />
             Decompose into parallel tasks
           </button>
+
+          <div className="my-1 border-t border-hairline" />
+
+          <div className="px-3 py-1 text-[10px] font-semibold uppercase text-muted">Approval posture</div>
+          {(['manual', 'auto-safe', 'full'] as const).map((mode) => {
+            const meta = {
+              full: { label: 'Full access', icon: '⊘' },
+              'auto-safe': { label: 'Auto-approve safe', icon: '✓' },
+              manual: { label: 'Manual approve', icon: '⊙' },
+            }[mode]
+            const active = approvalMode === mode
+            return (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  onApprovalModeChange(mode)
+                  setOpen(false)
+                }}
+                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
+                  active ? 'text-accent-primary bg-white/5 font-semibold' : 'text-secondary hover:bg-white/5 hover:text-primary'
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center text-[11px]">{meta.icon}</span>
+                  {meta.label}
+                </span>
+                {active && <span>✓</span>}
+              </button>
+            )
+          })}
+
+          {profiles.length > 0 && (
+            <>
+              <div className="my-1 border-t border-hairline" />
+              <div className="px-3 py-1 text-[10px] font-semibold uppercase text-muted">Agent Profile</div>
+              <div className="px-3 py-1">
+                <select
+                  value={selectedProfileId}
+                  onChange={(e) => {
+                    onProfileChange(e.target.value)
+                    setOpen(false)
+                  }}
+                  className="w-full rounded border border-hairline bg-card-raised px-2 py-1 text-xs text-secondary outline-none focus:border-accent-primary"
+                >
+                  <option value="">Profile: none</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          {onOpenSwarm && (
+            <>
+              <div className="my-1 border-t border-hairline" />
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenSwarm()
+                  setOpen(false)
+                }}
+                className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-secondary hover:bg-white/5 hover:text-primary"
+              >
+                <BeeIcon />
+                <span>Open Swarm Builder</span>
+              </button>
+            </>
+          )}
+
+          {(busyReason || submitPhase) && (
+            <>
+              <div className="my-1 border-t border-hairline" />
+              <div className="px-3 py-1 text-[10px] text-muted">
+                {busyReason && !queueAllowed ? busyReason : null}
+                {submitPhase ? `${submitPhase}...` : null}
+              </div>
+            </>
+          )}
         </div>
-      ) : null}
+      )}
     </div>
   )
 }
 
-function ProfileSelect({
-  profiles,
-  issueCount,
-  value,
-  onChange,
-}: {
-  profiles: AgentProfile[]
-  issueCount: number
-  value: string
-  onChange: (profileId: string) => void
-}) {
+function MicIcon() {
   return (
-    <label className="relative">
-      <span className="sr-only">Agent profile</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        title={issueCount > 0 ? `${issueCount} profile issue${issueCount === 1 ? '' : 's'} in Doctor` : 'Agent profile'}
-        className="h-6 max-w-[180px] rounded border border-hairline bg-card-raised px-2 pr-6 text-[11px] text-secondary outline-none transition hover:border-white/15 hover:text-primary focus:border-accent-primary/40"
-      >
-        <option value="">Profile: none</option>
-        {profiles.map((profile) => (
-          <option key={profile.id} value={profile.id}>
-            {profile.name}
-          </option>
-        ))}
-      </select>
-      {issueCount > 0 ? (
-        <span
-          aria-hidden="true"
-          className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-accent-warn"
-        />
-      ) : null}
-    </label>
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+    </svg>
+  )
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  )
+}
+
+function MicButton() {
+  return (
+    <button
+      type="button"
+      disabled
+      title="Voice input (Not available)"
+      className="flex h-7 w-7 items-center justify-center rounded-full text-muted/50 cursor-not-allowed hover:bg-transparent"
+    >
+      <MicIcon />
+    </button>
   )
 }
 

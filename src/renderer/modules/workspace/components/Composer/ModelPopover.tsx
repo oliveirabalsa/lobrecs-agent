@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Modal } from '../../../../components/ui'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AGENT_SHORT,
   THINKING_LABEL,
@@ -16,7 +15,7 @@ const AUTO_THINKING_LEVELS: Array<Exclude<ThinkingLevel, 'off'>> = [
   'xhigh',
 ]
 
-interface ModelPickerModalProps {
+interface ModelPopoverProps {
   open: boolean
   groups: ModelGroup[]
   selection: ModelSelection
@@ -40,7 +39,8 @@ export function ModelPopover({
   onClose,
   allowAuto = true,
   showThinkingControl = true,
-}: ModelPickerModalProps) {
+}: ModelPopoverProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const tabs = useMemo(() => {
     const providerTabs = groups.map((g) => ({
       id: g.agentId,
@@ -61,6 +61,28 @@ export function ModelPopover({
   useEffect(() => {
     if (open) setActiveTab(initialTab)
   }, [open, initialTab])
+
+  useEffect(() => {
+    if (!open) return undefined
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target
+      if (target instanceof Node && panelRef.current?.contains(target)) return
+      onClose()
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onClose, open])
 
   const thinking: ThinkingLevel = selection.thinking ?? 'off'
   const activeGroup = groups.find((g) => g.agentId === activeTab) ?? null
@@ -105,19 +127,23 @@ export function ModelPopover({
   const visibleThinkingLevels = ['off' as const, ...thinkingLevelsForSelection(selectedOption, autoActive)]
   const selectedThinking = visibleThinkingLevels.includes(thinking) ? thinking : 'off'
 
+  if (!open) return null
+
   return (
-    <Modal
-      open={open}
-      onOpenChange={(next) => (next ? null : onClose())}
-      title="Select model"
-      visualTitle={false}
-      description="Choose an agent, model, and thinking depth"
-      maxWidth={640}
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label="Select model"
+      aria-describedby="model-popover-description"
+      className="absolute bottom-full right-0 z-50 mb-2 w-[min(480px,calc(100vw-32px))] overflow-hidden rounded-card border border-hairline bg-card/95 p-2.5 font-ui text-primary shadow-2xl shadow-black/45 backdrop-blur-md"
     >
-      <div className="flex h-[min(560px,calc(100vh-120px))] min-h-[360px] gap-3">
+      <p id="model-popover-description" className="sr-only">
+        Choose an agent, model, and thinking depth.
+      </p>
+      <div className="flex max-h-[min(380px,calc(100vh-180px))] min-h-[240px] gap-2.5">
         <nav
           aria-label="Provider"
-          className="flex w-32 shrink-0 flex-col gap-0.5 border-r border-hairline pr-2"
+          className="flex w-24 shrink-0 flex-col gap-0.5 border-r border-hairline/80 pr-2"
         >
           {tabs.map((tab) => {
             const active = tab.id === activeTab
@@ -130,10 +156,10 @@ export function ModelPopover({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center justify-between gap-1 rounded-card px-2.5 py-1.5 text-left text-xs transition-colors ${
+                className={`flex items-center justify-between gap-1 rounded px-2 py-1 text-left text-[11px] transition-colors ${
                   active
-                    ? 'bg-white/10 text-primary'
-                    : 'text-secondary hover:bg-white/5 hover:text-primary'
+                    ? 'bg-white/8 text-primary'
+                    : 'text-muted hover:bg-white/5 hover:text-primary'
                 }`}
               >
                 <span className="truncate">{tab.label}</span>
@@ -151,28 +177,28 @@ export function ModelPopover({
               <button
                 type="button"
                 onClick={pickAuto}
-                className={`flex w-full flex-col gap-1 rounded-card border px-3 py-3 text-left transition-colors ${
+                className={`flex w-full flex-col gap-0.5 rounded-card border px-3 py-2 text-left transition-colors ${
                   autoActive
                     ? 'border-accent-primary/40 bg-accent-primary/5'
                     : 'border-hairline hover:border-white/15 hover:bg-white/5'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-primary">Auto routing</span>
+                  <span className="text-xs font-medium text-primary">Auto routing</span>
                   {autoActive ? (
                     <span className="h-1.5 w-1.5 rounded-full bg-accent-primary" />
                   ) : null}
                 </div>
-                <span className="text-xs text-muted">
+                <span className="text-[11px] text-muted">
                   Router scores complexity and picks the best agent + model per turn.
                 </span>
               </button>
             ) : (
               <div className="flex flex-col gap-1">
                 {activeGroup?.account ? (
-                  <div className="mb-2 rounded-card border border-hairline bg-card-raised px-3 py-2">
+                  <div className="mb-2 rounded-card border border-hairline/80 bg-card-raised/80 px-3 py-1.5">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-medium uppercase text-muted">
+                      <span className="text-[10px] font-medium uppercase text-muted">
                         Account
                       </span>
                       <span
@@ -185,11 +211,11 @@ export function ModelPopover({
                         }`}
                       />
                     </div>
-                    <div className="mt-1 truncate text-xs font-medium text-primary">
+                    <div className="mt-0.5 truncate text-xs font-medium text-primary">
                       {activeGroup.account.label}
                     </div>
                     {activeGroup.account.detail ? (
-                      <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted">
+                      <div className="mt-0.5 line-clamp-2 text-[10px] leading-3 text-muted">
                         {activeGroup.account.detail}
                       </div>
                     ) : null}
@@ -205,17 +231,17 @@ export function ModelPopover({
                       key={option.key}
                       type="button"
                       onClick={() => pickModel(option)}
-                      className={`flex w-full items-center justify-between gap-2 rounded-card border px-3 py-2 text-left transition-colors ${
+                      className={`flex w-full items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left transition-colors ${
                         isActive
-                          ? 'border-accent-primary/40 bg-accent-primary/5'
+                          ? 'border-accent-primary/35 bg-accent-primary/6'
                           : 'border-transparent hover:border-white/10 hover:bg-white/5'
                       }`}
                     >
-                      <span className="min-w-0 flex-1 truncate text-sm text-primary">
+                      <span className="min-w-0 flex-1 truncate text-xs text-primary">
                         {option.label}
                       </span>
                       <span
-                        className={`inline-flex h-5 items-center rounded-pill border px-2 text-[10px] font-medium ${
+                        className={`inline-flex h-4.5 items-center rounded-pill border px-1.5 text-[9px] font-medium ${
                           TIER_TONE[option.tier]
                         }`}
                       >
@@ -232,17 +258,17 @@ export function ModelPopover({
           </div>
 
           {showThinking ? (
-            <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline pt-3">
+            <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-hairline/80 pt-2.5">
               <div className="flex flex-col">
-                <span className="text-xs font-medium text-primary">Thinking depth</span>
-                <span className="text-[11px] text-muted">
+                <span className="text-[11px] font-medium text-primary">Thinking depth</span>
+                <span className="text-[10px] text-muted">
                   Higher depth = slower, more deliberate replies.
                 </span>
               </div>
               <div
                 role="radiogroup"
                 aria-label="Thinking depth"
-                className="flex shrink-0 items-center gap-0.5 rounded-pill border border-hairline bg-card-raised p-0.5"
+                className="flex shrink-0 items-center gap-0.5 rounded-md border border-hairline bg-card-raised/80 p-0.5"
               >
                 {visibleThinkingLevels.map((level) => {
                   const active = selectedThinking === level
@@ -253,7 +279,7 @@ export function ModelPopover({
                       role="radio"
                       aria-checked={active}
                       onClick={() => setThinking(level)}
-                      className={`rounded-pill px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                      className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
                         active
                           ? 'bg-accent-primary/20 text-accent-primary'
                           : 'text-muted hover:text-primary'
@@ -268,7 +294,7 @@ export function ModelPopover({
           ) : null}
         </div>
       </div>
-    </Modal>
+    </div>
   )
 }
 
