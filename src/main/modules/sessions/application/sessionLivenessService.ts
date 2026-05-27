@@ -8,6 +8,18 @@ import {
   type ActiveSession,
 } from './sessionWorkflowTypes'
 
+export const CODEX_PLAN_MODE_MAX_STALL_MS = 900_000
+
+export function maxStallMsForSession(
+  session: Pick<ActiveSession, 'agentId' | 'planMode'>,
+  configuredMaxStallMs: number | false,
+): number | false {
+  if (configuredMaxStallMs === false) return false
+  if (session.agentId !== 'codex' || !session.planMode) return configuredMaxStallMs
+
+  return Math.max(configuredMaxStallMs, CODEX_PLAN_MODE_MAX_STALL_MS)
+}
+
 export type SessionLivenessServiceOptions = {
   activeSessions: Map<string, ActiveSession>
   idleHeartbeatMs: number | false
@@ -83,7 +95,8 @@ export class SessionLivenessService {
     }
 
     const stallDuration = now - active.lastAgentEventAt
-    if (this.options.maxStallMs !== false && stallDuration >= this.options.maxStallMs) {
+    const maxStallMs = maxStallMsForSession(active, this.options.maxStallMs)
+    if (maxStallMs !== false && stallDuration >= maxStallMs) {
       const stallSeconds = Math.round(stallDuration / 1000)
       this.options.recordEvent({
         type: 'activity',
