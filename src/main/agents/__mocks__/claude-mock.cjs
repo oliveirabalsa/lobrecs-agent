@@ -1,5 +1,33 @@
 #!/usr/bin/env node
 
+if (process.argv.includes('--help')) {
+  console.log('Usage: claude [options] [command] [prompt]')
+  console.log('')
+  console.log('Commands:')
+  console.log('  models      List available models')
+  process.exit(0)
+}
+
+if (process.argv[2] === 'models') {
+  console.log(
+    JSON.stringify({
+      data: [
+        {
+          id: 'claude-opus-4-8',
+          display_name: 'Claude Opus 4.8',
+          type: 'model',
+        },
+        {
+          id: 'claude-sonnet-4-6',
+          display_name: 'Claude Sonnet 4.6',
+          type: 'model',
+        },
+      ],
+    }),
+  )
+  process.exit(0)
+}
+
 setTimeout(() => {
   if (process.env.CLAUDE_MOCK_RESULT_MODE === 'error') {
     console.log(JSON.stringify({ type: 'result', subtype: 'error', result: 'model failed' }))

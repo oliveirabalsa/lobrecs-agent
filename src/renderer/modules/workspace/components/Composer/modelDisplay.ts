@@ -1,8 +1,8 @@
 import type { ModelTier, SupportedAgentId, ThinkingLevel } from './types'
 
 /**
- * Visual-only formatter: turns canonical model IDs like `claude-opus-4-7`
- * into `Opus 4.7` for display. The underlying `modelId` in `ModelSelection`
+ * Visual-only formatter: turns canonical model IDs like `claude-opus-4-8`
+ * into `Opus 4.8` for display. The underlying `modelId` in `ModelSelection`
  * is never rewritten — IPC + routing keep the canonical string.
  */
 export function formatModelLabel(agentId: SupportedAgentId, modelId: string): string {

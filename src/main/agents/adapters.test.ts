@@ -29,6 +29,8 @@ describe('agent adapters', () => {
     delete process.env.CLAUDE_MOCK_SESSION_END_NOISE
     delete process.env.CLAUDE_MOCK_PLUGIN_WORKER_NOISE
     delete process.env.CLAUDE_MOCK_USER_QUESTION
+    delete process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_BASE_URL
     delete process.env.CODEX_COMMAND
     delete process.env.CODEX_MOCK_CAPACITY_MODEL
     delete process.env.CURSOR_AGENT_COMMAND
@@ -100,13 +102,36 @@ describe('agent adapters', () => {
     expect(stderrText).toContain('bypassPermissions')
     expect(stderrText).toContain('--verbose')
     expect(stderrText).toContain('--dangerously-skip-permissions')
-    expect(stderrText).toContain('claude-opus-4-7')
+    expect(stderrText).toContain('claude-opus-4-8')
     expect(stderrText).toContain('Repository instructions:')
     expect(toolCall).toMatchObject({ type: 'activity' })
     expect(toolResult).toMatchObject({ type: 'activity' })
     expect(rawLine?.type).toBe('stdout')
     expect(events.some((event) => event.type === 'stderr')).toBe(true)
     expect(events.some((event) => event.type === 'session-complete')).toBe(true)
+  })
+
+  it('lists Claude Code models from the CLI catalog before static fallbacks', async () => {
+    process.env.CLAUDE_COMMAND = claudeMock
+    const adapter = new ClaudeCodeAdapter()
+
+    await expect(adapter.listModels()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentId: 'claude-code',
+          id: 'claude-opus-4-8',
+          label: 'Claude Opus 4.8',
+          source: 'cli',
+          tier: 'frontier',
+        }),
+        expect.objectContaining({
+          agentId: 'claude-code',
+          id: 'claude-sonnet-4-6',
+          label: 'Claude Sonnet 4.6',
+          source: 'cli',
+        }),
+      ]),
+    )
   })
 
   it('does not echo duplicate Claude text from assistant and result records', async () => {

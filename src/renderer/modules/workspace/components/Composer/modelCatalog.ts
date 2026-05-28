@@ -26,8 +26,8 @@ export const FALLBACK_MODEL_CATALOGS: AgentModelCatalog[] = [
         supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
       },
       {
-        id: 'claude-opus-4-7',
-        label: 'claude-opus-4-7',
+        id: 'claude-opus-4-8',
+        label: 'claude-opus-4-8',
         agentId: 'claude-code',
         tier: 'frontier',
         source: 'fallback',

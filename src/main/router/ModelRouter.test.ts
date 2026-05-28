@@ -230,8 +230,8 @@ describe('ModelRouter', () => {
                 source: 'fallback',
               },
               {
-                id: 'claude-opus-4-7',
-                label: 'claude-opus-4-7',
+                id: 'claude-opus-4-8',
+                label: 'claude-opus-4-8',
                 agentId: 'claude-code',
                 tier: 'frontier',
                 source: 'fallback',
@@ -264,13 +264,65 @@ describe('ModelRouter', () => {
     const opus = await router.route({
       prompt: 'fix the selected model',
       preferredAgentId: 'claude-code',
-      modelOverride: 'claude-opus-4-7',
+      modelOverride: 'claude-opus-4-8',
     })
 
     expect(sonnet.model).toBe('claude-sonnet-4-6')
     expect(sonnet.reasoning).toBe('Manual override')
-    expect(opus.model).toBe('claude-opus-4-7')
+    expect(opus.model).toBe('claude-opus-4-8')
     expect(opus.reasoning).toBe('Manual override')
+  })
+
+  it('uses live Claude API models instead of stale settings fallbacks', async () => {
+    const router = new ModelRouter({
+      adapterRegistry: {
+        get(agentId) {
+          if (agentId !== 'claude-code') return { isInstalled: () => true }
+          return {
+            isInstalled: () => true,
+            listModels: async () => [
+              {
+                id: 'claude-opus-4-8',
+                label: 'Claude Opus 4.8',
+                agentId: 'claude-code',
+                tier: 'frontier',
+                source: 'api',
+              },
+              {
+                id: 'claude-opus-4-7',
+                label: 'claude-opus-4-7',
+                agentId: 'claude-code',
+                tier: 'frontier',
+                source: 'fallback',
+              },
+            ],
+          }
+        },
+      },
+      settingsProvider: () => ({
+        ...DEFAULT_APP_SETTINGS,
+        agents: {
+          ...DEFAULT_APP_SETTINGS.agents,
+          defaultAgentId: 'claude-code',
+          modelMap: {
+            ...DEFAULT_APP_SETTINGS.agents.modelMap,
+            'claude-code': {
+              ...DEFAULT_APP_SETTINGS.agents.modelMap['claude-code'],
+              advanced: 'claude-opus-4-7',
+              frontier: 'claude-opus-4-7',
+            },
+          },
+        },
+      }),
+    })
+
+    const decision = await router.route({
+      prompt: 'investigate a deep architecture and security regression',
+      preferredAgentId: 'claude-code',
+      minimumTier: 'frontier',
+    })
+
+    expect(decision.model).toBe('claude-opus-4-8')
   })
 
   it('falls back to claude-code when the preferred agent is unavailable', async () => {
@@ -355,7 +407,7 @@ describe('ModelRouter', () => {
 
     expect(decision.agentId).toBe('claude-code')
     expect(decision.tier).toBe('advanced')
-    expect(decision.model).toBe('claude-opus-4-7')
+    expect(decision.model).toBe('claude-opus-4-8')
   })
 
   it('uses settings-backed model maps and disabled agent routing', async () => {

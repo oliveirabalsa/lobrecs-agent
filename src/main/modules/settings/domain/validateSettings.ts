@@ -37,6 +37,13 @@ const PERMISSION_MODES: readonly AgentPermissionMode[] = [
   'ask-for-approval',
   'read-only',
 ]
+const MODEL_ID_MIGRATIONS: Partial<
+  Record<SupportedAgentId, Partial<Record<string, string>>>
+> = {
+  'claude-code': {
+    'claude-opus-4-7': 'claude-opus-4-8',
+  },
+}
 
 export function normalizeSettings(input: unknown): AppSettings {
   const merged = mergeSettings(
@@ -255,11 +262,15 @@ function normalizeModelMap(
   const fallback = DEFAULT_APP_SETTINGS.agents.modelMap[agentId]
 
   return {
-    lightweight: stringOr(record.lightweight, fallback.lightweight),
-    balanced: stringOr(record.balanced, fallback.balanced),
-    advanced: stringOr(record.advanced, fallback.advanced),
-    frontier: stringOr(record.frontier, fallback.frontier),
+    lightweight: normalizeModelId(agentId, stringOr(record.lightweight, fallback.lightweight)),
+    balanced: normalizeModelId(agentId, stringOr(record.balanced, fallback.balanced)),
+    advanced: normalizeModelId(agentId, stringOr(record.advanced, fallback.advanced)),
+    frontier: normalizeModelId(agentId, stringOr(record.frontier, fallback.frontier)),
   }
+}
+
+function normalizeModelId(agentId: SupportedAgentId, modelId: string): string {
+  return MODEL_ID_MIGRATIONS[agentId]?.[modelId] ?? modelId
 }
 
 function normalizeTierThresholds(

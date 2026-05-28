@@ -315,10 +315,11 @@ export class ModelRouter {
     if (adapter?.listModels) {
       try {
         const models = await adapter.listModels()
+        const authoritativeModels = authoritativeCatalogModels(models)
         const mappedModel = getModelForTier(agentId, tier, settings)
-        if (models.some((model) => model.id === mappedModel)) return mappedModel
+        if (authoritativeModels.some((model) => model.id === mappedModel)) return mappedModel
 
-        const model = pickModelForTier(models, tier)
+        const model = pickModelForTier(authoritativeModels, tier)
         if (model) return model.id
       } catch {
         // Fall back to the static map when local model discovery fails.
@@ -392,7 +393,7 @@ export function modelTierFromModel(model: string): ModelTier {
 
 function authoritativeCatalogModels(models: AgentModel[]): AgentModel[] {
   const authoritative = models.filter(
-    (model) => model.source === 'cli' || model.source === 'config',
+    (model) => model.source === 'api' || model.source === 'cli' || model.source === 'config',
   )
   return authoritative.length > 0 ? authoritative : models
 }

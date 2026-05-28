@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   fallbackModelsForAgent,
   inferModelTier,
+  parseAnthropicModelsResponse,
+  parseClaudeCliModels,
   parseCodexModels,
   parseOpenCodeModels,
   pickModelForTier,
@@ -71,6 +73,40 @@ describe('modelDiscovery', () => {
     })
   })
 
+  it('parses Claude models from CLI and Anthropic API responses', () => {
+    expect(
+      parseClaudeCliModels(
+        [
+          'Available models',
+          'claude-sonnet-4-6 - Claude Sonnet 4.6',
+          'claude-opus-4-8 - Claude Opus 4.8',
+        ].join('\n'),
+      ).map((model) => [model.id, model.label, model.source]),
+    ).toEqual([
+      ['claude-sonnet-4-6', 'Claude Sonnet 4.6', 'cli'],
+      ['claude-opus-4-8', 'Claude Opus 4.8', 'cli'],
+    ])
+
+    expect(
+      parseAnthropicModelsResponse({
+        data: [
+          {
+            id: 'claude-opus-4-8',
+            display_name: 'Claude Opus 4.8',
+            type: 'model',
+          },
+          {
+            id: 'not-claude',
+            display_name: 'Other',
+            type: 'model',
+          },
+        ],
+      }).map((model) => [model.id, model.label, model.source, model.tier]),
+    ).toEqual([
+      ['claude-opus-4-8', 'Claude Opus 4.8', 'api', 'frontier'],
+    ])
+  })
+
   it('picks the closest available model for the requested tier', () => {
     const models = parseOpenCodeModels(
       'minimax-coding-plan/MiniMax-M2\nminimax-coding-plan/MiniMax-M2.7\n',
@@ -81,6 +117,7 @@ describe('modelDiscovery', () => {
 
   it('infers tiers for unknown local model names', () => {
     expect(inferModelTier('claude-haiku-4-5-20251001')).toBe('lightweight')
+    expect(inferModelTier('claude-opus-4-8')).toBe('frontier')
     expect(inferModelTier('claude-opus-4-7')).toBe('frontier')
     expect(inferModelTier('minimax-coding-plan/MiniMax-M2.7')).toBe('advanced')
     expect(inferModelTier('gemini-2.5-flash')).toBe('balanced')
@@ -100,11 +137,11 @@ describe('modelDiscovery', () => {
   it('keeps Claude fallback models concrete instead of displaying short aliases', () => {
     const ids = fallbackModelsForAgent('claude-code').map((model) => model.id)
 
-    expect(ids).toContain('claude-opus-4-7')
+    expect(ids).toContain('claude-opus-4-8')
     expect(ids).not.toContain('opus')
     expect(ids).not.toContain('sonnet')
     expect(ids).not.toContain('haiku')
-    expect(fallbackModelsForAgent('claude-code').find((model) => model.id === 'claude-opus-4-7')).toMatchObject({
+    expect(fallbackModelsForAgent('claude-code').find((model) => model.id === 'claude-opus-4-8')).toMatchObject({
       supportedThinkingLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     })
   })
@@ -145,6 +182,7 @@ describe('modelDiscovery', () => {
     it('returns true for Claude 3+ and Claude Code fallback models', () => {
       expect(modelSupportsImages('claude-3-5-sonnet')).toBe(true)
       expect(modelSupportsImages('claude-haiku-4-5-20251001')).toBe(true)
+      expect(modelSupportsImages('claude-opus-4-8')).toBe(true)
       expect(modelSupportsImages('claude-opus-4-7')).toBe(true)
     })
 

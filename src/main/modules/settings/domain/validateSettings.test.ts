@@ -123,6 +123,26 @@ describe('settings validation', () => {
     })
   })
 
+  it('migrates stale Claude Opus defaults to the current model id', () => {
+    const settings = normalizeSettings({
+      agents: {
+        modelMap: {
+          'claude-code': {
+            lightweight: 'claude-haiku-4-5-20251001',
+            balanced: 'claude-sonnet-4-6',
+            advanced: 'claude-opus-4-7',
+            frontier: 'claude-opus-4-7',
+          },
+        },
+      },
+    })
+
+    expect(settings.agents.modelMap['claude-code']).toMatchObject({
+      advanced: 'claude-opus-4-8',
+      frontier: 'claude-opus-4-8',
+    })
+  })
+
   it('migrates persisted Gemini settings to Antigravity', () => {
     const settings = normalizeSettings({
       agents: {

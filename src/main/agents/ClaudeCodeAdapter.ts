@@ -1,10 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
-import { commandExists, resolveCommand, withContextAndImages } from './command'
+import { commandExists, resolveCommand, runCommandText, withContextAndImages } from './command'
 import {
   dedupeModels,
+  fetchAnthropicApiModels,
   fallbackModelsForAgent,
+  parseClaudeCliModels,
   readClaudeHistoryModels,
 } from './modelDiscovery'
 import { isClaudeSessionEndHookWarning } from '../../shared/contracts/agentOutput'
@@ -16,10 +18,11 @@ import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAda
 import type { AgentActivity, AgentEvent, AgentModel } from '../../shared/types'
 
 const CLAUDE_COMMAND_ENV = 'CLAUDE_COMMAND'
+const CLAUDE_CLI_MODELS_HELP_PATTERN = /(?:^|\n)\s{2,}models?\b/
 const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
-  opus: 'claude-opus-4-7',
+  opus: 'claude-opus-4-8',
 }
 
 type ClaudeParserState = {
@@ -174,10 +177,61 @@ export class ClaudeCodeAdapter implements AgentAdapter {
   }
 
   private async discoverModels(): Promise<AgentModel[]> {
-    return dedupeModels([
-      ...fallbackModelsForAgent(this.id),
-      ...(await readClaudeHistoryModels()),
+    const command = resolveCommand(CLAUDE_COMMAND_ENV, 'claude')
+    const [cliModels, apiModels, historyModels] = await Promise.all([
+      discoverClaudeCliModels(command),
+      discoverClaudeApiModels(),
+      readClaudeHistoryModels(),
     ])
+
+    return dedupeModels([
+      ...cliModels,
+      ...apiModels,
+      ...fallbackModelsForAgent(this.id),
+      ...historyModels,
+    ])
+  }
+}
+
+async function discoverClaudeCliModels(command: string): Promise<AgentModel[]> {
+  try {
+    const help = await runCommandText(command, ['--help'], {
+      timeout: 3000,
+      maxBuffer: 512 * 1024,
+    })
+    if (!CLAUDE_CLI_MODELS_HELP_PATTERN.test(help)) return []
+  } catch {
+    return []
+  }
+
+  for (const args of [
+    ['models', '--json'],
+    ['models'],
+  ]) {
+    try {
+      const output = await runCommandText(command, args, {
+        timeout: 5000,
+        maxBuffer: 2 * 1024 * 1024,
+      })
+      const models = parseClaudeCliModels(output)
+      if (models.length > 0) return models
+    } catch {
+      // Some Claude Code versions advertise model discovery before all output
+      // formats are available. Try the next supported form.
+    }
+  }
+
+  return []
+}
+
+async function discoverClaudeApiModels(): Promise<AgentModel[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
+  if (!apiKey) return []
+
+  try {
+    return await fetchAnthropicApiModels(apiKey, process.env.ANTHROPIC_BASE_URL)
+  } catch {
+    return []
   }
 }
 

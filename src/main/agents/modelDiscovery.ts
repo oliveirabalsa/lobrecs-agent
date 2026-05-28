@@ -12,10 +12,12 @@ import type {
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g
 const CLAUDE_MODEL_PATTERN = /^claude-[a-z0-9-]+$/i
 const TIER_ORDER: ModelTier[] = ['lightweight', 'balanced', 'advanced', 'frontier']
+const ANTHROPIC_MODELS_TIMEOUT_MS = 5000
 
 const CLAUDE_FALLBACK_MODELS = [
   'claude-haiku-4-5-20251001',
   'claude-sonnet-4-6',
+  'claude-opus-4-8',
   'claude-opus-4-7',
 ]
 
@@ -121,6 +123,88 @@ export function parseOpenCodeModels(output: string): AgentModel[] {
   )
 }
 
+export function parseClaudeCliModels(output: string): AgentModel[] {
+  const jsonModels = parseAnthropicModelsResponse(parseJsonOrUndefined(output), 'cli')
+  if (jsonModels.length > 0) return jsonModels
+
+  const models = output
+    .replace(ANSI_PATTERN, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .flatMap((line) => {
+      const match = line.match(/(?:^|\s)(claude-[a-z0-9][a-z0-9-]*)(?:\s+-\s+(.+))?$/i)
+      if (!match) return []
+
+      const [, id, label] = match
+      return [
+        createAgentModel('claude-code', id, 'cli', {
+          ...(label ? { label: label.trim() } : {}),
+        }),
+      ]
+    })
+
+  return dedupeModels(models)
+}
+
+export async function fetchAnthropicApiModels(
+  apiKey: string,
+  baseUrl = 'https://api.anthropic.com',
+): Promise<AgentModel[]> {
+  if (!apiKey.trim() || typeof fetch !== 'function') return []
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), ANTHROPIC_MODELS_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(anthropicModelsUrl(baseUrl), {
+      headers: {
+        'anthropic-version': '2023-06-01',
+        'x-api-key': apiKey,
+      },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) return []
+    return parseAnthropicModelsResponse(await response.json(), 'api')
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function parseAnthropicModelsResponse(
+  value: unknown,
+  source: Extract<AgentModel['source'], 'api' | 'cli'> = 'api',
+): AgentModel[] {
+  const records = modelRecords(value)
+
+  return dedupeModels(
+    records.flatMap((entry) => {
+      if (typeof entry === 'string') {
+        const id = entry.trim()
+        return CLAUDE_MODEL_PATTERN.test(id)
+          ? [createAgentModel('claude-code', id, source)]
+          : []
+      }
+      if (!entry || typeof entry !== 'object') return []
+
+      const record = entry as Record<string, unknown>
+      const id = typeof record.id === 'string' ? record.id.trim() : ''
+      if (!CLAUDE_MODEL_PATTERN.test(id)) return []
+      if (typeof record.type === 'string' && record.type !== 'model') return []
+
+      const label = stringField(record, 'display_name') ??
+        stringField(record, 'displayName') ??
+        stringField(record, 'name')
+
+      return [
+        createAgentModel('claude-code', id, source, {
+          ...(label ? { label } : {}),
+        }),
+      ]
+    }),
+  )
+}
+
 export function isOpenCodeMiniMaxTokenPlanModel(id: string): boolean {
   return id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)
 }
@@ -211,7 +295,7 @@ function defaultThinkingLevelForAgent(
 
 function labelForModelId(id: string): string {
   if (id === 'auto') return 'Auto'
-  if (id === 'opus') return 'opus (latest Opus, currently 4.7)'
+  if (id === 'opus') return 'opus (latest Opus, currently 4.8)'
   if (id === 'sonnet') return 'sonnet (latest Sonnet)'
   if (id === 'haiku') return 'haiku (latest Haiku)'
   return id
@@ -365,6 +449,35 @@ function collectClaudeModelIds(value: unknown, output: Set<string>): void {
   }
 }
 
+function parseJsonOrUndefined(output: string): unknown {
+  try {
+    return JSON.parse(output)
+  } catch {
+    return undefined
+  }
+}
+
+function modelRecords(value: unknown): unknown[] {
+  if (!value || typeof value !== 'object') return []
+  if (Array.isArray(value)) return value
+
+  const record = value as Record<string, unknown>
+  if (Array.isArray(record.data)) return record.data
+  if (Array.isArray(record.models)) return record.models
+
+  return []
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function anthropicModelsUrl(baseUrl: string): string {
+  const normalized = baseUrl.trim().replace(/\/+$/, '') || 'https://api.anthropic.com'
+  return normalized.endsWith('/v1') ? `${normalized}/models` : `${normalized}/v1/models`
+}
+
 export function modelSupportsImages(modelId: string): boolean {
   const normalized = modelId.toLowerCase()
 
@@ -383,7 +496,7 @@ export function modelSupportsImages(modelId: string): boolean {
   ) {
     return true
   }
-  // Claude Code fallbacks like 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-7'
+  // Claude Code fallbacks like 'claude-haiku-4-5-20251001', 'claude-sonnet-4-6', 'claude-opus-4-8'
   if (/^claude-(haiku|sonnet|opus)/i.test(modelId)) {
     return true
   }

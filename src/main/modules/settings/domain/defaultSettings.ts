@@ -220,6 +220,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     pricing: {
       'claude-haiku-4-5-20251001': { inputPer1M: 0.8, outputPer1M: 4 },
       'claude-sonnet-4-6': { inputPer1M: 3, outputPer1M: 15 },
+      'claude-opus-4-8': { inputPer1M: 15, outputPer1M: 25 },
       'claude-opus-4-7': { inputPer1M: 15, outputPer1M: 25 },
       'claude-opus-4-6': { inputPer1M: 15, outputPer1M: 75 },
       'gpt-5.3-codex-spark': { inputPer1M: 0.25, outputPer1M: 1 },

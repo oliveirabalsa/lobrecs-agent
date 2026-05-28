@@ -39,7 +39,7 @@ export interface AgentModel {
   label: string
   agentId: SupportedAgentId
   tier: ModelTier
-  source: 'cli' | 'config' | 'history' | 'fallback'
+  source: 'api' | 'cli' | 'config' | 'history' | 'fallback'
   description?: string
   defaultThinkingLevel?: Exclude<AgentThinkingLevel, 'off'>
   supportedThinkingLevels?: Array<Exclude<AgentThinkingLevel, 'off'>>
@@ -334,8 +334,8 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
   'claude-code': {
     lightweight: 'claude-haiku-4-5-20251001',
     balanced: 'claude-sonnet-4-6',
-    advanced: 'claude-opus-4-7',
-    frontier: 'claude-opus-4-7',
+    advanced: 'claude-opus-4-8',
+    frontier: 'claude-opus-4-8',
   },
   codex: {
     lightweight: 'gpt-5.3-codex-spark',
