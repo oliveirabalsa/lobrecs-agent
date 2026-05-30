@@ -1,4 +1,7 @@
 import { once } from 'node:events'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProcessPool } from './ProcessPool'
 
@@ -61,6 +64,44 @@ describe('ProcessPool', () => {
     expect(signal).toBe('SIGKILL')
     expect(pool.get('stubborn-session')).toBeUndefined()
   })
+
+  it('terminates child processes spawned by the tracked process', async () => {
+    if (process.platform === 'win32') return
+
+    const pool = new ProcessPool()
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'lobrecs-process-tree-'))
+    const pidFile = path.join(tempDir, 'grandchild.pid')
+    const parent = pool.spawn(
+      'tree-session',
+      process.execPath,
+      [
+        '-e',
+        [
+          'const { spawn } = require("node:child_process");',
+          'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+          `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));`,
+          'setInterval(() => {}, 1000);',
+        ].join(''),
+      ],
+      { cwd: process.cwd() },
+    )
+
+    try {
+      await waitForFile(pidFile)
+      const grandchildPid = Number(await readFile(pidFile, 'utf8'))
+      expect(isProcessAlive(grandchildPid)).toBe(true)
+
+      const exit = once(parent, 'exit')
+      pool.kill('tree-session')
+      await withTimeout(exit)
+      await waitFor(() => !isProcessAlive(grandchildPid))
+
+      expect(isProcessAlive(grandchildPid)).toBe(false)
+    } finally {
+      pool.killAll()
+      await rm(tempDir, { recursive: true, force: true })
+    }
+  })
 })
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs = 2000): Promise<T> {
@@ -74,5 +115,34 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 2000): Promise<T>
     return await Promise.race([promise, timeoutPromise])
   } finally {
     if (timeout) clearTimeout(timeout)
+  }
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  await waitFor(async () => {
+    try {
+      await readFile(filePath, 'utf8')
+      return true
+    } catch {
+      return false
+    }
+  })
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error('Timed out waiting for condition')
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
   }
 }

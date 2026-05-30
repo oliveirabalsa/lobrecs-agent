@@ -27,6 +27,7 @@ export class ProcessPool extends EventEmitter {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: buildProcessEnvironment(options.env),
+      detached: process.platform !== 'win32',
       stdio: [options.stdin ?? 'pipe', 'pipe', 'pipe'],
     })
 
@@ -70,11 +71,11 @@ export class ProcessPool extends EventEmitter {
     if (!managed) return
 
     this.clearForceKillTimer(sessionId)
-    managed.process.kill('SIGTERM')
+    killManagedProcess(managed, 'SIGTERM')
 
     const timer = setTimeout(() => {
       if (this.processes.has(sessionId)) {
-        managed.process.kill('SIGKILL')
+        killManagedProcess(managed, 'SIGKILL')
       }
     }, 3000)
 
@@ -99,6 +100,41 @@ export class ProcessPool extends EventEmitter {
     clearTimeout(timer)
     this.forceKillTimers.delete(sessionId)
   }
+}
+
+function killManagedProcess(managed: ManagedProcess, signal: NodeJS.Signals): void {
+  if (process.platform === 'win32') {
+    killWindowsProcessTree(managed, signal)
+    return
+  }
+
+  try {
+    process.kill(-managed.pid, signal)
+  } catch (error) {
+    if (isNoSuchProcessError(error)) return
+
+    managed.process.kill(signal)
+  }
+}
+
+function killWindowsProcessTree(managed: ManagedProcess, signal: NodeJS.Signals): void {
+  const taskkill = spawn(
+    'taskkill',
+    ['/pid', String(managed.pid), '/T', ...(signal === 'SIGKILL' ? ['/F'] : [])],
+    { windowsHide: true },
+  )
+
+  taskkill.once('error', () => {
+    managed.process.kill(signal)
+  })
+}
+
+function isNoSuchProcessError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as NodeJS.ErrnoException).code === 'ESRCH'
+  )
 }
 
 export const processPool = new ProcessPool()

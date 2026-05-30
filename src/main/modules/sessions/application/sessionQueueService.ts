@@ -96,13 +96,7 @@ export class SessionQueueService {
 
     if (this.isThreadBusy(threadId)) return
 
-    const [next, ...rest] = queue
-    if (rest.length === 0) {
-      this.options.pendingQueues.delete(threadId)
-    } else {
-      this.options.pendingQueues.set(threadId, rest)
-    }
-    broadcastQueueUpdated(threadId, publicQueuedMessages(rest))
+    const next = queue[0]
 
     try {
       await this.options.dispatch({
@@ -114,6 +108,19 @@ export class SessionQueueService {
         threadId,
         runtimeSettings: next.runtimeSettings,
       })
+
+      const current = this.options.pendingQueues.get(threadId) ?? []
+      const updated =
+        current[0]?.id === next.id
+          ? current.slice(1)
+          : current.filter((message) => message.id !== next.id)
+
+      if (updated.length === 0) {
+        this.options.pendingQueues.delete(threadId)
+      } else {
+        this.options.pendingQueues.set(threadId, updated)
+      }
+      broadcastQueueUpdated(threadId, publicQueuedMessages(updated))
     } catch (error) {
       console.error(
         `[session] queued dispatch failed for thread ${threadId}:`,

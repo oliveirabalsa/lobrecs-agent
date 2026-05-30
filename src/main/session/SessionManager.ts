@@ -724,12 +724,7 @@ export class SessionManager {
 
   cancel(sessionId: string): void {
     const active = this.activeSessions.get(sessionId)
-    this.stopIdleHeartbeat(sessionId)
-    this.activeSessions.delete(sessionId)
-    this.processWarningsBySession.delete(sessionId)
-    this.sessionsPausedForUserInput.delete(sessionId)
-    this.dropPlanReviewsForSession(sessionId)
-    this.dropModelRecoveriesForSession(sessionId)
+    this.clearBlockingState(sessionId)
     const session = sessionsStore.get(sessionId)
 
     if (session && !TERMINAL_SESSION_STATUSES.has(session.status)) {
@@ -1344,10 +1339,7 @@ export class SessionManager {
       this.applyUsage(event)
     }
     sessionsStore.updateStatus(event.sessionId, status)
-    this.stopIdleHeartbeat(event.sessionId)
-    this.stopLiveDiff(event.sessionId)
-    this.activeSessions.delete(event.sessionId)
-    this.processWarningsBySession.delete(event.sessionId)
+    this.clearBlockingState(event.sessionId)
 
     if (active?.planMode) {
       void this.completePlanModeSession(event.sessionId, active, event, session)
@@ -1558,8 +1550,7 @@ export class SessionManager {
     sessionsStore.updateStatus(event.sessionId, 'error')
     this.recordEvent(event)
     void this.removeWorktree(event.sessionId, active)
-    this.stopIdleHeartbeat(event.sessionId)
-    this.stopLiveDiff(event.sessionId)
+    this.clearBlockingState(event.sessionId)
     if (session && active) {
       this.emitNotifierEvent({
         type: 'session.error',
@@ -1570,8 +1561,6 @@ export class SessionManager {
         spawnedAgent: session.spawnedAgent,
       })
     }
-    this.activeSessions.delete(event.sessionId)
-    this.processWarningsBySession.delete(event.sessionId)
   }
 
   private recordEvent(event: AgentEvent): void {
@@ -1817,6 +1806,17 @@ export class SessionManager {
     await this.queueService.dispatchNextQueued(threadId, fallback)
   }
 
+  private clearBlockingState(sessionId: string): void {
+    this.stopIdleHeartbeat(sessionId)
+    this.stopLiveDiff(sessionId)
+    this.activeSessions.delete(sessionId)
+    this.processWarningsBySession.delete(sessionId)
+    this.sessionsPausedForUserInput.delete(sessionId)
+    this.dropPlanReviewsForSession(sessionId)
+    this.dropModelRecoveriesForSession(sessionId)
+    this.delegatedTasksByChildSession.delete(sessionId)
+  }
+
   private failSession(sessionId: string, error: unknown): void {
     const message = errorMessage(error)
     const event: AgentEvent = {
@@ -1829,7 +1829,6 @@ export class SessionManager {
     sessionsStore.addEvent(event)
     sessionsStore.updateStatus(sessionId, 'error')
     this.broadcastEvent(event)
-    this.stopIdleHeartbeat(sessionId)
     const active = this.activeSessions.get(sessionId)
     const session = sessionsStore.get(sessionId)
     const threadId = active?.threadId ?? session?.threadId
@@ -1843,11 +1842,8 @@ export class SessionManager {
         spawnedAgent: session.spawnedAgent,
       })
     }
-    this.activeSessions.delete(sessionId)
-    this.processWarningsBySession.delete(sessionId)
-    this.sessionsPausedForUserInput.delete(sessionId)
-    this.dropModelRecoveriesForSession(sessionId)
-    this.delegatedTasksByChildSession.delete(sessionId)
+    void this.removeWorktree(sessionId, active)
+    this.clearBlockingState(sessionId)
   }
 
   private registerDelegatedTask(record: DelegatedTaskRecord): void {

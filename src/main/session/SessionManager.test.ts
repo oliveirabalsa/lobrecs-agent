@@ -405,6 +405,105 @@ describe('SessionManager', () => {
     expect(adapter.cancel).toHaveBeenCalledTimes(1)
   })
 
+  it('clears awaiting-input recovery state when a paused session is cancelled', async () => {
+    const project = createProject()
+    const claudeAdapter = new FakeAdapter('claude-code')
+    const codexAdapter = new FakeAdapter('codex')
+    const broadcasts: AgentEvent[] = []
+    const manager = new SessionManager({
+      adapters: [claudeAdapter, codexAdapter],
+      broadcast: (event) => broadcasts.push(event),
+      worktreeIsolation: false,
+    })
+    const { sessionId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'finish the refactor',
+      agentId: 'claude-code',
+      model: 'claude-opus-4-7',
+      repoPath: project.repoPath,
+    })
+
+    claudeAdapter.emit({
+      type: 'error',
+      sessionId,
+      payload: { message: 'Claude usage limit reached. Please try again later.' },
+      timestamp: 10,
+    })
+
+    await waitFor(() => sessionsStore.get(sessionId)?.status === 'awaiting-input')
+    const recoveryEvent = broadcasts.find(
+      (event) =>
+        event.type === 'activity' &&
+        typeof event.payload === 'object' &&
+        event.payload !== null &&
+        (event.payload as { kind?: string }).kind === 'model-recovery',
+    )
+    const recoveryId = (recoveryEvent?.payload as { recoveryId?: string } | undefined)
+      ?.recoveryId
+
+    expect(recoveryId).toBeTruthy()
+
+    manager.cancel(sessionId)
+
+    expect(sessionsStore.get(sessionId)?.status).toBe('cancelled')
+    expect(manager.isActive(sessionId)).toBe(false)
+    await expect(
+      manager.resolveModelRecovery({
+        recoveryId: recoveryId!,
+        sessionId,
+        decision: 'continue',
+        agentId: 'codex',
+        modelOverride: 'gpt-5.4',
+      }),
+    ).resolves.toBeNull()
+    expect(codexAdapter.dispatches).toHaveLength(0)
+  })
+
+  it('clears awaiting-approval state when a session fails', async () => {
+    const project = createProject()
+    const adapter = new FakeAdapter()
+    const manager = new SessionManager({
+      adapters: [adapter],
+      worktreeIsolation: false,
+    })
+    const { sessionId, threadId } = await manager.dispatch({
+      projectId: project.id,
+      prompt: 'needs approval',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    adapter.emit({
+      type: 'approval-request',
+      sessionId,
+      payload: { command: 'npm test' },
+      timestamp: 10,
+    })
+    expect(sessionsStore.get(sessionId)?.status).toBe('awaiting-approval')
+
+    adapter.emit({
+      type: 'error',
+      sessionId,
+      payload: { message: 'agent process failed' },
+      timestamp: 11,
+    })
+
+    expect(sessionsStore.get(sessionId)?.status).toBe('error')
+    expect(manager.isActive(sessionId)).toBe(false)
+
+    await manager.dispatch({
+      projectId: project.id,
+      threadId,
+      prompt: 'next attempt',
+      agentId: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      repoPath: project.repoPath,
+    })
+
+    expect(adapter.dispatches.at(-1)?.prompt).toBe('next attempt')
+  })
+
   it('pauses on provider limits and continues with a user-selected model', async () => {
     const project = createProject()
     const claudeAdapter = new FakeAdapter('claude-code')
