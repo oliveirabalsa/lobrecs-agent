@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isTrustedGeneratedOrTempPath } from './trustedPaths'
 
 const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
@@ -98,9 +99,16 @@ function imageFilePathFromSource(source: string): string {
     if (url.protocol !== 'file:') {
       throw new Error('Image preview can only save local image sources.')
     }
-    return fileURLToPath(url)
+    const filePath = fileURLToPath(url)
+    if (!isTrustedGeneratedOrTempPath(filePath)) {
+      throw new Error('Image preview file URLs must point to app-managed or trusted generated files.')
+    }
+    return filePath
   } catch (error) {
     if (error instanceof Error && error.message.includes('local image sources')) {
+      throw error
+    }
+    if (error instanceof Error && error.message.includes('app-managed or trusted generated')) {
       throw error
     }
     throw new Error('Image preview source must be a data URL or local file URL.')

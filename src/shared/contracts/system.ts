@@ -199,6 +199,10 @@ export function validateOpenEditorPath(input: unknown): string {
   return assertAbsolutePath(input, 'File path')
 }
 
+export function validateLoadBackgroundImagePath(input: unknown): string {
+  return assertAbsolutePath(input, 'Background image path')
+}
+
 export function validateReadMarkdownDocumentInput(input: unknown): ReadMarkdownDocumentInput {
   const value = assertRecord(input, 'Markdown preview input')
   return {

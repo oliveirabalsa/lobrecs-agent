@@ -165,11 +165,16 @@ function parseUrl(value: string): URL | null {
 }
 
 function ensureSafeRemoteMarkdownUrl(url: URL): void {
-  const hostname = url.hostname.toLowerCase()
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  const isIpv6 = hostname.includes(':')
   if (
+    url.username ||
+    url.password ||
     hostname === 'localhost' ||
     hostname === '0.0.0.0' ||
     hostname === '::1' ||
+    (isIpv6 && /^f[cd][0-9a-f:]*$/i.test(hostname)) ||
+    (isIpv6 && /^fe80[:]/i.test(hostname)) ||
     hostname.startsWith('127.') ||
     hostname.startsWith('10.') ||
     hostname.startsWith('192.168.') ||

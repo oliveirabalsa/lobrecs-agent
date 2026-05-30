@@ -6,6 +6,7 @@ import { listAgentModelCatalogs } from '../../agents/application/listAgentModelC
 import { getAgentProfileDoctorReport } from '../../agents/application/agentProfileService'
 import { isSupportedAgentId } from '../../agents/domain/isSupportedAgentId'
 import { projectsStore } from '../../../store'
+import { BackgroundImageAccess } from '../application/backgroundImageAccess'
 import { readMarkdownDocument } from '../application/markdownDocument'
 import { DoctorService } from '../application/doctor'
 import {
@@ -50,6 +51,7 @@ import {
   validateCliEditorTerminalResizeInput,
   validateCliEditorTerminalStartInput,
   validateCliEditorTerminalWriteInput,
+  validateLoadBackgroundImagePath,
   validateOpenEditorPath,
   validateOpenInEditorInput,
   validateReadMarkdownDocumentInput,
@@ -64,6 +66,8 @@ const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
 }
 
 export function registerSystemHandlers(context: MainIpcContext): void {
+  const backgroundImageAccess = new BackgroundImageAccess(app.getPath('userData'))
+
   ipcMain.handle('system:open-editor', async (_event, rawFilePath: unknown) => {
     const filePath = assertInsideProjectOrTrustedRoots(
       validateOpenEditorPath(rawFilePath),
@@ -88,24 +92,20 @@ export function registerSystemHandlers(context: MainIpcContext): void {
         { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'] },
       ],
     })
-    return result.canceled ? null : result.filePaths[0]
+    return result.canceled || !result.filePaths[0]
+      ? null
+      : backgroundImageAccess.allowSelected(result.filePaths[0])
   })
   ipcMain.handle(
     'system:load-background-image',
-    async (_event, filePath: string): Promise<string | null> => {
-      if (!filePath) return null
+    async (_event, rawFilePath: unknown): Promise<string | null> => {
+      if (!rawFilePath) return null
       try {
-        const buffer = await readFile(filePath)
-        const ext = path.extname(filePath).toLowerCase().slice(1)
-        const mime =
-          ext === 'svg' ? 'image/svg+xml'
-            : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-            : ext === 'png' ? 'image/png'
-            : ext === 'webp' ? 'image/webp'
-            : ext === 'gif' ? 'image/gif'
-            : ext === 'bmp' ? 'image/bmp'
-            : 'application/octet-stream'
-        return `data:${mime};base64,${buffer.toString('base64')}`
+        const resolvedPath = backgroundImageAccess.assertAllowed(
+          validateLoadBackgroundImagePath(rawFilePath),
+        )
+        const buffer = await readFile(resolvedPath)
+        return backgroundImageAccess.dataUrl(resolvedPath, buffer)
       } catch {
         return null
       }

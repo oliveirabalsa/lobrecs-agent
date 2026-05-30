@@ -27,6 +27,7 @@ import {
   validateCliEditorTerminalResizeInput,
   validateCliEditorTerminalStartInput,
   validateCliEditorTerminalWriteInput,
+  validateLoadBackgroundImagePath,
   validateOpenEditorPath,
   validateOpenInEditorInput,
   validateReadMarkdownDocumentInput,
@@ -70,7 +71,7 @@ export function createSystemApi(ipcRenderer: IpcInvoker & IpcSubscriber): System
     selectDirectory: () => ipcRenderer.invoke('system:select-directory'),
     selectBackgroundImage: () => ipcRenderer.invoke('system:select-background-image'),
     loadBackgroundImage: (filePath) =>
-      ipcRenderer.invoke('system:load-background-image', filePath),
+      ipcRenderer.invoke('system:load-background-image', validateLoadBackgroundImagePath(filePath)),
     checkAgentInstalled: (agentId) => ipcRenderer.invoke('system:check-agent', agentId),
     listAgentModels: () => ipcRenderer.invoke('system:list-agent-models'),
     listCapabilities: () => ipcRenderer.invoke('system:list-capabilities'),

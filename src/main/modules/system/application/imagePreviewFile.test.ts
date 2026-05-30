@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -29,7 +29,8 @@ describe('image preview file helpers', () => {
   })
 
   it('reads a local file URL', async () => {
-    tempDir = await mkdtemp(path.join(os.tmpdir(), 'lobrecs-image-preview-'))
+    await mkdir(path.join(os.tmpdir(), 'lobrecs-agent'), { recursive: true })
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'lobrecs-agent', 'image-preview-'))
     const filePath = path.join(tempDir, 'screen shot.png')
     await writeFile(filePath, Buffer.from('image-bytes'))
 
@@ -43,6 +44,16 @@ describe('image preview file helpers', () => {
   it('rejects remote image URLs', async () => {
     await expect(readImagePreviewSource('https://example.com/image.png')).rejects.toThrow(
       'local image sources',
+    )
+  })
+
+  it('rejects local file URLs outside app-managed or trusted generated roots', async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), 'lobrecs-image-preview-'))
+    const filePath = path.join(tempDir, 'screen shot.png')
+    await writeFile(filePath, Buffer.from('image-bytes'))
+
+    await expect(readImagePreviewSource(pathToFileURL(filePath).toString())).rejects.toThrow(
+      'app-managed or trusted generated',
     )
   })
 

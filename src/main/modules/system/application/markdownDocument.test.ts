@@ -73,6 +73,12 @@ describe('markdownDocument', () => {
     await expect(
       readMarkdownDocument({ href: 'http://127.0.0.1/readme.md' }),
     ).rejects.toThrow('local network URLs')
+    await expect(
+      readMarkdownDocument({ href: 'http://[::1]/readme.md' }),
+    ).rejects.toThrow('local network URLs')
+    await expect(
+      readMarkdownDocument({ href: 'https://user:pass@example.com/readme.md' }),
+    ).rejects.toThrow('local network URLs')
   })
 
   it('allows Antigravity generated markdown paths', () => {
