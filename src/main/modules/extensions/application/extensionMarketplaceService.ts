@@ -12,6 +12,10 @@ import type {
   UpdateExtensionRuntimeStateInput,
 } from '../../../../shared/types'
 import {
+  validateInstallExtensionInput,
+  validateSearchMarketplaceExtensionsInput,
+} from '../../../../shared/types'
+import {
   extensionsStore,
   type SaveExtensionDoctorResultInput,
   type SaveExtensionInstallationInput,
@@ -50,13 +54,14 @@ export class ExtensionMarketplaceService {
   async searchCatalog(
     input: SearchMarketplaceExtensionsInput = {},
   ): Promise<MarketplaceCatalogSearchResult> {
-    const query = input.query?.trim().toLowerCase()
-    const categories = setFrom(input.categories)
-    const sources = setFrom(input.sources)
-    const targetAgents = setFrom(input.targetAgents)
-    const tags = setFrom(input.tags?.map((tag) => tag.toLowerCase()))
-    const limit = normalizeLimit(input.limit)
-    const catalog = await this.loadCatalog(input.query)
+    const safeInput = validateSearchMarketplaceExtensionsInput(input)
+    const query = safeInput.query?.trim().toLowerCase()
+    const categories = setFrom(safeInput.categories)
+    const sources = setFrom(safeInput.sources)
+    const targetAgents = setFrom(safeInput.targetAgents)
+    const tags = setFrom(safeInput.tags?.map((tag) => tag.toLowerCase()))
+    const limit = normalizeLimit(safeInput.limit)
+    const catalog = await this.loadCatalog(safeInput.query)
 
     const items = catalog.filter((extension) => {
       if (query && !matchesQuery(extension, query)) return false
@@ -94,20 +99,21 @@ export class ExtensionMarketplaceService {
   }
 
   async install(input: InstallExtensionInput): Promise<InstalledExtensionRecord> {
+    const safeInput = validateInstallExtensionInput(input)
     const extension =
-      (await this.loadCatalog()).find((item) => item.id === input.extensionId) ??
-      (await this.loadCatalog(externalCatalogQueryFromId(input.extensionId))).find(
-        (item) => item.id === input.extensionId,
+      (await this.loadCatalog()).find((item) => item.id === safeInput.extensionId) ??
+      (await this.loadCatalog(externalCatalogQueryFromId(safeInput.extensionId))).find(
+        (item) => item.id === safeInput.extensionId,
       )
-    if (!extension) throw new Error(`Unknown extension: ${input.extensionId}`)
+    if (!extension) throw new Error(`Unknown extension: ${safeInput.extensionId}`)
     if (extension.artifacts.length === 0 && !extension.executable) {
       throw new Error(`${extension.name} is a provider entry and cannot be installed directly.`)
     }
-    if (extension.requiresProject && !input.projectPath?.trim()) {
+    if (extension.requiresProject && !safeInput.projectPath?.trim()) {
       throw new Error(`${extension.name} requires a selected project path.`)
     }
 
-    const targetAgents = resolveTargetAgents(input.targetAgents, extension.targetAgents)
+    const targetAgents = resolveTargetAgents(safeInput.targetAgents, extension.targetAgents)
     if (targetAgents.length === 0) {
       throw new Error(`No supported target agents selected for ${extension.name}.`)
     }
@@ -119,8 +125,8 @@ export class ExtensionMarketplaceService {
           await installArtifactForAgent({
             artifact,
             agentId,
-            scope: input.scope,
-            projectPath: input.projectPath,
+            scope: safeInput.scope,
+            projectPath: safeInput.projectPath,
           }),
         )
       }
@@ -128,8 +134,8 @@ export class ExtensionMarketplaceService {
 
     return this.repository.save({
       extensionId: extension.id,
-      scope: input.scope,
-      projectPath: input.projectPath,
+      scope: safeInput.scope,
+      projectPath: safeInput.projectPath,
       targetAgents,
       actions,
       installedAt: Date.now(),

@@ -47,6 +47,38 @@ describe('installArtifactForAgent', () => {
     ).resolves.toBe('# Inline Skill\n')
   })
 
+  it('rejects catalog skill names that would escape the managed install folder', async () => {
+    await expect(
+      installArtifactForAgent({
+        artifact: {
+          kind: 'skill',
+          skillName: '../escape',
+          description: 'Bad skill',
+          body: '# Bad Skill\n',
+        },
+        agentId: 'codex',
+        scope: 'project',
+        projectPath: repoPath,
+      }),
+    ).rejects.toThrow('path separators')
+  })
+
+  it('rejects filesystem root as a project-scoped extension install root', async () => {
+    await expect(
+      installArtifactForAgent({
+        artifact: {
+          kind: 'skill',
+          skillName: 'inline-skill',
+          description: 'Inline skill',
+          body: '# Inline Skill\n',
+        },
+        agentId: 'codex',
+        scope: 'project',
+        projectPath: path.parse(repoPath).root,
+      }),
+    ).rejects.toThrow('filesystem root')
+  })
+
   it('installs skills.sh artifacts through the CLI instead of writing body files', async () => {
     const action = await installArtifactForAgent({
       artifact: {

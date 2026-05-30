@@ -244,8 +244,8 @@ async function installClaudeMcp(
 ): Promise<ExtensionInstallAction> {
   const filePath =
     input.scope === 'project'
-      ? path.join(requireProjectPath(input), '.mcp.json')
-      : path.join(os.homedir(), '.claude.json')
+      ? safeJoin(requireProjectPath(input), '.mcp.json')
+      : safeJoin(os.homedir(), '.claude.json')
   const config = await readJsonObject(filePath)
 
   const mcpServers = ensurePlainObject(config.mcpServers)
@@ -292,9 +292,9 @@ async function installCodexSkill(
 ): Promise<ExtensionInstallAction> {
   const base =
     input.scope === 'project'
-      ? path.join(requireProjectPath(input), '.codex/skills')
-      : path.join(os.homedir(), '.codex/skills')
-  const filePath = path.join(base, artifact.skillName, 'SKILL.md')
+      ? safeJoin(requireProjectPath(input), '.codex/skills')
+      : safeJoin(os.homedir(), '.codex/skills')
+  const filePath = safeJoin(base, safePathSegment(artifact.skillName, 'Skill name'), 'SKILL.md')
   await writeTextFile(filePath, `${artifact.body.trim()}\n`)
 
   return {
@@ -313,8 +313,16 @@ async function installOpenCodeInstruction(
   const configPath = openCodeConfigPath(input)
   const instructionPath =
     input.scope === 'project'
-      ? path.join(requireProjectPath(input), '.opencode/instructions', `${artifact.skillName}.md`)
-      : path.join(os.homedir(), '.config/opencode/instructions', `${artifact.skillName}.md`)
+      ? safeJoin(
+          requireProjectPath(input),
+          '.opencode/instructions',
+          `${safePathSegment(artifact.skillName, 'Skill name')}.md`,
+        )
+      : safeJoin(
+          os.homedir(),
+          '.config/opencode/instructions',
+          `${safePathSegment(artifact.skillName, 'Skill name')}.md`,
+        )
   await writeTextFile(instructionPath, `${artifact.body.trim()}\n`)
 
   const config = await readJsonObject(configPath)
@@ -406,8 +414,8 @@ function openCodeMcpEntry(artifact: ExtensionMcpServerArtifact): Record<string, 
 
 function openCodeConfigPath(input: InstallArtifactInput): string {
   return input.scope === 'project'
-    ? path.join(requireProjectPath(input), 'opencode.json')
-    : path.join(os.homedir(), '.config/opencode/opencode.json')
+    ? safeJoin(requireProjectPath(input), 'opencode.json')
+    : safeJoin(os.homedir(), '.config/opencode/opencode.json')
 }
 
 function skillsCliArgs(
@@ -484,15 +492,40 @@ function scopedPath(
   globalRelative: string,
 ): string {
   return input.scope === 'project'
-    ? path.join(requireProjectPath(input), projectRelative)
-    : path.join(os.homedir(), globalRelative)
+    ? safeJoin(requireProjectPath(input), projectRelative)
+    : safeJoin(os.homedir(), globalRelative)
 }
 
 function requireProjectPath(input: InstallArtifactInput): string {
   if (!input.projectPath?.trim()) {
     throw new Error('Project path is required for project-scoped extension installs.')
   }
-  return input.projectPath
+  const resolved = path.resolve(input.projectPath)
+  if (resolved === path.parse(resolved).root) {
+    throw new Error('Project path cannot be the filesystem root.')
+  }
+  return resolved
+}
+
+function safeJoin(root: string, ...segments: string[]): string {
+  const resolvedRoot = path.resolve(root)
+  const resolved = path.resolve(resolvedRoot, ...segments)
+  const relative = path.relative(resolvedRoot, resolved)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Extension install path escaped its managed root.')
+  }
+  return resolved
+}
+
+function safePathSegment(value: string, label: string): string {
+  const segment = value.trim()
+  if (!segment || segment === '.' || segment === '..') {
+    throw new Error(`${label} is not a safe path segment.`)
+  }
+  if (segment.includes('/') || segment.includes('\\') || segment.includes('\u0000')) {
+    throw new Error(`${label} cannot contain path separators.`)
+  }
+  return segment
 }
 
 function upsertTomlSection(content: string, sectionName: string, sectionContent: string): string {
