@@ -191,7 +191,9 @@ export function useComposerState({
   // Revoke any outstanding preview URLs on unmount to prevent leaks.
   useEffect(() => {
     return () => {
-      attachmentsRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl))
+      attachmentsRef.current.forEach((image) => {
+        if (image.previewUrl) URL.revokeObjectURL(image.previewUrl)
+      })
     }
   }, [])
 
@@ -276,14 +278,16 @@ export function useComposerState({
   const removeAttachment = useCallback((id: string) => {
     setAttachmentsState((current) => {
       const removed = current.find((image) => image.id === id)
-      if (removed) URL.revokeObjectURL(removed.previewUrl)
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
       return current.filter((image) => image.id !== id)
     })
   }, [])
 
   const clearAttachments = useCallback(() => {
     setAttachmentsState((current) => {
-      current.forEach((image) => URL.revokeObjectURL(image.previewUrl))
+      current.forEach((image) => {
+        if (image.previewUrl) URL.revokeObjectURL(image.previewUrl)
+      })
       return []
     })
   }, [])

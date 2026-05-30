@@ -208,9 +208,9 @@ export function Composer({
   // every child-boundary crossing, so a raw boolean would flicker — the depth
   // counter only drops the overlay once the pointer truly leaves the window.
   const dragDepthRef = useRef(0)
-  // Holds the latest attachImageFiles closure so the window drag listeners,
+  // Holds the latest attachFiles closure so the window drag listeners,
   // bound once, never need to re-subscribe when the closure is recreated.
-  const attachImageFilesRef = useRef<(files: File[]) => Promise<void>>(
+  const attachFilesRef = useRef<(files: File[]) => Promise<void>>(
     async () => {},
   )
 
@@ -326,7 +326,7 @@ export function Composer({
   const submit = useCallback(async () => {
     const trimmed = draft.trim()
     const effectivePrompt =
-      trimmed || (attachments.length > 0 ? 'Use the attached image as context.' : '')
+      trimmed || (attachments.length > 0 ? 'Use the attached files as context.' : '')
     if (!effectivePrompt || submitting || attaching) return
 
     if (busy) {
@@ -564,18 +564,18 @@ export function Composer({
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const imageFiles = [...event.clipboardData.items]
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    const files = [...event.clipboardData.items]
+      .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file))
 
-    if (imageFiles.length === 0) return
+    if (files.length === 0) return
 
     event.preventDefault()
-    await attachImageFiles(imageFiles)
+    await attachFiles(files)
   }
 
-  async function attachImageFiles(files: File[]) {
+  async function attachFiles(files: File[]) {
     if (files.length === 0) return
     const remaining = MAX_ATTACHMENTS - attachments.length
     if (remaining <= 0) return
@@ -587,27 +587,28 @@ export function Composer({
       const saved: AttachedImage[] = await Promise.all(
         accepted.map(async (file) => {
           const dataUrl = await readFileAsDataUrl(file)
-          const attachment = await window.agentforge.system.saveImageAttachment({
+          const attachment = await window.agentforge.system.saveAttachment({
             dataUrl,
-            name: file.name || `clipboard-${Date.now()}.png`,
+            name: file.name || `clipboard-${Date.now()}`,
             mimeType: file.type,
           })
           return {
             id: `${attachment.filePath}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
-            previewUrl: URL.createObjectURL(file),
+            // Only images get a visual thumbnail; other files render as a chip.
+            previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
             attachment,
           }
         }),
       )
       addAttachments(saved)
     } catch (attachError: unknown) {
-      setError(attachError instanceof Error ? attachError.message : 'Failed to attach image')
+      setError(attachError instanceof Error ? attachError.message : 'Failed to attach file')
     } finally {
       setAttaching(false)
     }
   }
 
-  attachImageFilesRef.current = attachImageFiles
+  attachFilesRef.current = attachFiles
 
   // Window-level drag-and-drop: dropping image files anywhere over the app
   // attaches them to the composer, with a full-viewport dropzone overlay.
@@ -636,10 +637,8 @@ export function Composer({
       if (!dragHasFiles(event)) return
       // Stop the renderer from navigating to the dropped file.
       event.preventDefault()
-      const images = Array.from(event.dataTransfer?.files ?? []).filter((file) =>
-        file.type.startsWith('image/'),
-      )
-      if (images.length > 0) void attachImageFilesRef.current(images)
+      const files = Array.from(event.dataTransfer?.files ?? [])
+      if (files.length > 0) void attachFilesRef.current(files)
     }
     window.addEventListener('dragenter', handleDragEnter)
     window.addEventListener('dragover', handleDragOver)
@@ -696,7 +695,7 @@ export function Composer({
           <PlusMenu
             remainingSlots={MAX_ATTACHMENTS - attachments.length}
             disabled={submitting}
-            onFilesSelected={(files) => void attachImageFiles(files)}
+            onFilesSelected={(files) => void attachFiles(files)}
             profiles={profiles}
             profileIssues={profileIssues}
             selectedProfileId={selectedProfileId}
@@ -849,10 +848,10 @@ function DropzoneOverlay() {
           <DropIcon />
         </span>
         <div className="text-sm font-medium text-primary">
-          Drop file to attach context
+          Drop files to attach context
         </div>
         <div className="text-xs text-muted">
-          Images are added to your next message
+          Files are added to your next message
         </div>
       </div>
     </div>
@@ -920,9 +919,7 @@ function PlusMenu({
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []).filter((file) =>
-      file.type.startsWith('image/'),
-    )
+    const files = Array.from(event.target.files ?? [])
     if (files.length > 0) {
       onFilesSelected(files.slice(0, remainingSlots))
     }
@@ -944,7 +941,6 @@ function PlusMenu({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
         multiple
         className="hidden"
         onChange={handleFileInputChange}
@@ -960,7 +956,7 @@ function PlusMenu({
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-secondary hover:bg-white/5 hover:text-primary disabled:opacity-40"
           >
             <span aria-hidden="true" className="text-sm font-semibold">+</span>
-            <span>Attach images ({remainingSlots} left)</span>
+            <span>Attach files ({remainingSlots} left)</span>
           </button>
 
           <div className="my-1 border-t border-hairline" />

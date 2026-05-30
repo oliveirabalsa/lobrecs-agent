@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ImageAttachment } from '../../../../shared/types'
+import { isImageAttachment, type ImageAttachment } from '../../../../shared/types'
 import {
   AttachmentThumb,
   resolveAttachmentName,
@@ -49,7 +49,7 @@ export function SwarmRoleMessage({
             {attachments.map((attachment) => (
               <AttachmentThumb
                 key={attachment.filePath}
-                src={resolveAttachmentSrc(attachment)}
+                src={isImageAttachment(attachment) ? resolveAttachmentSrc(attachment) : undefined}
                 name={resolveAttachmentName(attachment)}
               />
             ))}

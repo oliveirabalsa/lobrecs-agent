@@ -21,7 +21,8 @@ import {
 
 interface AttachedImage {
   id: string
-  previewUrl: string
+  /** Object URL for image previews; absent for non-image files. */
+  previewUrl?: string
   attachment: ImageAttachment
 }
 
@@ -277,7 +278,7 @@ export function SwarmBuilder({
 
   if (!open) return null
 
-  async function attachImageFiles(files: File[]) {
+  async function attachFiles(files: File[]) {
     if (files.length === 0) return
     const remaining = 8 - attachments.length
     if (remaining <= 0) return
@@ -289,35 +290,35 @@ export function SwarmBuilder({
       const saved: AttachedImage[] = await Promise.all(
         accepted.map(async (file) => {
           const dataUrl = await readFileAsDataUrl(file)
-          const attachment = await window.agentforge.system.saveImageAttachment({
+          const attachment = await window.agentforge.system.saveAttachment({
             dataUrl,
-            name: file.name || `clipboard-${Date.now()}.png`,
+            name: file.name || `clipboard-${Date.now()}`,
             mimeType: file.type,
           })
           return {
             id: `${attachment.filePath}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
-            previewUrl: URL.createObjectURL(file),
+            previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
             attachment,
           }
         }),
       )
       setAttachments((current) => [...current, ...saved])
     } catch (attachError) {
-      setError(attachError instanceof Error ? attachError.message : 'Failed to attach image')
+      setError(attachError instanceof Error ? attachError.message : 'Failed to attach file')
     } finally {
       setAttaching(false)
     }
   }
 
   async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const imageFiles = [...event.clipboardData.items]
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    const files = [...event.clipboardData.items]
+      .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => Boolean(file))
 
-    if (imageFiles.length === 0) return
+    if (files.length === 0) return
     event.preventDefault()
-    await attachImageFiles(imageFiles)
+    await attachFiles(files)
   }
 
   async function handleLaunch() {
@@ -443,11 +444,17 @@ export function SwarmBuilder({
                         className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-card border border-hairline"
                         title={image.attachment.name}
                       >
-                        <img
-                          src={image.previewUrl}
-                          alt={image.attachment.name ?? 'Attached image'}
-                          className="h-full w-full object-cover"
-                        />
+                        {image.previewUrl ? (
+                          <img
+                            src={image.previewUrl}
+                            alt={image.attachment.name ?? 'Attached image'}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center px-1 text-center text-[8px] uppercase leading-none text-muted">
+                            {(image.attachment.name?.split('.').pop() ?? 'file').slice(0, 4)}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() =>

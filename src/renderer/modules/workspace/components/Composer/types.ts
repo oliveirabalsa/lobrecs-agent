@@ -21,7 +21,8 @@ export type ModelSelection =
 
 export interface AttachedImage {
   id: string
-  previewUrl: string
+  /** Object URL for image previews; absent for non-image files (shown as a chip). */
+  previewUrl?: string
   attachment: ImageAttachment
 }
 

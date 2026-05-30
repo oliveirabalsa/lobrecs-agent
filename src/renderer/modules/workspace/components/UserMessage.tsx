@@ -1,4 +1,4 @@
-import type { ImageAttachment } from '../../../../shared/types'
+import { isImageAttachment, type ImageAttachment } from '../../../../shared/types'
 import { parseSwarmRolePrompt } from '../lib/swarmMessage'
 import { parsePlanModeQuestionAnswer } from '../lib/planModeQuestionAnswer'
 import {
@@ -77,7 +77,7 @@ export function UserMessage({
             {attachments.map((attachment) => (
               <AttachmentThumb
                 key={attachment.filePath}
-                src={resolveAttachmentSrc(attachment)}
+                src={isImageAttachment(attachment) ? resolveAttachmentSrc(attachment) : undefined}
                 name={resolveAttachmentName(attachment)}
               />
             ))}

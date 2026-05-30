@@ -8,8 +8,9 @@ interface AttachmentStripProps {
 }
 
 /**
- * Horizontal strip of 48px image thumbnails rendered above the textarea.
- * Click a tile to preview at full size; hover to reveal the remove button.
+ * Horizontal strip of 48px attachment tiles rendered above the textarea.
+ * Images preview at full size on click; other files show as a chip. Hover to
+ * reveal the remove button.
  */
 export function AttachmentStrip({ attachments, attaching, onRemove }: AttachmentStripProps) {
   if (attachments.length === 0 && !attaching) return null
@@ -27,7 +28,7 @@ export function AttachmentStrip({ attachments, attaching, onRemove }: Attachment
           />
         ))}
         {attaching ? (
-          <span className="text-xs text-muted">Attaching image…</span>
+          <span className="text-xs text-muted">Attaching file…</span>
         ) : null}
       </div>
     </div>
