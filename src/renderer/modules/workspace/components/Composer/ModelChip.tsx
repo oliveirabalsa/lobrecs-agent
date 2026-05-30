@@ -19,7 +19,7 @@ interface ModelChipProps {
 /**
  * Composer model chip. Click to open the compact picker popover.
  * Label format: `{Agent} · {Friendly Model}` or `Auto` (with router hint).
- * Thinking depth, when active, is appended as `· think:Hi`.
+ * Thinking depth, when active, is appended as a compact readable badge.
  */
 export function ModelChip({
   groups,
@@ -50,7 +50,7 @@ export function ModelChip({
   const thinking = selection.thinking && selection.thinking !== 'off' ? selection.thinking : null
 
   return (
-    <div className="relative min-w-0 shrink-0">
+    <div className="relative min-w-0 shrink">
       <button
         type="button"
         aria-haspopup="dialog"
@@ -58,18 +58,18 @@ export function ModelChip({
         aria-label={`Select model: ${label}`}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={() => setOpen((value) => !value)}
-        className="group flex max-w-[220px] items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/40 sm:max-w-[280px]"
+        className="group flex max-w-[min(320px,48vw)] items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/40"
       >
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate" title={label}>{label}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="min-w-0 truncate" title={label}>{label}</span>
           {thinking ? (
             <span
               aria-label={`Thinking ${THINKING_LABEL[thinking]}`}
               title={`Thinking: ${THINKING_LABEL[thinking]}`}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-primary/15 px-1 py-0 text-[9px] font-semibold uppercase text-accent-primary"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded bg-accent-primary/15 px-1.5 py-0 text-[9px] font-semibold text-accent-primary"
             >
               <BrainIcon />
-              {THINKING_LABEL[thinking].slice(0, 2)}
+              {THINKING_LABEL[thinking]}
             </span>
           ) : null}
         </span>

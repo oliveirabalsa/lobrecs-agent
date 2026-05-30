@@ -78,6 +78,18 @@ describe('ExtensionMarketplaceService', () => {
     expect(result.publishers).toContain('Microsoft Playwright')
   })
 
+  it('treats a blank search query as an unfiltered marketplace load', async () => {
+    const service = serviceWithCatalog()
+
+    const result = await service.searchCatalog({
+      query: '',
+      limit: 100,
+    })
+
+    expect(result.items.length).toBeGreaterThan(0)
+    expect(result.total).toBe(result.items.length)
+  })
+
   it('surfaces skills.sh skills as searchable external skill entries', async () => {
     const service = serviceWithCatalog()
 

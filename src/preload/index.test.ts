@@ -347,6 +347,19 @@ describe('preload api shape', () => {
         ],
       },
       {
+        call: (agentforge) =>
+          agentforge.extensions.searchCatalog({
+            query: '',
+            limit: 100,
+          }),
+        expected: [
+          'extensions:search-catalog',
+          {
+            limit: 100,
+          },
+        ],
+      },
+      {
         call: (agentforge) => agentforge.extensions.listInstalled(),
         expected: ['extensions:list-installed'],
       },

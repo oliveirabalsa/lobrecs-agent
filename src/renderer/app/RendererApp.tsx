@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ThreadSearchResult } from '../../shared/types'
 import { SearchPalette } from '../components/SearchPalette'
 import { Sidebar, type Thread } from '../components/Sidebar'
@@ -283,6 +283,74 @@ export function RendererApp() {
     setOnboardingOpen(true)
   }, [])
 
+  const searchCommands = useMemo(
+    () => [
+      {
+        id: 'new-chat',
+        label: 'New Chat',
+        description: 'Start a fresh workspace thread',
+        keywords: ['thread', 'compose', 'task'],
+        onSelect: handleNewChat,
+      },
+      {
+        id: 'extensions',
+        label: 'Extensions',
+        description: 'Install plugins, skills, MCPs, and providers',
+        keywords: ['marketplace', 'plugins', 'skills', 'mcp'],
+        onSelect: handleOpenExtensions,
+      },
+      {
+        id: 'cli-tools',
+        label: 'CLI Tools',
+        description: 'Manage local coding CLI integrations',
+        keywords: ['codex', 'claude', 'opencode'],
+        onSelect: handleOpenCliTools,
+      },
+      {
+        id: 'usage',
+        label: 'Usage',
+        description: 'Open model and provider cost tracking',
+        keywords: ['costs', 'tokens', 'spend'],
+        onSelect: handleOpenUsage,
+      },
+      {
+        id: 'settings',
+        label: 'Settings',
+        description: 'Tune app behavior and preferences',
+        keywords: ['preferences', 'configuration'],
+        onSelect: handleOpenSettings,
+      },
+      ...(workspace.selectedProject
+        ? [
+            {
+              id: 'automations',
+              label: 'Automations',
+              description: 'Open project automations',
+              keywords: ['workflows', 'jobs'],
+              onSelect: handleOpenAutomations,
+            },
+            {
+              id: 'git',
+              label: 'Git',
+              description: 'Open repository source control',
+              keywords: ['branch', 'commit', 'diff'],
+              onSelect: handleOpenGit,
+            },
+          ]
+        : []),
+    ],
+    [
+      handleNewChat,
+      handleOpenAutomations,
+      handleOpenCliTools,
+      handleOpenExtensions,
+      handleOpenGit,
+      handleOpenSettings,
+      handleOpenUsage,
+      workspace.selectedProject,
+    ],
+  )
+
   useEffect(() => {
     if (!mobileSidebarOpen) return
 
@@ -487,6 +555,7 @@ export function RendererApp() {
         open={searchOpen}
         onOpenChange={setSearchOpen}
         onOpenResult={(result) => void handleOpenSearchResult(result)}
+        commands={searchCommands}
       />
       <OnboardingFlow
         open={onboardingOpen}

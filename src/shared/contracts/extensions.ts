@@ -275,7 +275,8 @@ function optionalTrimmedString(
   maxLength: number,
 ): string | undefined {
   if (value === undefined || value === null) return undefined
-  return assertString(value, label, { maxLength }).trim()
+  const trimmed = assertString(value, label, { maxLength, allowEmpty: true }).trim()
+  return trimmed ? trimmed : undefined
 }
 
 function optionalStringArray<T extends string>(

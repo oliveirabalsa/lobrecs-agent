@@ -81,7 +81,7 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
             onClick={handleDeleteClick}
             aria-label={`Delete thread ${thread.title}`}
             title="Delete thread"
-            className={`${inactiveButtonClass} focus-ring opacity-50 group-hover:opacity-100 focus-visible:opacity-100`}
+            className={`${inactiveButtonClass} focus-ring opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100`}
           >
             <TrashIcon />
           </button>

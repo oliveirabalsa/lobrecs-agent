@@ -31,6 +31,12 @@ const sourceOptions: Array<{ id: ExtensionCatalogSource | 'all'; label: string }
   { id: 'community', label: 'Community' },
   { id: 'external', label: 'External' },
 ]
+const quickViews = [
+  { id: 'all', label: 'All' },
+  { id: 'installed', label: 'Installed' },
+  { id: 'featured', label: 'Featured' },
+] as const
+type QuickView = (typeof quickViews)[number]['id']
 
 export function ExtensionMarketplace({
   selectedProject,
@@ -42,6 +48,7 @@ export function ExtensionMarketplace({
   const [category, setCategory] = useState<ExtensionCatalogKind | 'all'>('all')
   const [source, setSource] = useState<ExtensionCatalogSource | 'all'>('all')
   const [target, setTarget] = useState<ExtensionTargetAgent | 'all'>('all')
+  const [quickView, setQuickView] = useState<QuickView>('all')
   const [scope, setScope] = useState<ExtensionInstallScope>(() =>
     selectedProject ? 'project' : 'global',
   )
@@ -107,6 +114,18 @@ export function ExtensionMarketplace({
     () => catalog?.items.filter((extension) => extension.featured).slice(0, 3) ?? [],
     [catalog?.items],
   )
+  const items = catalog?.items ?? []
+  const total = catalog?.total ?? 0
+  const visibleItems = useMemo(() => {
+    if (quickView === 'installed') {
+      return items.filter((extension) => latestByExtension.has(extension.id))
+    }
+    if (quickView === 'featured') {
+      return items.filter((extension) => extension.featured)
+    }
+    return items
+  }, [items, latestByExtension, quickView])
+  const visibleTotal = visibleItems.length
 
   const install = useCallback(
     async (extension: MarketplaceExtension) => {
@@ -178,9 +197,6 @@ export function ExtensionMarketplace({
     [loadInstalled],
   )
 
-  const items = catalog?.items ?? []
-  const total = catalog?.total ?? 0
-
   return (
     <div className={`flex min-h-0 flex-1 flex-col bg-canvas ${compact ? '' : 'overflow-hidden'}`}>
       <div className="shrink-0 border-b border-hairline px-5 py-5">
@@ -204,6 +220,11 @@ export function ExtensionMarketplace({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
+          <SegmentedControl
+            value={quickView}
+            options={quickViews.map((item) => ({ id: item.id, label: item.label }))}
+            onChange={(value) => setQuickView(value as QuickView)}
+          />
           <div className="flex rounded-card border border-hairline bg-card p-0.5">
             {categories.map((item) => (
               <button
@@ -281,13 +302,15 @@ export function ExtensionMarketplace({
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-[14px] font-semibold text-primary">Marketplace</h2>
                 <span className="text-[11px] text-muted">
-                  {total} result{total === 1 ? '' : 's'}
+                  {quickView === 'all' ? total : visibleTotal} result{
+                    (quickView === 'all' ? total : visibleTotal) === 1 ? '' : 's'
+                  }
                 </span>
               </div>
 
-              {items.length > 0 ? (
+              {visibleItems.length > 0 ? (
                 <div className="grid gap-3 lg:grid-cols-2">
-                  {items.map((extension) => (
+                  {visibleItems.map((extension) => (
                     <ExtensionCard
                       key={extension.id}
                       extension={extension}
@@ -299,7 +322,11 @@ export function ExtensionMarketplace({
                 </div>
               ) : (
                 <div className="rounded-card border border-dashed border-hairline px-4 py-10 text-center text-[12px] text-muted">
-                  No extensions match the current filters.
+                  {quickView === 'installed'
+                    ? 'No installed extensions match the current filters.'
+                    : quickView === 'featured'
+                      ? 'No featured extensions match the current filters.'
+                      : 'No extensions match the current filters.'}
                 </div>
               )}
             </>

@@ -119,7 +119,7 @@ export function ProjectTreeItem({
             }}
             aria-label={`New chat in ${project.name}`}
             title="New chat"
-            className="focus-ring no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted opacity-60 hover:bg-white/10 hover:text-primary group-hover:opacity-100 focus-visible:opacity-100"
+            className="focus-ring no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted opacity-0 transition-opacity hover:bg-white/10 hover:text-primary group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           >
             <PencilIcon />
           </button>

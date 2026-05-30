@@ -326,17 +326,17 @@ export function ModelPopover({
           </div>
 
           {showThinking ? (
-            <div className="mt-2.5 flex items-center justify-between gap-3 border-t border-hairline/80 pt-2.5">
-              <div className="flex flex-col">
+            <div className="mt-2.5 flex flex-col gap-2.5 border-t border-hairline/80 pt-2.5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-col">
                 <span className="text-[11px] font-medium text-primary">Thinking depth</span>
-                <span className="text-[10px] text-muted">
+                <span className="text-[10px] leading-4 text-muted">
                   Higher depth = slower, more deliberate replies.
                 </span>
               </div>
               <div
                 role="radiogroup"
                 aria-label="Thinking depth"
-                className="flex shrink-0 items-center gap-0.5 rounded-md border border-hairline bg-card-raised/80 p-0.5"
+                className="grid shrink-0 grid-cols-3 gap-0.5 rounded-md border border-hairline bg-card-raised/80 p-0.5 sm:flex sm:items-center"
               >
                 {visibleThinkingLevels.map((level) => {
                   const active = selectedThinking === level

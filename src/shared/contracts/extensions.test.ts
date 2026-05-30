@@ -27,6 +27,11 @@ describe('extension contract validators', () => {
     })
   })
 
+  it('treats blank catalog queries as no query', () => {
+    expect(validateSearchMarketplaceExtensionsInput({ query: '' })).toEqual({})
+    expect(validateSearchMarketplaceExtensionsInput({ query: '   ' })).toEqual({})
+  })
+
   it('rejects unsupported catalog filters', () => {
     expect(() => validateSearchMarketplaceExtensionsInput({ categories: ['../../bad'] })).toThrow(
       'Extension category is invalid',

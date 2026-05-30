@@ -22,8 +22,8 @@ export function StatusFooter({
     contextPercent === null ? 'Context' : `${Math.max(0, Math.min(100, Math.round(contextPercent)))}%`
 
   return (
-    <div className="flex h-[22px] min-w-0 items-center justify-between gap-3 px-3 text-[11px] text-muted">
-      <span className="inline-flex min-w-0 items-center gap-1">
+    <div className="flex min-h-6 min-w-0 items-center justify-between gap-3 px-3 pt-0.5 text-[11px] leading-none text-muted">
+      <span className="inline-flex min-w-0 max-w-[70%] flex-1 items-center gap-1">
         <span className="shrink-0" aria-hidden="true">⊡</span>
         <span className="truncate">{locationLabel}</span>
       </span>

@@ -714,7 +714,7 @@ export function WorkspaceView({
             />
 
             {worktreeHandoffEnabled && activeThreadId ? (
-              <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-card/35 px-3 py-1.5 text-[11px] text-muted">
+              <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-hairline bg-card/35 px-3 py-1.5 text-[11px] text-muted">
                 <span className="max-w-[220px] truncate">
                   {worktreeState?.location === 'worktree'
                     ? `Worktree ${worktreeState.branch ?? ''}`

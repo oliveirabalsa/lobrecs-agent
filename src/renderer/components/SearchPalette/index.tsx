@@ -1,14 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ThreadSearchResult } from '../../../shared/types'
 import { Modal, Spinner } from '../ui'
+import {
+  buildSearchPaletteItems,
+  type SearchPaletteCommand,
+  type SearchPaletteItem,
+} from './searchPaletteItems'
 
 interface SearchPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onOpenResult: (result: ThreadSearchResult) => void | Promise<void>
+  commands?: Array<SearchPaletteCommand & { onSelect: () => void | Promise<void> }>
 }
 
-export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPaletteProps) {
+export function SearchPalette({
+  open,
+  onOpenChange,
+  onOpenResult,
+  commands = [],
+}: SearchPaletteProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ThreadSearchResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -17,6 +28,10 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
   const inputRef = useRef<HTMLInputElement | null>(null)
   const requestVersionRef = useRef(0)
   const normalizedQuery = useMemo(() => query.trim(), [query])
+  const items = useMemo(
+    () => buildSearchPaletteItems({ query: normalizedQuery, commands, threadResults: results }),
+    [commands, normalizedQuery, results],
+  )
 
   useEffect(() => {
     if (!open) return
@@ -57,8 +72,17 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
     }
   }, [normalizedQuery, open])
 
-  async function openResult(result: ThreadSearchResult) {
-    await onOpenResult(result)
+  useEffect(() => {
+    setActiveIndex((index) => Math.min(index, Math.max(items.length - 1, 0)))
+  }, [items.length])
+
+  async function openItem(item: SearchPaletteItem) {
+    if (item.kind === 'command') {
+      const command = commands.find((candidate) => candidate.id === item.command.id)
+      await command?.onSelect()
+    } else {
+      await onOpenResult(item.result)
+    }
     onOpenChange(false)
   }
 
@@ -81,14 +105,14 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
-                setActiveIndex((index) => Math.min(index + 1, Math.max(results.length - 1, 0)))
+                setActiveIndex((index) => Math.min(index + 1, Math.max(items.length - 1, 0)))
               } else if (event.key === 'ArrowUp') {
                 event.preventDefault()
                 setActiveIndex((index) => Math.max(index - 1, 0))
               } else if (event.key === 'Enter') {
                 event.preventDefault()
-                const result = results[activeIndex]
-                if (result) void openResult(result)
+                const item = items[activeIndex]
+                if (item) void openItem(item)
               }
             }}
             className="min-w-0 flex-1 bg-transparent text-[15px] text-primary outline-none placeholder:text-muted"
@@ -106,34 +130,52 @@ export function SearchPalette({ open, onOpenChange, onOpenResult }: SearchPalett
             <div className="mx-2 rounded-card border border-accent-del/40 bg-accent-del/10 px-3 py-2 text-xs text-accent-del">
               {error}
             </div>
-          ) : results.length > 0 ? (
+          ) : items.length > 0 ? (
             <div role="listbox" aria-label="Search results" className="px-2">
-              {results.map((result, index) => (
+              {items.map((item, index) => (
                 <button
-                  key={result.thread.id}
+                  key={item.kind === 'command' ? `command:${item.command.id}` : `thread:${item.result.thread.id}`}
                   type="button"
                   role="option"
                   aria-selected={index === activeIndex}
                   onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => void openResult(result)}
+                  onClick={() => void openItem(item)}
                   className={`flex w-full min-w-0 flex-col gap-1 rounded-card px-3 py-2 text-left transition-colors ${
                     index === activeIndex
                       ? 'bg-white/10 text-primary'
                       : 'text-secondary hover:bg-white/5 hover:text-primary'
                   }`}
                 >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-medium">{result.thread.title}</span>
-                    <span className="shrink-0 rounded border border-hairline px-1.5 py-0.5 text-[10px] capitalize text-muted">
-                      {result.matchKind}
-                    </span>
-                  </span>
-                  <span className="truncate text-[11px] text-muted">{result.project.name}</span>
-                  {result.matchText ? (
-                    <span className="line-clamp-2 text-[12px] leading-5 text-secondary">
-                      {result.matchText}
-                    </span>
-                  ) : null}
+                  {item.kind === 'command' ? (
+                    <>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium">{item.command.label}</span>
+                        <span className="shrink-0 rounded border border-hairline px-1.5 py-0.5 text-[10px] text-muted">
+                          command
+                        </span>
+                      </span>
+                      <span className="truncate text-[12px] text-muted">
+                        {item.command.description}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {item.result.thread.title}
+                        </span>
+                        <span className="shrink-0 rounded border border-hairline px-1.5 py-0.5 text-[10px] capitalize text-muted">
+                          {item.result.matchKind}
+                        </span>
+                      </span>
+                      <span className="truncate text-[11px] text-muted">{item.result.project.name}</span>
+                      {item.result.matchText ? (
+                        <span className="line-clamp-2 text-[12px] leading-5 text-secondary">
+                          {item.result.matchText}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
                 </button>
               ))}
             </div>
