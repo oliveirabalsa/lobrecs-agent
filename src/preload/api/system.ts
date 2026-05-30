@@ -19,7 +19,7 @@ import type {
   OpenInEditorInput,
   ReadMarkdownDocumentInput,
   RunManagedCliActionInput,
-  SaveImageAttachmentInput,
+  SaveAttachmentInput,
   SelectedDirectoryPath,
   VerificationRecipe,
 } from '../../shared/contracts/system'
@@ -48,7 +48,7 @@ export interface SystemApi {
   listVerificationRecipes(projectId?: string): Promise<VerificationRecipe[]>
   listManagedCliRuntimes(): Promise<ManagedCliStatus[]>
   runManagedCliAction(input: RunManagedCliActionInput): Promise<ManagedCliActionResult>
-  saveImageAttachment(input: SaveImageAttachmentInput): Promise<ImageAttachment>
+  saveAttachment(input: SaveAttachmentInput): Promise<ImageAttachment>
   copyImageToClipboard(input: ImagePreviewSourceInput): Promise<void>
   saveImageFile(input: ImagePreviewSourceInput): Promise<string | null>
   listEditors(): Promise<EditorInfo[]>
@@ -82,7 +82,7 @@ export function createSystemApi(ipcRenderer: IpcInvoker & IpcSubscriber): System
       ipcRenderer.invoke('system:list-verification-recipes', projectId),
     listManagedCliRuntimes: () => ipcRenderer.invoke('system:list-managed-cli-runtimes'),
     runManagedCliAction: (input) => ipcRenderer.invoke('system:run-managed-cli-action', input),
-    saveImageAttachment: (input) => ipcRenderer.invoke('system:save-image-attachment', input),
+    saveAttachment: (input) => ipcRenderer.invoke('system:save-attachment', input),
     copyImageToClipboard: (input) =>
       ipcRenderer.invoke('system:copy-image-to-clipboard', input),
     saveImageFile: (input) => ipcRenderer.invoke('system:save-image-file', input),

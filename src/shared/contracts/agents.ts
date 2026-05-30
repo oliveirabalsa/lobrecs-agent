@@ -192,11 +192,27 @@ export interface SwarmStepApprovalDecisionPayload {
   modelOverride?: string
 }
 
+/**
+ * A file handed to the agent as context. Despite the historical name, this
+ * carries *any* attachment type — the agent receives `filePath` (a copy in the
+ * scratch dir) and reads it directly. Image-specific behaviors (the
+ * supports-images model gate, Codex `--image` args, the thumbnail preview)
+ * branch on {@link isImageAttachment}; everything else treats it generically.
+ */
 export interface ImageAttachment {
   filePath: string
   name?: string
   mimeType?: string
   size?: number
+}
+
+/**
+ * True when an attachment is an image the model can ingest visually. Used to
+ * gate image-only behaviors; non-image files are passed to the agent by path
+ * instead and never force an image-capable model/agent.
+ */
+export function isImageAttachment(attachment: Pick<ImageAttachment, 'mimeType'>): boolean {
+  return attachment.mimeType?.startsWith('image/') ?? false
 }
 
 // ── Enqueue ──────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { buildProcessEnvironment, resolveExecutable } from '../process/environment'
-import type { ImageAttachment } from '../../shared/types'
+import { isImageAttachment, type ImageAttachment } from '../../shared/types'
 
 const execFileAsync = promisify(execFile)
 
@@ -62,25 +62,42 @@ export function withContext(prompt: string, context?: string): string {
   return `Repository instructions:\n${trimmedContext}\n\nTask:\n${prompt}`
 }
 
+function formatAttachmentLine(attachment: ImageAttachment): string {
+  const name = attachment.name ?? path.basename(attachment.filePath)
+  const mimeType = attachment.mimeType ? ` (${attachment.mimeType})` : ''
+  const sizeLabel = attachment.size ? ` [${Math.round(attachment.size / 1024)}KB]` : ''
+
+  return `- ${name}${mimeType}${sizeLabel}: ${attachment.filePath}`
+}
+
 export function withContextAndImages(
   prompt: string,
   context?: string,
-  imageAttachments: ReadonlyArray<ImageAttachment> = [],
+  attachments: ReadonlyArray<ImageAttachment> = [],
 ): string {
   const basePrompt = withContext(prompt, context)
-  if (imageAttachments.length === 0) return basePrompt
+  if (attachments.length === 0) return basePrompt
 
-  const imageList = imageAttachments
-    .map((image) => {
-      const name = image.name ?? path.basename(image.filePath)
-      const mimeType = image.mimeType ? ` (${image.mimeType})` : ''
-      const sizeLabel = image.size ? ` [${Math.round(image.size / 1024)}KB]` : ''
+  const images = attachments.filter(isImageAttachment)
+  const files = attachments.filter((attachment) => !isImageAttachment(attachment))
 
-      return `- ${name}${mimeType}${sizeLabel}: ${image.filePath}`
-    })
-    .join('\n')
+  const sections: string[] = [basePrompt]
 
-  return `${basePrompt}\n\nAttached images:\n${imageList}\n\nUse these image attachments as context for the task.`
+  if (images.length > 0) {
+    sections.push(
+      `Attached images:\n${images.map(formatAttachmentLine).join('\n')}\n\n` +
+        'Use these image attachments as context for the task.',
+    )
+  }
+
+  if (files.length > 0) {
+    sections.push(
+      `Attached files:\n${files.map(formatAttachmentLine).join('\n')}\n\n` +
+        'Read these files from their paths and use their contents as context for the task.',
+    )
+  }
+
+  return sections.join('\n\n')
 }
 
 function isPathLikeCommand(command: string): boolean {

@@ -7,6 +7,7 @@ import {
   fallbackModelsForAgent,
   parseCodexModels,
 } from './modelDiscovery'
+import { isImageAttachment } from '../../shared/types'
 import type { AgentAdapter, AgentDispatchParams, AgentSession } from './AgentAdapter'
 import type { AgentEvent, AgentModel } from '../../shared/types'
 
@@ -42,10 +43,9 @@ export class CodexAdapter implements AgentAdapter {
           'codex',
           params.runtimeSettings?.command,
         )
-        const imageArgs = (params.imageAttachments ?? []).flatMap((image) => [
-          '--image',
-          image.filePath,
-        ])
+        const imageArgs = (params.imageAttachments ?? [])
+          .filter(isImageAttachment)
+          .flatMap((image) => ['--image', image.filePath])
         const args = [
           'exec',
           '--model',

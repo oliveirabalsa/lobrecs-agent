@@ -12,7 +12,8 @@ import {
 
 export type SelectedDirectoryPath = string | null
 
-export interface SaveImageAttachmentInput {
+export interface SaveAttachmentInput {
+  /** Base64 `data:` URL of the file's bytes, as read in the renderer. */
   dataUrl: string
   name?: string
   mimeType?: string

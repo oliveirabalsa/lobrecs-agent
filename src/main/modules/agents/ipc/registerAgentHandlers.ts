@@ -22,6 +22,7 @@ import {
 } from '../domain/approvalMode'
 import { isSupportedAgentId } from '../domain/isSupportedAgentId'
 import {
+  isImageAttachment,
   validateAgentDispatchParams,
   validateEnqueueParams,
   validateSessionId,
@@ -100,6 +101,9 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         params.imageAttachments,
         settings.agents.imageAttachments,
       )
+      // Only actual images constrain agent/model choice; other files are read
+      // by the agent from their scratch-dir paths and need no vision support.
+      const requiresImageSupport = imageAttachments.some(isImageAttachment)
       const userPickedAgent = isSupportedAgentId(params.agentId)
       const preferredAgentId = userPickedAgent
         ? (params.agentId as SupportedAgentId)
@@ -112,14 +116,14 @@ export function registerAgentHandlers(context: MainIpcContext): void {
       const decision = await context.modelRouter.route({
         prompt,
         preferredAgentId,
-        requiresImageSupport: imageAttachments.length > 0,
+        requiresImageSupport,
         modelOverride: params.modelOverride ?? profile?.defaultModel,
         projectId: project.id,
         recentFailures,
         autoAgentSelection: !userPickedAgent && !params.modelOverride,
       })
 
-      if (imageAttachments.length > 0 && !context.modelRouter.supportsImages(decision.agentId, decision.model)) {
+      if (requiresImageSupport && !context.modelRouter.supportsImages(decision.agentId, decision.model)) {
         throw new Error(`Image attachments are not supported by the selected agent/model (${decision.agentId} - ${decision.model})`)
       }
 
@@ -142,7 +146,7 @@ export function registerAgentHandlers(context: MainIpcContext): void {
           settings,
           agentId: decision.agentId,
           currentModel: decision.model,
-          requiresImageSupport: imageAttachments.length > 0,
+          requiresImageSupport,
         }),
         repoPath: project.repoPath,
         imageAttachments,
@@ -252,17 +256,18 @@ export function registerAgentHandlers(context: MainIpcContext): void {
         settings.execution.defaultApprovalMode,
       )
 
+      const recoveryRequiresImages = (session.imageAttachments ?? []).some(isImageAttachment)
       return context.sessionManager.resolveModelRecovery(payload, {
         runtimeSettings,
         modelFallbacks: capacityFallbackModelsForAgent({
           settings,
           agentId: payload.agentId,
           currentModel: payload.modelOverride,
-          requiresImageSupport: (session.imageAttachments?.length ?? 0) > 0,
+          requiresImageSupport: recoveryRequiresImages,
         }),
         validateSelection: (agentId, model) => {
           if (
-            (session.imageAttachments?.length ?? 0) > 0 &&
+            recoveryRequiresImages &&
             !context.modelRouter.supportsImages(agentId, model)
           ) {
             throw new Error(

@@ -16,6 +16,7 @@ import type {
   Thread,
   ThreadUpdatedEvent,
 } from '../../shared/types'
+import { isImageAttachment } from '../../shared/types'
 import { processWarningKey } from '../../shared/contracts/agentOutput'
 import { worktreeManager } from '../git/WorktreeManager'
 import { applyDiffContent } from '../modules/diffs/application/applyDiff'
@@ -1677,7 +1678,7 @@ export class SessionManager {
     this.processWarningsBySession.delete(sessionId)
 
     const recoveryId = randomUUID()
-    const requiresImageSupport = (session.imageAttachments?.length ?? 0) > 0
+    const requiresImageSupport = (session.imageAttachments ?? []).some(isImageAttachment)
     this.pendingModelRecoveries.set(recoveryId, {
       recoveryId,
       sourceSessionId: sessionId,

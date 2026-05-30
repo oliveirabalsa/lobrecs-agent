@@ -917,17 +917,17 @@ describe('preload api shape', () => {
       },
       {
         call: (agentforge) =>
-          agentforge.system.saveImageAttachment({
-            dataUrl: 'data:image/png;base64,AAAA',
-            name: 'paste.png',
-            mimeType: 'image/png',
+          agentforge.system.saveAttachment({
+            dataUrl: 'data:application/pdf;base64,AAAA',
+            name: 'spec.pdf',
+            mimeType: 'application/pdf',
           }),
         expected: [
-          'system:save-image-attachment',
+          'system:save-attachment',
           {
-            dataUrl: 'data:image/png;base64,AAAA',
-            name: 'paste.png',
-            mimeType: 'image/png',
+            dataUrl: 'data:application/pdf;base64,AAAA',
+            name: 'spec.pdf',
+            mimeType: 'application/pdf',
           },
         ],
       },

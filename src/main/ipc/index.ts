@@ -1,5 +1,6 @@
 import { adapterRegistry } from '../agents'
 import { getMainWindow } from '../app/bootstrap'
+import { isImageAttachment } from '../../shared/types'
 import { estimateCost } from '../cost'
 import { worktreeManager } from '../git/WorktreeManager'
 import { registerAgentHandlers } from '../modules/agents/ipc/registerAgentHandlers'
@@ -261,7 +262,7 @@ function configureSwarmOrchestrator(context: MainIpcContext): void {
           settings,
           agentId: input.agentId,
           currentModel: input.model,
-          requiresImageSupport: (input.imageAttachments?.length ?? 0) > 0,
+          requiresImageSupport: (input.imageAttachments ?? []).some(isImageAttachment),
         }),
         repoPath: input.repoPath,
         context: projectsStore.getContext(input.projectId),

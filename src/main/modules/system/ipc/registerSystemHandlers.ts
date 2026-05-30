@@ -43,7 +43,7 @@ import type {
   MarkdownDocument,
   OpenInEditorInput,
   RunManagedCliActionInput,
-  SaveImageAttachmentInput,
+  SaveAttachmentInput,
   SupportedAgentId,
 } from '../../../../shared/types'
 import {
@@ -139,8 +139,8 @@ export function registerSystemHandlers(context: MainIpcContext): void {
     async (_event, input: RunManagedCliActionInput): Promise<ManagedCliActionResult> =>
       runManagedCliAction(context, input),
   )
-  ipcMain.handle('system:save-image-attachment', async (_event, input: SaveImageAttachmentInput) =>
-    saveImageAttachment(
+  ipcMain.handle('system:save-attachment', async (_event, input: SaveAttachmentInput) =>
+    saveAttachment(
       input,
       context.settingsService.getGlobal().agents.imageAttachments.maxSizeMb,
     ),
@@ -241,57 +241,68 @@ function createCliEditorTerminalEmitter(sender: WebContents): CliEditorTerminalE
   }
 }
 
-async function saveImageAttachment(
-  input: SaveImageAttachmentInput,
+/**
+ * Copies an arbitrary attachment's bytes into the scratch dir and returns its
+ * on-disk path. The agent later reads that path directly, so any file type is
+ * supported — images are not special here. The original extension is preserved
+ * (derived from the file name, falling back to the MIME type) so downstream
+ * tools can sniff the format.
+ */
+async function saveAttachment(
+  input: SaveAttachmentInput,
   maxSizeMb: number,
 ): Promise<ImageAttachment> {
-  const parsed = parseImageDataUrl(input.dataUrl, input.mimeType)
-  const extension = IMAGE_MIME_EXTENSIONS[parsed.mimeType]
-
-  if (!extension) {
-    throw new Error('Unsupported image type')
-  }
+  const parsed = parseDataUrl(input.dataUrl, input.mimeType)
 
   if (parsed.buffer.length === 0 || parsed.buffer.length > maxSizeMb * 1024 * 1024) {
-    throw new Error('Image attachment is too large')
+    throw new Error(`Attachment is too large (limit ${maxSizeMb}MB)`)
   }
 
+  const extension = attachmentExtension(input.name, parsed.mimeType)
   const dir = path.join(app.getPath('temp'), 'lobrecs-agent', 'attachments')
-  const safeName = safeBaseName(input.name) ?? `clipboard-${Date.now()}`
-  const filePath = path.join(dir, `${safeName}-${randomUUID()}.${extension}`)
+  const safeName = safeBaseName(input.name) ?? `attachment-${Date.now()}`
+  const suffix = extension ? `.${extension}` : ''
+  const filePath = path.join(dir, `${safeName}-${randomUUID()}${suffix}`)
 
   await mkdir(dir, { recursive: true })
   await writeFile(filePath, parsed.buffer)
 
   return {
     filePath,
-    name: input.name ?? `${safeName}.${extension}`,
+    name: input.name ?? `${safeName}${suffix}`,
     mimeType: parsed.mimeType,
     size: parsed.buffer.length,
   }
 }
 
-function parseImageDataUrl(
+function parseDataUrl(
   dataUrl: string,
   fallbackMimeType?: string,
 ): { mimeType: string; buffer: Buffer } {
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUrl)
+  const match = /^data:([a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9!#$&^_.+-]+)?;base64,(.+)$/i.exec(dataUrl)
 
   if (match) {
     return {
-      mimeType: match[1].toLowerCase(),
+      mimeType: (match[1] ?? fallbackMimeType ?? 'application/octet-stream').toLowerCase(),
       buffer: Buffer.from(match[2], 'base64'),
     }
   }
 
-  if (!fallbackMimeType?.startsWith('image/')) {
-    throw new Error('Invalid image attachment')
+  if (!fallbackMimeType) {
+    throw new Error('Invalid attachment data')
   }
 
   return {
     mimeType: fallbackMimeType.toLowerCase(),
     buffer: Buffer.from(dataUrl, 'base64'),
   }
+}
+
+/** Prefer the original file's extension; fall back to a known MIME mapping. */
+function attachmentExtension(name: string | undefined, mimeType: string): string | undefined {
+  const fromName = path.extname(name ?? '').toLowerCase().replace(/^\./, '')
+  if (fromName) return fromName
+  return IMAGE_MIME_EXTENSIONS[mimeType]
 }
 
 function safeBaseName(name?: string): string | undefined {

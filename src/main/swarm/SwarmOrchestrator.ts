@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  isImageAttachment,
   SWARM_STRATEGIES,
   type AgentActivity,
   type AppSettings,
@@ -1184,7 +1185,7 @@ export function createDefaultDependencies(): SwarmOrchestratorDependencies {
           settings,
           agentId: input.agentId,
           currentModel: input.model,
-          requiresImageSupport: (input.imageAttachments?.length ?? 0) > 0,
+          requiresImageSupport: (input.imageAttachments ?? []).some(isImageAttachment),
         }),
         repoPath: input.repoPath,
         context: projectsStore.getContext(input.projectId),
