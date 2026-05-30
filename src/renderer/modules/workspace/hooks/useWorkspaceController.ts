@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Thread } from '../../../../shared/contracts/threads'
 import { SUPPORTED_AGENT_IDS } from '../../../../shared/types'
 import type {
@@ -238,6 +238,13 @@ export function useWorkspaceController() {
   const [mainView, setMainView] = useState<MainView>('workspace')
   const [swarmOpen, setSwarmOpen] = useState(false)
   const [pendingQueue, setPendingQueue] = useState<QueuedMessage[]>([])
+  const projectRestoreSeqRef = useRef(0)
+  const threadRestoreSeqRef = useRef(0)
+  const selectedProjectIdRef = useRef(selectedProject?.id ?? null)
+  const activeThreadIdRef = useRef(activeThreadId)
+
+  selectedProjectIdRef.current = selectedProject?.id ?? null
+  activeThreadIdRef.current = activeThreadId
 
   const diffProposals = useMemo(
     () =>
@@ -309,12 +316,19 @@ export function useWorkspaceController() {
   }, [activeSession?.status, approvalRequest, isBusy])
 
   function handleSelectedProjectDeleted() {
+    projectRestoreSeqRef.current += 1
+    threadRestoreSeqRef.current += 1
+    selectedProjectIdRef.current = null
     setSelectedProject(null)
     setDiffProposalState(null)
     clearActiveThread()
   }
 
   function handleProjectSelect(project: Project) {
+    const restoreSeq = projectRestoreSeqRef.current + 1
+    projectRestoreSeqRef.current = restoreSeq
+    threadRestoreSeqRef.current += 1
+    selectedProjectIdRef.current = project.id
     setSelectedProject(project)
     setActiveSession(null)
     tabs.resetTabs()
@@ -329,11 +343,17 @@ export function useWorkspaceController() {
     void window.agentforge.threads
       .get(restoredId)
       .then(async (thread) => {
+        if (projectRestoreSeqRef.current !== restoreSeq || selectedProjectIdRef.current !== project.id) {
+          return
+        }
         if (!thread || thread.projectId !== project.id || !thread.lastSessionId) {
           writeActiveThread(project.id, null)
           return
         }
         const session = await window.agentforge.sessions.get(thread.lastSessionId)
+        if (projectRestoreSeqRef.current !== restoreSeq || selectedProjectIdRef.current !== project.id) {
+          return
+        }
         if (!session || session.projectId !== project.id) {
           writeActiveThread(project.id, null)
           return
@@ -706,10 +726,19 @@ export function useWorkspaceController() {
 
       const lastSessionId = thread.lastSessionId
       if (!lastSessionId) return
+      const restoreSeq = threadRestoreSeqRef.current + 1
+      threadRestoreSeqRef.current = restoreSeq
 
       void window.agentforge.sessions
         .get(lastSessionId)
         .then((session) => {
+          if (
+            threadRestoreSeqRef.current !== restoreSeq ||
+            activeThreadIdRef.current !== activeThreadId ||
+            selectedProjectIdRef.current !== selectedProject.id
+          ) {
+            return
+          }
           if (!session || session.threadId !== activeThreadId) return
           handleOpenSession(session)
         })

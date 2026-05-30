@@ -144,7 +144,7 @@ export function useWorkspaceRightPanelState({
     if (!ls) return
     const key = rightPanelOpenKey(activeThreadIdRef.current)
     if (rightPanelOpen) ls.setItem(key, '1')
-    else ls.removeItem(key)
+    else ls.setItem(key, '0')
   }, [rightPanelOpen])
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   AgentActivity,
   AgentEvent,
@@ -43,8 +43,12 @@ export function SwarmGraphPanel({
   const [loading, setLoading] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'pause' | 'resume' | null>(null)
+  const reloadSeqRef = useRef(0)
 
   const reload = useCallback(async () => {
+    const reloadSeq = reloadSeqRef.current + 1
+    reloadSeqRef.current = reloadSeq
+
     if (!threadId) {
       setSessions([])
       setEventsBySession(new Map())
@@ -53,20 +57,23 @@ export function SwarmGraphPanel({
 
     setLoading(true)
     try {
-      const threadSessions = (await window.agentforge.sessions.list(project.id))
-        .filter((session) => session.threadId === threadId)
+      const threadSessions = (await window.agentforge.sessions.listByThread(threadId))
+        .filter((session) => session.projectId === project.id)
         .sort((a, b) => a.createdAt - b.createdAt)
-      const eventEntries = await Promise.all(
-        threadSessions.map(async (session) => [
-          session.id,
-          await window.agentforge.sessions.listEvents(session.id).catch(() => []),
-        ] as const),
-      )
+      const sessionIds = threadSessions.map((session) => session.id)
+      const eventsById: Record<string, AgentEvent[]> =
+        sessionIds.length > 0
+          ? await window.agentforge.sessions.listEventsForSessions(sessionIds).catch(() => ({}))
+          : {}
+
+      if (reloadSeqRef.current !== reloadSeq) return
 
       setSessions(threadSessions)
-      setEventsBySession(new Map(eventEntries))
+      setEventsBySession(
+        new Map(sessionIds.map((sessionId) => [sessionId, eventsById[sessionId] ?? []])),
+      )
     } finally {
-      setLoading(false)
+      if (reloadSeqRef.current === reloadSeq) setLoading(false)
     }
   }, [project.id, threadId])
 
