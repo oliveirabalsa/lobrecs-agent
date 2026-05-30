@@ -782,7 +782,6 @@ export function Composer({
               routerPreview={routerPreview}
               onSelect={setModelSelection}
             />
-            <MicButton />
             <SendButton
               running={running}
               canSend={canSend}
@@ -811,9 +810,21 @@ export function Composer({
       {error ? (
         <div
           role="alert"
-          className="mt-2 rounded-card border border-accent-del/40 bg-accent-del/10 px-3 py-2 text-xs text-accent-del"
+          aria-live="polite"
+          className="motion-fade-up-in mt-2 flex items-start gap-2 rounded-card border border-accent-del/60 bg-accent-del/15 px-3 py-2 text-xs text-accent-del"
         >
-          {error}
+          <span className="min-w-0 flex-1">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            aria-label="Dismiss error"
+            className="focus-ring -mr-1 -mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-accent-del/70 transition-colors hover:bg-accent-del/15 hover:text-accent-del"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          </button>
         </div>
       ) : null}
 
@@ -1025,7 +1036,7 @@ function PlusMenu({
                   onApprovalModeChange(mode)
                   setOpen(false)
                 }}
-                className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
+                className={`focus-ring flex w-full items-center justify-between px-3 py-1.5 text-left text-xs ${
                   active ? 'text-accent-primary bg-white/5 font-semibold' : 'text-secondary hover:bg-white/5 hover:text-primary'
                 }`}
               >
@@ -1094,26 +1105,6 @@ function PlusMenu({
   )
 }
 
-function MicIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-      <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
-      <line x1="12" y1="19" x2="12" y2="22" />
-    </svg>
-  )
-}
-
 function PlusIcon() {
   return (
     <svg
@@ -1133,18 +1124,6 @@ function PlusIcon() {
   )
 }
 
-function MicButton() {
-  return (
-    <button
-      type="button"
-      disabled
-      title="Voice input (Not available)"
-      className="flex h-7 w-7 items-center justify-center rounded-full text-muted/50 cursor-not-allowed hover:bg-transparent"
-    >
-      <MicIcon />
-    </button>
-  )
-}
 
 /** Checklist-with-tick glyph for the composer's plan-mode toggle. */
 function PlanModeIcon() {

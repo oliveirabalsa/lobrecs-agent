@@ -209,7 +209,7 @@ export function ContextExplorer({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search files, symbols, decisions..."
-                className="h-8 min-w-0 flex-1 rounded-card border border-hairline bg-card-raised px-2.5 text-[12px] text-primary outline-none placeholder:text-muted focus:border-white/20"
+                className="h-8 min-w-0 flex-1 rounded-card border border-hairline bg-card-raised px-2.5 text-[12px] text-primary outline-none placeholder:text-muted focus:border-accent-primary/60"
               />
               <Button
                 type="submit"

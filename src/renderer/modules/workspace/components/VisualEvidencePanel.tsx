@@ -91,7 +91,7 @@ export function VisualEvidencePanel({ sessionId }: VisualEvidencePanelProps) {
                 type="button"
                 disabled={!sessionId || capturing}
                 onClick={() => setViewportPreset(preset.id)}
-                className={`rounded-card border px-2 py-1.5 text-left text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`focus-ring rounded-card border px-2 py-1.5 text-left text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   viewportPreset === preset.id
                     ? 'border-accent-primary/50 bg-accent-primary/10 text-primary'
                     : 'border-hairline bg-canvas/60 text-muted hover:bg-white/5 hover:text-secondary'

@@ -269,7 +269,7 @@ export function CreatePullRequestDialog({
                   value={headBranch}
                   onChange={(e) => setHeadBranch(e.target.value)}
                   disabled={loading}
-                  className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-white/20 disabled:opacity-40"
+                  className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary/60 disabled:opacity-40"
                   placeholder="feature/my-branch"
                 />
               </div>
@@ -279,7 +279,7 @@ export function CreatePullRequestDialog({
                   value={baseBranch}
                   onChange={(e) => setBaseBranch(e.target.value)}
                   disabled={loading}
-                  className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-white/20 disabled:opacity-40"
+                  className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary/60 disabled:opacity-40"
                   placeholder="main"
                 />
               </div>
@@ -292,7 +292,7 @@ export function CreatePullRequestDialog({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={loading}
-                className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-white/20 disabled:opacity-40"
+                className="h-9 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary/60 disabled:opacity-40"
                 placeholder="Pull request title"
               />
             </div>
@@ -305,7 +305,7 @@ export function CreatePullRequestDialog({
                 onChange={(e) => setBody(e.target.value)}
                 disabled={loading}
                 rows={12}
-                className="w-full resize-none rounded-card border border-hairline bg-card p-3 font-mono text-xs text-primary outline-none placeholder:text-muted focus:border-white/20 disabled:opacity-40"
+                className="w-full resize-none rounded-card border border-hairline bg-card p-3 font-mono text-xs text-primary outline-none placeholder:text-muted focus:border-accent-primary/60 disabled:opacity-40"
                 placeholder={template}
               />
             </div>

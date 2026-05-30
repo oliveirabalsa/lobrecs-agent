@@ -31,7 +31,7 @@ export function StatusFooter({
         type="button"
         onClick={onContextClick}
         disabled={!onContextClick}
-        className="inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-primary disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted"
+        className="focus-ring inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted"
         aria-label="Open context explorer"
         title="Open context explorer"
       >

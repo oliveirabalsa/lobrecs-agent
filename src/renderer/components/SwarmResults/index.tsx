@@ -119,18 +119,18 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-zinc-950">
-      <header className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-4 py-3">
+    <section className="flex min-h-0 flex-1 flex-col bg-canvas">
+      <header className="flex shrink-0 items-center justify-between border-b border-hairline px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-zinc-100">Swarm Results</div>
-          <div className="text-xs text-zinc-500">
+          <div className="text-sm font-semibold text-primary">Swarm Results</div>
+          <div className="text-xs text-muted">
             {swarmId} · {completedCount}/{sessions.length} ready
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+            className="focus-ring rounded-card border border-hairline-strong px-3 py-1.5 text-xs text-secondary hover:bg-card-raised disabled:cursor-not-allowed disabled:opacity-40"
             disabled={selectedDoneIds.length === 0 || pendingAction !== null}
             onClick={() => void mergeSelected()}
           >
@@ -139,7 +139,7 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
           {onDiscardAll ? (
             <button
               type="button"
-              className="rounded border border-red-900/70 px-3 py-1.5 text-xs text-red-300 hover:bg-red-950/30 disabled:cursor-not-allowed disabled:opacity-40"
+              className="focus-ring rounded-card border border-accent-del/50 px-3 py-1.5 text-xs text-accent-del hover:bg-accent-del/10 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={sessions.length === 0 || pendingAction !== null}
               onClick={() => void discardAll()}
             >
@@ -150,14 +150,14 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
       </header>
 
       {confirmAction ? (
-        <div className="flex flex-wrap items-center gap-3 border-b border-amber-800/70 bg-amber-950/30 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 border-b border-accent-warn/40 bg-accent-warn/10 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-amber-100">{confirmAction.title}</div>
-            <div className="mt-1 text-xs text-amber-200/80">{confirmAction.detail}</div>
+            <div className="text-sm font-semibold text-primary">{confirmAction.title}</div>
+            <div className="mt-1 text-xs text-secondary">{confirmAction.detail}</div>
           </div>
           <button
             type="button"
-            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+            className="focus-ring rounded-card border border-hairline-strong px-3 py-1.5 text-xs text-secondary hover:bg-card-raised"
             disabled={pendingAction !== null}
             onClick={() => setConfirmAction(null)}
           >
@@ -165,7 +165,7 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
           </button>
           <button
             type="button"
-            className="rounded border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-900/70 disabled:opacity-50"
+            className="focus-ring rounded-card border border-accent-primary/60 bg-accent-primary/15 px-3 py-1.5 text-xs font-medium text-accent-primary hover:bg-accent-primary/25 disabled:opacity-50"
             disabled={pendingAction !== null}
             onClick={() => void runConfirmedAction()}
           >
@@ -177,14 +177,14 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
       <div className="min-h-0 flex-1 overflow-auto p-4">
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           {lanes.map((lane) => (
-            <section key={lane.title} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-900/40">
-              <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
-                <h3 className="text-xs font-semibold uppercase text-zinc-400">{lane.title}</h3>
-                <span className="text-xs text-zinc-500">{lane.sessions.length}</span>
+            <section key={lane.title} className="min-w-0 rounded-card border border-hairline bg-card-raised/40">
+              <div className="flex items-center justify-between border-b border-hairline px-3 py-2">
+                <h3 className="text-xs font-semibold uppercase text-secondary">{lane.title}</h3>
+                <span className="text-xs text-muted">{lane.sessions.length}</span>
               </div>
               <div className="grid gap-3 p-3">
                 {lane.sessions.length === 0 ? (
-                  <div className="rounded border border-dashed border-zinc-800 px-3 py-6 text-center text-xs text-zinc-600">
+                  <div className="rounded-card border border-dashed border-hairline px-3 py-6 text-center text-xs text-muted">
                     No sessions
                   </div>
                 ) : null}
@@ -195,19 +195,19 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
             return (
               <article
                 key={session.sessionId}
-                className={`rounded-md border bg-zinc-950 p-4 ${
-                  isSelected ? 'border-zinc-500' : 'border-zinc-800'
+                className={`rounded-card border bg-card p-4 ${
+                  isSelected ? 'border-accent-primary' : 'border-hairline'
                 }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-zinc-100">{session.role}</div>
-                    <div className="mt-1 truncate text-xs text-zinc-500">{session.model}</div>
+                    <div className="truncate text-sm font-medium text-primary">{session.role}</div>
+                    <div className="mt-1 truncate text-xs text-muted">{session.model}</div>
                   </div>
                   <label className="flex h-6 w-6 shrink-0 items-center justify-center">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 accent-zinc-100"
+                      className="focus-ring h-4 w-4 accent-accent-primary"
                       checked={isSelected}
                       disabled={!canAccept || pendingAction !== null}
                       onChange={(event) => {
@@ -224,15 +224,15 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
 
                 <div className="mt-4 grid gap-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Status</span>
+                    <span className="text-muted">Status</span>
                     <span className={statusColor(session.status)}>{session.status}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500">Diff</span>
-                    <span className="text-zinc-300">{formatDiff(session.diffStats)}</span>
+                    <span className="text-muted">Diff</span>
+                    <span className="text-secondary">{formatDiff(session.diffStats)}</span>
                   </div>
                   {session.worktreePath ? (
-                    <div className="truncate text-zinc-600" title={session.worktreePath}>
+                    <div className="truncate text-muted" title={session.worktreePath}>
                       {session.worktreePath}
                     </div>
                   ) : null}
@@ -240,7 +240,7 @@ export function SwarmResults({ swarmId, sessions, onAccept, onMerge, onDiscardAl
 
                 <button
                   type="button"
-                  className="mt-4 w-full rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="focus-ring mt-4 w-full rounded-card border border-hairline-strong px-3 py-1.5 text-sm text-secondary hover:bg-card-raised disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={!canAccept || pendingAction !== null}
                   onClick={() => void accept(session.sessionId)}
                 >
@@ -270,18 +270,18 @@ function formatDiff(stats: SwarmSessionSummary['diffStats']): string {
 function statusColor(status: string): string {
   switch (status) {
     case 'done':
-      return 'text-green-400'
+      return 'text-accent-add'
     case 'running':
-      return 'text-blue-400'
+      return 'text-accent-primary'
     case 'awaiting-approval':
-      return 'text-amber-400'
+      return 'text-accent-warn'
     case 'awaiting-input':
-      return 'text-blue-400'
+      return 'text-accent-primary'
     case 'error':
-      return 'text-red-400'
+      return 'text-accent-del'
     case 'cancelled':
-      return 'text-zinc-500'
+      return 'text-muted'
     default:
-      return 'text-zinc-300'
+      return 'text-secondary'
   }
 }

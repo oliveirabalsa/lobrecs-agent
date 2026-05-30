@@ -17,7 +17,7 @@ export function QueueBanner({ messages, onRemove, onClearAll, onForceSteer }: Qu
   if (messages.length === 0) return null
 
   const [first] = messages
-  const previewLimit = 55
+  const previewLimit = 75
   const preview =
     first.prompt.length > previewLimit
       ? `${first.prompt.slice(0, previewLimit).trimEnd()}…`
@@ -39,7 +39,7 @@ export function QueueBanner({ messages, onRemove, onClearAll, onForceSteer }: Qu
         <button
           type="button"
           onClick={() => void onForceSteer(first.id)}
-          className="shrink-0 rounded px-1.5 py-0.5 text-accent-warn transition-colors hover:bg-accent-warn/10 hover:text-accent-warn"
+          className="focus-ring shrink-0 rounded px-1.5 py-0.5 text-accent-warn transition-colors hover:bg-accent-warn/10 hover:text-accent-warn"
         >
           Force steer
         </button>
@@ -48,7 +48,7 @@ export function QueueBanner({ messages, onRemove, onClearAll, onForceSteer }: Qu
         <button
           type="button"
           onClick={() => void onRemove(first.id)}
-          className="shrink-0 rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-primary"
+          className="focus-ring shrink-0 rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-primary"
         >
           Remove
         </button>
@@ -56,7 +56,7 @@ export function QueueBanner({ messages, onRemove, onClearAll, onForceSteer }: Qu
         <button
           type="button"
           onClick={() => void onClearAll()}
-          className="shrink-0 rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-primary"
+          className="focus-ring shrink-0 rounded px-1.5 py-0.5 text-muted transition-colors hover:bg-white/5 hover:text-primary"
         >
           Clear all
         </button>

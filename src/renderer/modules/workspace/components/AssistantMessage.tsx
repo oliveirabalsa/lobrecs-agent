@@ -100,7 +100,7 @@ function ActionButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="flex h-6 w-6 items-center justify-center rounded text-secondary opacity-45 transition-opacity hover:bg-white/5 hover:opacity-100"
+      className="focus-ring flex h-6 w-6 items-center justify-center rounded text-secondary opacity-70 transition-opacity hover:bg-white/5 hover:opacity-100"
     >
       {children}
     </button>

@@ -61,7 +61,7 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
         <button
           type="button"
           onClick={() => onSelect(thread)}
-          className="flex h-full min-w-0 flex-1 items-center gap-2 text-left"
+          className="focus-ring flex h-full min-w-0 flex-1 items-center gap-2 text-left"
           aria-current={active ? 'page' : undefined}
           aria-label={thread.title}
         >
@@ -81,7 +81,7 @@ export function ThreadRow({ thread, active, onSelect, onSelectAgent, onDelete }:
             onClick={handleDeleteClick}
             aria-label={`Delete thread ${thread.title}`}
             title="Delete thread"
-            className={`${inactiveButtonClass} opacity-0 group-hover:opacity-100 focus:opacity-100`}
+            className={`${inactiveButtonClass} focus-ring opacity-50 group-hover:opacity-100 focus-visible:opacity-100`}
           >
             <TrashIcon />
           </button>
@@ -101,7 +101,7 @@ function StatusDot({ status }: { status: SessionStatus }) {
   const style = STATUS_DOT[status] ?? STATUS_DOT.cancelled
   return (
     <span
-      className="relative flex h-2 w-2 shrink-0 items-center justify-center"
+      className="relative flex h-2.5 w-2.5 shrink-0 items-center justify-center"
       role="img"
       aria-label={`Session status: ${style.label}`}
       title={style.label}
@@ -113,7 +113,7 @@ function StatusDot({ status }: { status: SessionStatus }) {
         />
       ) : null}
       <span
-        className={`relative inline-flex h-2 w-2 rounded-full ${style.color}`}
+        className={`relative inline-flex h-2.5 w-2.5 rounded-full ${style.color}`}
         aria-hidden="true"
       />
     </span>

@@ -20,7 +20,7 @@ export function SidebarFooter({
           <button
             type="button"
             onClick={onOpenSettings}
-            className={`no-drag flex h-8 min-w-0 flex-1 items-center gap-3 rounded-card px-3 text-left transition-colors ${
+            className={`focus-ring no-drag flex h-8 min-w-0 flex-1 items-center gap-3 rounded-card px-3 text-left transition-colors ${
               settingsActive
                 ? 'bg-white/10 text-primary'
                 : 'text-secondary hover:bg-white/5 hover:text-primary'
@@ -43,7 +43,7 @@ export function SidebarFooter({
             onClick={onOpenUsage}
             aria-label="Usage"
             title="Usage"
-            className={`no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-card transition-colors ${
+            className={`focus-ring no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-card transition-colors ${
               usageActive
                 ? 'bg-white/10 text-primary'
                 : 'text-muted hover:bg-white/5 hover:text-primary'

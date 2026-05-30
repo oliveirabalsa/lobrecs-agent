@@ -100,9 +100,9 @@ function GitIcon() {
 
 function ActionRow({ icon, label, onClick, disabled, shortcut, active }: ActionRowProps) {
   const baseClasses =
-    'no-drag flex h-7 w-full items-center gap-2.5 rounded-card pl-2.5 pr-2 text-left transition-colors'
+    'focus-ring no-drag flex h-7 w-full items-center gap-2.5 rounded-card pl-2.5 pr-2 text-left transition-colors'
   const stateClasses = disabled
-    ? 'cursor-not-allowed text-muted/60'
+    ? 'cursor-not-allowed text-muted opacity-40'
     : active
       ? 'bg-white/10 text-primary'
     : 'text-secondary hover:bg-white/5 hover:text-primary active:bg-white/10'

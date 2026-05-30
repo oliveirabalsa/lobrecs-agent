@@ -27,7 +27,7 @@ export function FieldRow({
   children: ReactNode
 }) {
   return (
-    <label className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)] md:items-center">
+    <label className="grid grid-cols-[minmax(0,1fr)_minmax(200px,280px)] items-center gap-3">
       <span className="min-w-0">
         <span className="block text-[13px] font-medium text-secondary">{label}</span>
         {detail ? (
@@ -120,7 +120,7 @@ export function Toggle({
       type="checkbox"
       checked={checked}
       onChange={(event) => onChange(event.target.checked)}
-      className="h-4 w-4 justify-self-start accent-accent-primary md:justify-self-end"
+      className="focus-ring h-4 w-4 justify-self-end accent-accent-primary"
     />
   )
 }

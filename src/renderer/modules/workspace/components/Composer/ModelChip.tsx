@@ -61,7 +61,7 @@ export function ModelChip({
         className="group flex max-w-[220px] items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/5 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary/40 sm:max-w-[280px]"
       >
         <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate">{label}</span>
+          <span className="truncate" title={label}>{label}</span>
           {thinking ? (
             <span
               aria-label={`Thinking ${THINKING_LABEL[thinking]}`}

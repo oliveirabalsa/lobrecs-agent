@@ -797,6 +797,19 @@ input {
 }
 
 /*
+ * Shared keyboard focus indicator. Apply `.focus-ring` to any custom
+ * interactive element (rows, icon buttons, selects) that isn't built on the
+ * shared Button primitive — it mirrors Button.tsx's focus-visible ring.
+ * Uses outline (which follows border-radius in Chromium) so it never gets
+ * clipped by overflow-hidden parents the way a box-shadow ring would.
+ */
+.focus-ring:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent-primary) 60%, transparent);
+  outline-offset: 1px;
+  border-radius: inherit;
+}
+
+/*
  * Lightweight animations for Radix data-state-driven components (Modal /
  * Dialog) and reusable artifacts. The `tailwindcss-animate` plugin is NOT
  * installed; these keyframes back the `animate-in` / `animate-out` /

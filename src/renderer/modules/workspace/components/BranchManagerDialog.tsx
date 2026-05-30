@@ -114,7 +114,7 @@ export function BranchManagerDialog({
               onChange={(e) => setNewBranchName(e.target.value)}
               placeholder="branch-name"
               disabled={actionPending}
-              className="h-8 rounded-card border border-hairline bg-card-raised px-3 text-xs text-primary outline-none focus:border-white/20 w-full"
+              className="h-8 rounded-card border border-hairline bg-card-raised px-3 text-xs text-primary outline-none focus:border-accent-primary/60 w-full"
             />
           </div>
           <Button
@@ -132,7 +132,7 @@ export function BranchManagerDialog({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search branches..."
-            className="h-8 rounded-card border border-hairline bg-card-raised pl-8 pr-3 text-xs text-primary outline-none focus:border-white/20 w-full"
+            className="h-8 rounded-card border border-hairline bg-card-raised pl-8 pr-3 text-xs text-primary outline-none focus:border-accent-primary/60 w-full"
           />
           <SearchIcon className="absolute left-2.5 top-2.5 h-3 w-3 text-muted" />
         </div>
@@ -174,7 +174,7 @@ export function BranchManagerDialog({
                       type="button"
                       disabled={actionPending}
                       onClick={() => void handleCheckout(branch)}
-                      className="px-2 py-1 text-[10px] font-medium text-accent-primary hover:bg-accent-primary/10 rounded transition-colors"
+                      className="focus-ring rounded px-2 py-1 text-[11px] font-medium text-accent-primary transition-colors hover:bg-accent-primary/10"
                     >
                       Checkout
                     </button>

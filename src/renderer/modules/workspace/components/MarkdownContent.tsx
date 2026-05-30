@@ -140,7 +140,7 @@ interface CodeBlockProps {
 
 function CodeBlock({ text, language }: CodeBlockProps) {
   return (
-    <figure className="my-2 overflow-hidden rounded-card border border-hairline bg-[#0a0a0c]/90 shadow-elevated">
+    <figure className="my-2 overflow-hidden rounded-card border border-hairline bg-code-block shadow-elevated">
       <div className="flex items-center justify-between border-b border-hairline bg-card-raised/30 px-3 py-1.5">
         {language ? (
           <span className="font-mono text-[10px] font-medium text-muted tracking-wider">

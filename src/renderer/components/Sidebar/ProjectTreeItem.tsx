@@ -81,7 +81,7 @@ export function ProjectTreeItem({
   return (
     <div className="flex flex-col">
       <div
-        className={`${rowBase} ${rowState}`}
+        className={`${rowBase} ${rowState} focus-ring`}
         onContextMenu={handleContextMenu}
         onClick={handleRowClick}
         role="button"
@@ -97,7 +97,7 @@ export function ProjectTreeItem({
           type="button"
           onClick={handleChevronClick}
           aria-label={expanded ? `Collapse ${project.name}` : `Expand ${project.name}`}
-          className="flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted hover:text-primary"
+          className="focus-ring flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted hover:text-primary"
         >
           <ChevronIcon open={expanded} />
         </button>
@@ -119,7 +119,7 @@ export function ProjectTreeItem({
             }}
             aria-label={`New chat in ${project.name}`}
             title="New chat"
-            className="no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 text-muted hover:bg-white/10 hover:text-primary group-hover:opacity-100 focus-visible:opacity-100"
+            className="focus-ring no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted opacity-60 hover:bg-white/10 hover:text-primary group-hover:opacity-100 focus-visible:opacity-100"
           >
             <PencilIcon />
           </button>
@@ -170,7 +170,7 @@ export function ProjectTreeItem({
                 <button
                   type="button"
                   onClick={() => setShowAll((value) => !value)}
-                  className="mt-0.5 self-start rounded px-2 py-1 text-[10px] text-muted hover:text-primary cursor-pointer"
+                  className="focus-ring mt-0.5 cursor-pointer self-start rounded px-2 py-1 text-[11px] text-muted hover:bg-white/5 hover:text-primary"
                 >
                   {showAll ? 'Show less' : `Show more (${hiddenCount})`}
                 </button>

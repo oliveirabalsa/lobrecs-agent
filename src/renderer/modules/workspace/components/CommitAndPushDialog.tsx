@@ -269,7 +269,7 @@ export function CommitAndPushDialog({ project, open, onOpenChange }: CommitAndPu
                           type="button"
                           onClick={() => removeCommit(draft.id)}
                           disabled={busy}
-                          className="text-xs text-muted transition-colors hover:text-primary disabled:opacity-40"
+                          className="focus-ring rounded-card px-2 py-1 text-xs text-muted transition-colors hover:bg-white/5 hover:text-primary disabled:opacity-40"
                         >
                           Remove
                         </button>
@@ -286,7 +286,7 @@ export function CommitAndPushDialog({ project, open, onOpenChange }: CommitAndPu
                         )
                       }
                       disabled={busy}
-                      className="mt-3 h-10 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-white/20"
+                      className="mt-3 h-10 w-full rounded-card border border-hairline bg-card px-3 text-sm text-primary outline-none placeholder:text-muted focus:border-accent-primary/60"
                       placeholder="feat(scope): short message"
                       aria-label={`Commit ${index + 1} message`}
                     />
@@ -424,7 +424,7 @@ function FileAssignmentRow({
         onChange={(event) => onAssign(event.target.value)}
         className={cx(
           'h-8 rounded-card border border-hairline bg-card px-2 text-xs text-primary outline-none',
-          'focus:border-white/20 disabled:opacity-40',
+          'focus:border-accent-primary/60 disabled:opacity-40',
         )}
         aria-label={`Assign ${file.path} to a commit`}
       >

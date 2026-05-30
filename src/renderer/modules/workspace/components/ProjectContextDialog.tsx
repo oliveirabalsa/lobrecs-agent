@@ -56,7 +56,7 @@ export function ProjectContextDialog({
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          className="min-h-[220px] w-full resize-y rounded-card border border-hairline bg-card-raised px-3 py-2 text-sm leading-6 text-primary outline-none placeholder:text-muted focus:border-white/20"
+          className="min-h-[220px] w-full resize-y rounded-card border border-hairline bg-card-raised px-3 py-2 text-sm leading-6 text-primary outline-none placeholder:text-muted focus:border-accent-primary/60"
           placeholder="Project instructions, coding standards, constraints..."
           aria-label="Project context"
         />
