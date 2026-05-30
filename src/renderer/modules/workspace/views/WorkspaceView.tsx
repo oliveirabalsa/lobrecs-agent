@@ -44,7 +44,7 @@ import { BranchManagerDialog } from '../components/BranchManagerDialog'
 import { DoctorPanel } from '../components/DoctorPanel'
 import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
-import { WorkspaceTopBar } from '../components/WorkspaceTopBar'
+import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import { VisualEvidencePanel } from '../components/VisualEvidencePanel'
 import { formatModelLabel } from '../components/Composer/modelDisplay'
 import type { BackgroundAgentsBlockingState } from '../components/BackgroundAgentsCard'
@@ -1083,45 +1083,25 @@ export function WorkspaceView({
                     className="absolute top-0 bottom-0 left-0 w-2 cursor-col-resize z-20 hidden lg:block hover:bg-accent-primary/60"
                     onPointerDown={startRightPanelResize}
                   />
-                  <div className="flex h-9 shrink-0 items-center gap-1 border-b border-hairline px-2">
-                    <RightPanelTab
-                      label="Diff"
-                      active={rightPanelMode === 'diff'}
-                      disabled={diffProposals.length === 0}
-                      onClick={() => setRightPanelMode('diff')}
-                    />
-                    <RightPanelTab
-                      label="Terminal"
-                      active={rightPanelMode === 'terminal'}
-                      onClick={() => setRightPanelMode('terminal')}
-                    />
-                    <RightPanelTab
-                      label="Swarm"
-                      active={rightPanelMode === 'swarm'}
-                      disabled={!activeThreadId}
-                      onClick={() => setRightPanelMode('swarm')}
-                    />
-                    <RightPanelTab
-                      label="Context"
-                      active={rightPanelMode === 'context'}
-                      onClick={() => setRightPanelMode('context')}
-                    />
-                    <RightPanelTab
-                      label="Reviews"
-                      active={rightPanelMode === 'reviews'}
-                      onClick={() => setRightPanelMode('reviews')}
-                    />
-                    <RightPanelTab
-                      label="Evidence"
-                      active={rightPanelMode === 'evidence'}
-                      disabled={!activeSessionId}
-                      onClick={() => setRightPanelMode('evidence')}
-                    />
-                    <RightPanelTab
-                      label="Doctor"
-                      active={rightPanelMode === 'doctor'}
-                      onClick={() => setRightPanelMode('doctor')}
-                    />
+                  <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-hairline px-2">
+                    {PANEL_TABS.map((tab) => (
+                      <RightPanelTab
+                        key={tab.mode}
+                        icon={tab.icon}
+                        label={tab.label}
+                        active={rightPanelMode === tab.mode}
+                        disabled={
+                          tab.mode === 'diff'
+                            ? diffProposals.length === 0
+                            : tab.mode === 'swarm'
+                              ? !activeThreadId
+                              : tab.mode === 'evidence'
+                                ? !activeSessionId
+                                : false
+                        }
+                        onClick={() => setRightPanelMode(tab.mode)}
+                      />
+                    ))}
                     <div className="flex-1" />
                     <button
                       type="button"
@@ -1302,12 +1282,38 @@ function WorkspacePlaceholderTopBar({
   )
 }
 
+/**
+ * Right-panel views, in tab order. Each carries an icon so the tab strip can
+ * render an icon rail (see {@link RightPanelTab}) instead of seven text labels
+ * that overflow the docked width.
+ */
+const PANEL_TABS: ReadonlyArray<{
+  mode: RightPanelMode
+  label: string
+  icon: React.ReactNode
+}> = [
+  { mode: 'diff', label: 'Diff', icon: <PanelDiffIcon /> },
+  { mode: 'terminal', label: 'Terminal', icon: <PanelTerminalIcon /> },
+  { mode: 'swarm', label: 'Swarm', icon: <PanelSwarmIcon /> },
+  { mode: 'context', label: 'Context', icon: <PanelContextIcon /> },
+  { mode: 'reviews', label: 'Reviews', icon: <PanelReviewsIcon /> },
+  { mode: 'evidence', label: 'Evidence', icon: <PanelEvidenceIcon /> },
+  { mode: 'doctor', label: 'Doctor', icon: <PanelDoctorIcon /> },
+]
+
+/**
+ * Icon-rail tab. Inactive tabs collapse to a square icon button (label in the
+ * tooltip); the active tab expands to icon + label. This keeps all seven views
+ * visible even at the panel's 320px minimum width.
+ */
 function RightPanelTab({
+  icon,
   label,
   active,
   disabled,
   onClick,
 }: {
+  icon: React.ReactNode
   label: string
   active: boolean
   disabled?: boolean
@@ -1324,10 +1330,103 @@ function RightPanelTab({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`shrink-0 rounded px-2 py-1 text-[11px] font-medium transition-colors ${stateClasses}`}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={`flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-[11px] font-medium transition-colors ${stateClasses}`}
     >
-      {label}
+      <span className="flex h-3.5 w-3.5 items-center justify-center">{icon}</span>
+      {active ? <span>{label}</span> : null}
     </button>
+  )
+}
+
+const PANEL_ICON_PROPS = {
+  width: 14,
+  height: 14,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 2,
+  strokeLinecap: 'round',
+  strokeLinejoin: 'round',
+  'aria-hidden': true,
+} as const
+
+function PanelDiffIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <path d="M12 4v16" />
+      <path d="M3 8h6" />
+      <path d="M3 16h6" />
+      <path d="M15 8h6" />
+      <path d="M18 5v6" />
+      <path d="M18 13v6" />
+    </svg>
+  )
+}
+
+function PanelTerminalIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  )
+}
+
+function PanelSwarmIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M8.5 6h7" />
+      <path d="M7.5 8.2 10.6 15.8" />
+      <path d="M16.5 8.2 13.4 15.8" />
+    </svg>
+  )
+}
+
+function PanelContextIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+      <path d="M8 9h6" />
+      <path d="M8 12h4" />
+    </svg>
+  )
+}
+
+function PanelReviewsIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <path d="M4 4h16v16H4z" />
+      <path d="M8 9h8" />
+      <path d="M8 14h5" />
+      <path d="m15 14 1.5 1.5L20 12" />
+    </svg>
+  )
+}
+
+function PanelEvidenceIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.5" />
+      <path d="m21 15-4.5-4.5L7 20" />
+      <path d="M14 20l3.5-3.5L21 20" />
+    </svg>
+  )
+}
+
+function PanelDoctorIcon() {
+  return (
+    <svg {...PANEL_ICON_PROPS}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+      <path d="M9 12l2 2 4-5" />
+    </svg>
   )
 }
 
