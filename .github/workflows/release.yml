@@ -9,8 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          repo="oliveirabalsa/lobrecs-agent"
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo "Release $tag already exists — builders will upload to it."
+          else
+            gh release create "$tag" --repo "$repo" --title "$tag" --generate-notes
+          fi
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
