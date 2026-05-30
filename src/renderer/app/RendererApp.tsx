@@ -169,11 +169,6 @@ export function RendererApp() {
     [workspace],
   )
 
-  const handleRerunSession = useCallback(async () => {
-    const summary = await workspace.handleRerunActiveSession()
-    if (summary) history.push(summary.threadId)
-  }, [history, workspace])
-
   const handleOpenSearch = useCallback(() => {
     setSearchOpen(true)
     setMobileSidebarOpen(false)
@@ -452,7 +447,6 @@ export function RendererApp() {
           onBannerError={workspace.handleWorkspaceError}
           onSwarmOpenChange={workspace.setSwarmOpen}
           onCancelSession={workspace.handleCancelSession}
-          onRerunSession={() => void handleRerunSession()}
           onDeleteThread={() => void workspace.handleDeleteActiveThread()}
           onForkSession={(sessionId) => void workspace.handleForkSession(sessionId)}
           onRestorePrompt={workspace.handleRestorePrompt}

@@ -15,7 +15,6 @@ export type RightPanelMode =
 
 interface WorkspaceTopBarProps {
   title: string
-  model?: string
   branchName?: string | null
   rightPanelOpen: boolean
   rightPanelMode: RightPanelMode
@@ -23,8 +22,6 @@ interface WorkspaceTopBarProps {
   hasSwarmGraph: boolean
   hasContext: boolean
   hasReviews: boolean
-  canRerun: boolean
-  onRerun?: () => void | Promise<void>
   onToggleRightPanel: (mode: RightPanelMode) => void
   onRename?: (newTitle: string) => void
   onDelete?: () => void
@@ -44,12 +41,11 @@ interface WorkspaceTopBarProps {
 /**
  * 44px top bar. Drag region except interactive controls.
  *
- * Left: thread title (15px semibold) + `···` overflow menu.
- * Right cluster (no-drag): ▶ rerun, model chip, diff/terminal toggles, info.
+ * Left: thread title (15px semibold) + `···` overflow menu (only when it has actions).
+ * Right cluster (no-drag): branch dropdown, "Open in" menu, panel-views menu.
  */
 export function WorkspaceTopBar({
   title,
-  model,
   branchName,
   rightPanelOpen,
   rightPanelMode,
@@ -57,8 +53,6 @@ export function WorkspaceTopBar({
   hasSwarmGraph,
   hasContext,
   hasReviews,
-  canRerun,
-  onRerun,
   onToggleRightPanel,
   onRename,
   onDelete,
@@ -134,6 +128,7 @@ export function WorkspaceTopBar({
   const doctorActive = rightPanelOpen && rightPanelMode === 'doctor'
   const evidenceActive = rightPanelOpen && rightPanelMode === 'evidence'
   const branchLabel = branchName?.trim()
+  const hasMenuActions = Boolean(onRename || onFork || onDelete)
   const leftInsetClass = reserveTrafficLightInset
     ? (sidebarCollapsed ? 'pl-[70px]' : 'pl-[70px] md:pl-4')
     : 'pl-2 md:pl-4'
@@ -191,12 +186,13 @@ export function WorkspaceTopBar({
             {title}
           </h1>
         )}
+        {hasMenuActions ? (
         <div ref={menuRef} className="relative shrink-0">
           <button
             type="button"
             onClick={() => setMenuOpen((value) => !value)}
             aria-label="Thread options"
-            className="flex h-7 w-7 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-primary"
+            className="focus-ring flex h-7 w-7 items-center justify-center rounded text-muted transition-colors hover:bg-white/5 hover:text-primary"
           >
             <EllipsisIcon />
           </button>
@@ -209,7 +205,7 @@ export function WorkspaceTopBar({
                     setMenuOpen(false)
                     setEditing(true)
                   }}
-                  className="block w-full px-3 py-1.5 text-left text-xs text-primary hover:bg-white/5"
+                  className="focus-ring block w-full px-3 py-1.5 text-left text-xs text-primary hover:bg-white/5"
                 >
                   Rename
                 </button>
@@ -221,7 +217,7 @@ export function WorkspaceTopBar({
                     setMenuOpen(false)
                     onFork()
                   }}
-                  className="block w-full px-3 py-1.5 text-left text-xs text-primary hover:bg-white/5"
+                  className="focus-ring block w-full px-3 py-1.5 text-left text-xs text-primary hover:bg-white/5"
                 >
                   Fork
                 </button>
@@ -234,36 +230,18 @@ export function WorkspaceTopBar({
                     const confirmed = window.confirm('Delete this thread?')
                     if (confirmed) onDelete()
                   }}
-                  className="block w-full px-3 py-1.5 text-left text-xs text-accent-del hover:bg-accent-del/10"
+                  className="focus-ring block w-full px-3 py-1.5 text-left text-xs text-accent-del hover:bg-accent-del/10"
                 >
                   Delete
                 </button>
               ) : null}
-              {!onRename && !onDelete && !onFork ? (
-                <div className="px-3 py-1.5 text-xs text-muted">No actions available</div>
-              ) : null}
             </div>
           ) : null}
         </div>
+        ) : null}
       </div>
 
       <div className="no-drag flex shrink-0 items-center gap-1">
-        <IconButton
-          aria-label="Rerun last prompt"
-          disabled={!canRerun || !onRerun}
-          onClick={onRerun}
-          className="hidden sm:flex"
-        >
-          <PlayIcon />
-        </IconButton>
-
-        <Pill
-          tone="neutral"
-          className="hidden max-w-[160px] sm:inline-flex lg:max-w-[200px]"
-        >
-          {model ? model : 'auto'}
-        </Pill>
-
         {branchLabel && projectId ? (
           <BranchDropdown
             projectId={projectId}
@@ -310,7 +288,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('diff')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <DiffIcon />
                 <span className="flex-1">Diff</span>
@@ -319,7 +297,7 @@ export function WorkspaceTopBar({
                     <CheckIcon />
                   </span>
                 ) : !hasDiff ? (
-                  <span className="text-[10px] font-normal text-muted/60">No changes</span>
+                  <span className="text-[11px] font-normal text-muted/60">No changes</span>
                 ) : null}
               </button>
 
@@ -331,7 +309,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('swarm')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <GraphIcon />
                 <span className="flex-1">Swarm</span>
@@ -340,7 +318,7 @@ export function WorkspaceTopBar({
                     <CheckIcon />
                   </span>
                 ) : !hasSwarmGraph ? (
-                  <span className="text-[10px] font-normal text-muted/60">Inactive</span>
+                  <span className="text-[11px] font-normal text-muted/60">Inactive</span>
                 ) : null}
               </button>
 
@@ -352,7 +330,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('context')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <ContextIcon />
                 <span className="flex-1">Context</span>
@@ -361,7 +339,7 @@ export function WorkspaceTopBar({
                     <CheckIcon />
                   </span>
                 ) : !hasContext ? (
-                  <span className="text-[10px] font-normal text-muted/60">Unavailable</span>
+                  <span className="text-[11px] font-normal text-muted/60">Unavailable</span>
                 ) : null}
               </button>
 
@@ -373,7 +351,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('reviews')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:text-muted/40 disabled:hover:bg-transparent"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
               >
                 <ReviewInboxIcon />
                 <span className="flex-1">Reviews</span>
@@ -382,7 +360,7 @@ export function WorkspaceTopBar({
                     <CheckIcon />
                   </span>
                 ) : !hasReviews ? (
-                  <span className="text-[10px] font-normal text-muted/60">No reviews</span>
+                  <span className="text-[11px] font-normal text-muted/60">No reviews</span>
                 ) : null}
               </button>
 
@@ -393,7 +371,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('evidence')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
               >
                 <EvidenceIcon />
                 <span className="flex-1">Evidence</span>
@@ -411,7 +389,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('doctor')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
               >
                 <DoctorIcon />
                 <span className="flex-1">Doctor</span>
@@ -429,7 +407,7 @@ export function WorkspaceTopBar({
                   setPanelMenuOpen(false)
                   onToggleRightPanel('terminal')
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
+                className="focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-primary transition-colors hover:bg-white/5"
               >
                 <TerminalIcon />
                 <span className="flex-1">Terminal</span>
@@ -475,7 +453,7 @@ function IconButton({
       disabled={disabled}
       aria-label={ariaLabel}
       aria-pressed={active}
-      className={`h-7 w-7 items-center justify-center rounded transition-colors ${stateClasses} ${
+      className={`focus-ring h-7 w-7 items-center justify-center rounded transition-colors ${stateClasses} ${
         className ?? 'flex'
       }`}
     >
@@ -510,14 +488,6 @@ function EllipsisIcon() {
       <circle cx="5" cy="12" r="1.6" />
       <circle cx="12" cy="12" r="1.6" />
       <circle cx="19" cy="12" r="1.6" />
-    </svg>
-  )
-}
-
-function PlayIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <polygon points="6 4 20 12 6 20" />
     </svg>
   )
 }

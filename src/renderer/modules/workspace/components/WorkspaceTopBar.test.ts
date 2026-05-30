@@ -7,7 +7,6 @@ function renderTopBar(branchName?: string | null): string {
   return renderToStaticMarkup(
     createElement(WorkspaceTopBar, {
       title: 'Repository workspace',
-      model: 'auto',
       branchName,
       rightPanelOpen: false,
       rightPanelMode: 'diff',
@@ -15,7 +14,6 @@ function renderTopBar(branchName?: string | null): string {
       hasSwarmGraph: false,
       hasContext: true,
       hasReviews: true,
-      canRerun: false,
       onToggleRightPanel: vi.fn(),
     }),
   )

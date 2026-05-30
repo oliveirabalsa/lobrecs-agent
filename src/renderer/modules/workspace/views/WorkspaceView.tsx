@@ -46,7 +46,6 @@ import { QueueBanner } from '../components/QueueBanner'
 import { WorkspaceEmpty } from '../components/WorkspaceEmpty'
 import { WorkspaceTopBar, type RightPanelMode } from '../components/WorkspaceTopBar'
 import { VisualEvidencePanel } from '../components/VisualEvidencePanel'
-import { formatModelLabel } from '../components/Composer/modelDisplay'
 import type { BackgroundAgentsBlockingState } from '../components/BackgroundAgentsCard'
 import type { DiffProposalScope, MainView } from '../hooks/useWorkspaceController'
 import { useWorkspaceGitActions } from '../hooks/useWorkspaceGitActions'
@@ -71,7 +70,6 @@ interface WorkspaceViewProps {
   onBannerError: (message: string) => void
   onSwarmOpenChange: Dispatch<SetStateAction<boolean>>
   onCancelSession: (sessionId: string) => void | Promise<void>
-  onRerunSession?: () => void | Promise<void>
   onDeleteThread: () => void
   onForkSession: (sessionId: string) => void
   onRestorePrompt: (prompt: string) => void
@@ -156,7 +154,6 @@ export function WorkspaceView({
   onBannerError,
   onSwarmOpenChange,
   onCancelSession,
-  onRerunSession,
   onDeleteThread,
   onForkSession,
   onRestorePrompt,
@@ -594,10 +591,6 @@ export function WorkspaceView({
     : selectedProject
       ? selectedProject.name
       : 'Workspace'
-  const activeModel = activeSession?.modelOverride ?? activeSession?.routingDecision?.model
-  const activeAgentId = activeSession?.agentId ?? activeSession?.routingDecision?.agentId
-  const activeModelLabel =
-    activeModel && activeAgentId ? formatModelLabel(activeAgentId, activeModel) : activeModel
   const worktreeHandoffEnabled =
     globalSettings?.execution.experimentalWorktreeHandoff === true
   const [worktreeState, setWorktreeState] = useState<WorktreeHandoffState | null>(null)
@@ -699,7 +692,6 @@ export function WorkspaceView({
           <>
             <WorkspaceTopBar
               title={titleForTopBar}
-              model={activeModelLabel}
               branchName={currentBranch}
               rightPanelOpen={rightPanelOpen}
               rightPanelMode={rightPanelMode}
@@ -707,8 +699,6 @@ export function WorkspaceView({
               hasSwarmGraph={Boolean(activeThreadId)}
               hasContext={Boolean(selectedProject)}
               hasReviews={Boolean(selectedProject)}
-              canRerun={Boolean(activeSession?.prompt) && !busy}
-              onRerun={onRerunSession}
               onToggleRightPanel={toggleRightPanel}
               onFork={activeSessionId ? () => onForkSession(activeSessionId) : undefined}
               onDelete={activeSession?.threadId ? onDeleteThread : undefined}
