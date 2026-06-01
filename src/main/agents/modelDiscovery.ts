@@ -106,10 +106,12 @@ export function parseOpenCodeModels(output: string): AgentModel[] {
     .map((line) => line.replace(ANSI_PATTERN, '').trim())
     .filter((line) => line.includes('/') && !line.includes(' '))
     .filter((id) => {
-      // Filter out non-token-plan MiniMax providers
-      // Keep: minimax-coding-plan/*, exclude: opencode/minimax*, minimax/*, minimax-cn-coding-plan/*
-      if (id.startsWith('opencode/minimax') ||
-          id.startsWith('minimax/') ||
+      // Keep only the canonical MiniMax Token Plan provider (minimax/).
+      // Drop: legacy `minimax-coding-plan/`, CN legacy `minimax-cn-coding-plan/`,
+      // and the unrelated `opencode/*` free-tier models (e.g. opencode/minimax-m3-free
+      // routes through the OpenCode Go plan, not the MiniMax Token Plan).
+      if (id.startsWith('opencode/') ||
+          id.startsWith('minimax-coding-plan/') ||
           id.startsWith('minimax-cn-coding-plan/')) {
         return false
       }
@@ -210,8 +212,8 @@ export function isOpenCodeMiniMaxTokenPlanModel(id: string): boolean {
 }
 
 function labelForOpenCodeModel(id: string): string {
-  if (id.startsWith('minimax-coding-plan/')) {
-    return `${id.slice('minimax-coding-plan/'.length)} (MiniMax Token Plan)`
+  if (id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)) {
+    return `${id.slice(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER.length)} (MiniMax Token Plan)`
   }
   if (id.startsWith('minimax-cn-coding-plan/')) {
     return `${id.slice('minimax-cn-coding-plan/'.length)} (MiniMax CN)`
@@ -399,6 +401,10 @@ export function inferModelTier(id: string, label = ''): ModelTier {
 
   if (normalized.includes('m2.7')) {
     return 'advanced'
+  }
+
+  if (normalized.includes('m3')) {
+    return 'frontier'
   }
 
   if (

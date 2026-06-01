@@ -551,7 +551,7 @@ describe('agent adapters', () => {
       sessionId: 'opencode-session',
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
-      model: 'minimax-coding-plan/MiniMax-M2.5',
+      model: 'minimax/MiniMax-M2.5',
     })
     const events = await collectEvents(session)
     const stdout = events.find((event) => event.type === 'stdout')
@@ -564,7 +564,7 @@ describe('agent adapters', () => {
         'json',
         '--dangerously-skip-permissions',
         '--model',
-        'minimax-coding-plan/MiniMax-M2.5',
+        'minimax/MiniMax-M2.5',
       ]),
     )
     expect(events.some((event) => event.type === 'stderr')).toBe(true)
@@ -585,7 +585,7 @@ describe('agent adapters', () => {
       sessionId: 'opencode-fast-session',
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
-      model: 'minimax-coding-plan/MiniMax-M2.5',
+      model: 'minimax/MiniMax-M2.5',
     })
 
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -605,7 +605,7 @@ describe('agent adapters', () => {
       sessionId: 'opencode-step-finish-session',
       prompt: 'Summarize this repo',
       repoPath: process.cwd(),
-      model: 'minimax-coding-plan/MiniMax-M2.5',
+      model: 'minimax/MiniMax-M2.5',
     })
     const events = await collectEvents(session)
 

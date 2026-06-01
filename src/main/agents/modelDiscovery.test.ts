@@ -41,24 +41,29 @@ describe('modelDiscovery', () => {
     })
   })
 
-  it('parses OpenCode models and filters to only minimax-coding-plan provider', () => {
+  it('parses OpenCode models and filters to the canonical minimax Token Plan provider', () => {
     const models = parseOpenCodeModels(
       [
         'opencode/minimax-m2.5-free',
-        'minimax/MiniMax-M2.7',
         'minimax-cn-coding-plan/MiniMax-M2.7',
         'minimax-coding-plan/MiniMax-M2',
-        'minimax-coding-plan/MiniMax-M2.5',
         'minimax-coding-plan/MiniMax-M2.7',
+        'minimax/MiniMax-M2',
+        'minimax/MiniMax-M2.5',
+        'minimax/MiniMax-M2.7',
+        'minimax/MiniMax-M3',
         'other-provider/model-1',
       ].join('\n'),
     )
 
-    // Should only include minimax-coding-plan models and other non-minimax providers
+    // Only the canonical `minimax/` Token Plan models + unrelated providers.
+    // Legacy `minimax-coding-plan/`, `minimax-cn-coding-plan/`, and `opencode/*`
+    // free-tier models are filtered out.
     expect(models.map((model) => model.id)).toEqual([
-      'minimax-coding-plan/MiniMax-M2',
-      'minimax-coding-plan/MiniMax-M2.5',
-      'minimax-coding-plan/MiniMax-M2.7',
+      'minimax/MiniMax-M2',
+      'minimax/MiniMax-M2.5',
+      'minimax/MiniMax-M2.7',
+      'minimax/MiniMax-M3',
       'other-provider/model-1',
     ])
 
@@ -67,8 +72,8 @@ describe('modelDiscovery', () => {
       agentId: 'opencode',
     })
 
-    expect(models[2]).toMatchObject({
-      label: 'MiniMax-M2.7 (MiniMax Token Plan)',
+    expect(models[3]).toMatchObject({
+      label: 'MiniMax-M3 (MiniMax Token Plan)',
       agentId: 'opencode',
     })
   })
@@ -109,17 +114,19 @@ describe('modelDiscovery', () => {
 
   it('picks the closest available model for the requested tier', () => {
     const models = parseOpenCodeModels(
-      'minimax-coding-plan/MiniMax-M2\nminimax-coding-plan/MiniMax-M2.7\n',
+      'minimax/MiniMax-M2\nminimax/MiniMax-M2.7\nminimax/MiniMax-M3\n',
     )
 
-    expect(pickModelForTier(models, 'frontier')?.id).toBe('minimax-coding-plan/MiniMax-M2.7')
+    expect(pickModelForTier(models, 'frontier')?.id).toBe('minimax/MiniMax-M3')
+    expect(pickModelForTier(models, 'advanced')?.id).toBe('minimax/MiniMax-M2.7')
   })
 
   it('infers tiers for unknown local model names', () => {
     expect(inferModelTier('claude-haiku-4-5-20251001')).toBe('lightweight')
     expect(inferModelTier('claude-opus-4-8')).toBe('frontier')
     expect(inferModelTier('claude-opus-4-7')).toBe('frontier')
-    expect(inferModelTier('minimax-coding-plan/MiniMax-M2.7')).toBe('advanced')
+    expect(inferModelTier('minimax/MiniMax-M2.7')).toBe('advanced')
+    expect(inferModelTier('minimax/MiniMax-M3')).toBe('frontier')
     expect(inferModelTier('gemini-2.5-flash')).toBe('balanced')
     expect(inferModelTier('antigravity-2.5-flash')).toBe('balanced')
     expect(inferModelTier('gemini-2.5-flash-lite')).toBe('lightweight')
@@ -198,8 +205,8 @@ describe('modelDiscovery', () => {
     })
 
     it('returns false for text-only models like MiniMax M2', () => {
-      expect(modelSupportsImages('minimax-coding-plan/MiniMax-M2')).toBe(false)
-      expect(modelSupportsImages('minimax-coding-plan/MiniMax-M2.7')).toBe(false)
+      expect(modelSupportsImages('minimax/MiniMax-M2')).toBe(false)
+      expect(modelSupportsImages('minimax/MiniMax-M2.7')).toBe(false)
       expect(modelSupportsImages('text-davinci-003')).toBe(false)
     })
   })

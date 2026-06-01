@@ -344,7 +344,18 @@ function validateSpawnedAgent(value: unknown): SpawnedAgentSession | undefined {
   }
 }
 
-export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax-coding-plan/'
+/**
+ * Canonical OpenCode provider prefix for the MiniMax Token Plan.
+ *
+ * MiniMax renamed its Coding Plan to the (multimodal) Token Plan in March 2026
+ * and updated the OpenCode provider id from the legacy `minimax-coding-plan/`
+ * to `minimax/`. The new id is what `opencode auth login` writes to
+ * `~/.local/share/opencode/auth.json` and what `opencode models` emits, so
+ * the app must match it to surface M-series models in the picker.
+ *
+ * See: https://platform.minimax.io/docs/token-plan/opencode
+ */
+export const OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER = 'minimax/'
 
 export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
   'claude-code': {
@@ -360,10 +371,10 @@ export const MODEL_MAP: Record<SupportedAgentId, Record<ModelTier, string>> = {
     frontier: 'gpt-5.5',
   },
   opencode: {
-    lightweight: 'minimax-coding-plan/MiniMax-M2',
-    balanced: 'minimax-coding-plan/MiniMax-M2.5',
-    advanced: 'minimax-coding-plan/MiniMax-M2.7',
-    frontier: 'minimax-coding-plan/MiniMax-M2.7',
+    lightweight: 'minimax/MiniMax-M2',
+    balanced: 'minimax/MiniMax-M2.5',
+    advanced: 'minimax/MiniMax-M2.7',
+    frontier: 'minimax/MiniMax-M3',
   },
   antigravity: {
     lightweight: 'gemini-2.0-flash-lite',

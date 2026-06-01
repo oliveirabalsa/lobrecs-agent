@@ -136,6 +136,10 @@ export interface VerificationSettings {
 export interface ModelPricing {
   inputPer1M: number
   outputPer1M: number
+  /** Cost per 1M cached-input tokens read (prompt-cache hits). */
+  cachedReadPer1M?: number
+  /** Cost per 1M tokens written to the prompt cache. */
+  cachedWritePer1M?: number
 }
 
 export interface CostSettings {

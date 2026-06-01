@@ -177,7 +177,7 @@ describe('runQualityGate', () => {
         return { agentId: 'claude-code', model: 'claude-sonnet-4-6' }
       }
 
-      return { agentId: 'opencode', model: 'minimax-coding-plan/MiniMax-M2' }
+      return { agentId: 'opencode', model: 'minimax/MiniMax-M2' }
     })
 
     await runQualityGate(
@@ -210,7 +210,7 @@ describe('runQualityGate', () => {
     expect(dispatchRepair).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'opencode',
-        model: 'minimax-coding-plan/MiniMax-M2',
+        model: 'minimax/MiniMax-M2',
       }),
     )
   })
@@ -353,7 +353,7 @@ function appliedProposal(filePath: string): DiffProposal {
 
 function modelForAgent(agentId: SupportedAgentId): string {
   if (agentId === 'codex') return 'gpt-5.3-codex'
-  if (agentId === 'opencode') return 'minimax-coding-plan/MiniMax-M2'
+  if (agentId === 'opencode') return 'minimax/MiniMax-M2'
   if (agentId === 'antigravity') return 'gemini-3.0-pro'
   return 'claude-sonnet-4-6'
 }

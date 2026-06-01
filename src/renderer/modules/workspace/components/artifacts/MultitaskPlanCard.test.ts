@@ -10,7 +10,7 @@ describe('replaceMultitaskTaskModel', () => {
       description: 'Fix the renderer',
       tier: 'balanced',
       agentId: 'opencode',
-      model: 'minimax-coding-plan/MiniMax-M2.5',
+      model: 'minimax/MiniMax-M2.5',
     },
     {
       id: 'task-2',

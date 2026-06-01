@@ -36,7 +36,7 @@ describe('ModelRouter', () => {
 
     expect(decision.tier).toBe('lightweight')
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
+    expect(decision.model).toBe('minimax/MiniMax-M2')
   })
 
   it('uses an installed preferred agent with MODEL_MAP', async () => {
@@ -63,7 +63,7 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
+    expect(decision.model).toBe('minimax/MiniMax-M2')
   })
 
   it('routes complex prompts via AUTO mode to Codex before Claude', async () => {
@@ -351,7 +351,7 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2')
+    expect(decision.model).toBe('minimax/MiniMax-M2')
   })
 
   it('does not dispatch an unavailable adapter just because it has a manual override', async () => {
@@ -369,7 +369,7 @@ describe('ModelRouter', () => {
     })
 
     expect(decision.agentId).toBe('opencode')
-    expect(decision.model).toBe('minimax-coding-plan/MiniMax-M2.7')
+    expect(decision.model).toBe('minimax/MiniMax-M3')
     expect(decision.reasoning).toContain('unavailable')
   })
 
@@ -501,7 +501,7 @@ describe('ModelRouter', () => {
         router.route({
           prompt: 'analyze UI layout',
           preferredAgentId: 'opencode',
-          modelOverride: 'minimax-coding-plan/MiniMax-M2',
+          modelOverride: 'minimax/MiniMax-M2',
           requiresImageSupport: true,
         })
       ).rejects.toThrow('Manual image-capable model required')

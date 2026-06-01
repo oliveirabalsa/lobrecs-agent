@@ -22,7 +22,7 @@ function createMockDependencies(
     ),
     routeModel: vi.fn().mockResolvedValue({
       agentId: 'opencode',
-      model: 'minimax-coding-plan/MiniMax-M2',
+      model: 'minimax/MiniMax-M2',
       tier: 'lightweight',
     }),
     estimateCost: vi.fn().mockReturnValue(0.02),
@@ -55,7 +55,7 @@ describe('TaskDecomposer', () => {
       .fn()
       .mockResolvedValueOnce({
         agentId: 'opencode',
-        model: 'minimax-coding-plan/MiniMax-M2',
+        model: 'minimax/MiniMax-M2',
         tier: 'lightweight',
       })
       .mockResolvedValueOnce({
@@ -65,7 +65,7 @@ describe('TaskDecomposer', () => {
       })
       .mockResolvedValueOnce({
         agentId: 'opencode',
-        model: 'minimax-coding-plan/MiniMax-M2',
+        model: 'minimax/MiniMax-M2',
         tier: 'lightweight',
       })
     const deps = createMockDependencies({ routeModel })
@@ -243,12 +243,12 @@ describe('TaskDecomposer', () => {
       .fn()
       .mockResolvedValueOnce({
         agentId: 'opencode',
-        model: 'minimax-coding-plan/MiniMax-M2',
+        model: 'minimax/MiniMax-M2',
         tier: 'lightweight',
       })
       .mockResolvedValue({
         agentId: 'opencode',
-        model: 'minimax-coding-plan/MiniMax-M2',
+        model: 'minimax/MiniMax-M2',
         tier: 'lightweight',
       })
 
