@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "minimax/MiniMax-M3",
   "mcp": {
     "context7": {
       "type": "remote",
