@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { MODEL_MAP, OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER } from '../../shared/types'
+import { MODEL_MAP } from '../../shared/types'
 import type {
   AgentModel,
   AgentThinkingLevel,
@@ -101,22 +101,14 @@ export function parseCodexModels(output: string): AgentModel[] {
 }
 
 export function parseOpenCodeModels(output: string): AgentModel[] {
+  // Surface every model that `opencode models` reports, verbatim. The provider
+  // prefix (e.g. `minimax/`, `minimax-coding-plan/`, `opencode/`) varies per
+  // install and per plan, so we do not whitelist a single provider — whatever the
+  // OpenCode CLI lists is what the user can actually run, so it all belongs here.
   const ids = output
     .split(/\r?\n/)
     .map((line) => line.replace(ANSI_PATTERN, '').trim())
     .filter((line) => line.includes('/') && !line.includes(' '))
-    .filter((id) => {
-      // Keep only the canonical MiniMax Token Plan provider (minimax/).
-      // Drop: legacy `minimax-coding-plan/`, CN legacy `minimax-cn-coding-plan/`,
-      // and the unrelated `opencode/*` free-tier models (e.g. opencode/minimax-m3-free
-      // routes through the OpenCode Go plan, not the MiniMax Token Plan).
-      if (id.startsWith('opencode/') ||
-          id.startsWith('minimax-coding-plan/') ||
-          id.startsWith('minimax-cn-coding-plan/')) {
-        return false
-      }
-      return true
-    })
 
   return dedupeModels(
     ids.map((id) => createAgentModel('opencode', id, 'cli', {
@@ -207,21 +199,23 @@ export function parseAnthropicModelsResponse(
   )
 }
 
-export function isOpenCodeMiniMaxTokenPlanModel(id: string): boolean {
-  return id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)
+const OPENCODE_PROVIDER_LABELS: Record<string, string> = {
+  minimax: 'MiniMax Token Plan',
+  'minimax-coding-plan': 'MiniMax Coding Plan',
+  'minimax-cn-coding-plan': 'MiniMax CN',
 }
 
 function labelForOpenCodeModel(id: string): string {
-  if (id.startsWith(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER)) {
-    return `${id.slice(OPENCODE_MINIMAX_TOKEN_PLAN_PROVIDER.length)} (MiniMax Token Plan)`
-  }
-  if (id.startsWith('minimax-cn-coding-plan/')) {
-    return `${id.slice('minimax-cn-coding-plan/'.length)} (MiniMax CN)`
-  }
-  if (id.startsWith('opencode/')) {
-    return id.slice('opencode/'.length)
-  }
-  return id
+  const slashIndex = id.indexOf('/')
+  if (slashIndex === -1) return id
+
+  const provider = id.slice(0, slashIndex)
+  const model = id.slice(slashIndex + 1)
+  const planLabel = OPENCODE_PROVIDER_LABELS[provider]
+
+  // `opencode/*` free-tier models read fine without a plan suffix; everything
+  // else gets a human-readable plan tag so duplicate model names stay distinct.
+  return planLabel ? `${model} (${planLabel})` : model
 }
 
 export function createAgentModel(

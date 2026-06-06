@@ -3,7 +3,6 @@ import { createInterface } from 'node:readline'
 import { processPool } from '../process/ProcessPool'
 import { commandExists, resolveCommand, runCommandText, withContextAndImages } from './command'
 import {
-  dedupeModels,
   fallbackModelsForAgent,
   parseOpenCodeModels,
 } from './modelDiscovery'
@@ -130,9 +129,11 @@ export class OpenCodeAdapter implements AgentAdapter {
       })
       const models = parseOpenCodeModels(output)
 
-      return models.length > 0
-        ? dedupeModels([...models, ...fallbackModelsForAgent(this.id)])
-        : fallbackModelsForAgent(this.id)
+      // When the CLI reports models, that IS the authoritative list — show it
+      // verbatim instead of padding it with hardcoded MODEL_MAP entries that may
+      // use a different provider prefix than this install. Only fall back to the
+      // built-in list when discovery yields nothing (e.g. CLI not installed).
+      return models.length > 0 ? models : fallbackModelsForAgent(this.id)
     } catch {
       return fallbackModelsForAgent(this.id)
     }

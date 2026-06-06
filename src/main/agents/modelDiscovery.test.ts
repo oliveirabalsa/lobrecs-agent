@@ -41,7 +41,7 @@ describe('modelDiscovery', () => {
     })
   })
 
-  it('parses OpenCode models and filters to the canonical minimax Token Plan provider', () => {
+  it('surfaces every model the OpenCode CLI reports, regardless of provider', () => {
     const models = parseOpenCodeModels(
       [
         'opencode/minimax-m2.5-free',
@@ -49,33 +49,46 @@ describe('modelDiscovery', () => {
         'minimax-coding-plan/MiniMax-M2',
         'minimax-coding-plan/MiniMax-M2.7',
         'minimax/MiniMax-M2',
-        'minimax/MiniMax-M2.5',
-        'minimax/MiniMax-M2.7',
         'minimax/MiniMax-M3',
         'other-provider/model-1',
       ].join('\n'),
     )
 
-    // Only the canonical `minimax/` Token Plan models + unrelated providers.
-    // Legacy `minimax-coding-plan/`, `minimax-cn-coding-plan/`, and `opencode/*`
-    // free-tier models are filtered out.
+    // No provider is filtered out — whatever `opencode models` lists is what the
+    // user can run, so the whole list reaches the picker.
     expect(models.map((model) => model.id)).toEqual([
+      'opencode/minimax-m2.5-free',
+      'minimax-cn-coding-plan/MiniMax-M2.7',
+      'minimax-coding-plan/MiniMax-M2',
+      'minimax-coding-plan/MiniMax-M2.7',
       'minimax/MiniMax-M2',
-      'minimax/MiniMax-M2.5',
-      'minimax/MiniMax-M2.7',
       'minimax/MiniMax-M3',
       'other-provider/model-1',
     ])
 
-    expect(models[0]).toMatchObject({
-      label: 'MiniMax-M2 (MiniMax Token Plan)',
-      agentId: 'opencode',
-    })
+    expect(models).toContainEqual(
+      expect.objectContaining({
+        id: 'minimax-coding-plan/MiniMax-M2',
+        label: 'MiniMax-M2 (MiniMax Coding Plan)',
+        agentId: 'opencode',
+      }),
+    )
 
-    expect(models[3]).toMatchObject({
-      label: 'MiniMax-M3 (MiniMax Token Plan)',
-      agentId: 'opencode',
-    })
+    expect(models).toContainEqual(
+      expect.objectContaining({
+        id: 'opencode/minimax-m2.5-free',
+        label: 'minimax-m2.5-free',
+        agentId: 'opencode',
+      }),
+    )
+
+    expect(models).toContainEqual(
+      expect.objectContaining({
+        id: 'minimax/MiniMax-M3',
+        label: 'MiniMax-M3 (MiniMax Token Plan)',
+        agentId: 'opencode',
+      }),
+    )
   })
 
   it('parses Claude models from CLI and Anthropic API responses', () => {
